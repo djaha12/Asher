@@ -2,7 +2,7 @@
 const { db, nowIso, round2, audit, nextNumber, transaction, getSetting } = require('../db');
 const { ApiError } = require('./util');
 
-function saleDetail(id) {
+function saleDetail(id, role = 'admin') {
   const s = db.prepare(
     `SELECT s.*, c.name AS customer_name, c.phone AS customer_phone, u.name AS seller_name
      FROM sales s LEFT JOIN customers c ON c.id = s.customer_id LEFT JOIN users u ON u.id = s.user_id
@@ -13,16 +13,23 @@ function saleDetail(id) {
     `SELECT si.*, p.sku, p.name, p.metal, p.weight, p.size, p.gem_summary
      FROM sale_items si JOIN products p ON p.id = si.product_id WHERE si.sale_id = ?`
   ).all(id);
+  // себестоимость — только администратору
+  if (role !== 'admin') {
+    delete s.cost_total;
+    for (const it of items) delete it.cost;
+  }
   return { ...s, items };
 }
 
-// после продажи пересматриваем сегмент клиента (только повышение)
+// после продажи пересматриваем сегмент клиента (только повышение);
+// считаем по фактически оплаченным (не возвращённым) позициям
 function maybeUpgradeSegment(customerId) {
   if (!customerId) return;
   const vipThreshold = Number(getSetting('vip_threshold', '500000')) || 500000;
   const st = db.prepare(
-    `SELECT COUNT(*) AS purchases, COALESCE(SUM(total),0) AS spent FROM sales
-     WHERE customer_id = ? AND status != 'returned'`
+    `SELECT COUNT(DISTINCT s.id) AS purchases, COALESCE(SUM(si.final_price),0) AS spent
+     FROM sales s JOIN sale_items si ON si.sale_id = s.id
+     WHERE s.customer_id = ? AND si.returned = 0`
   ).get(customerId);
   const cur = db.prepare('SELECT segment FROM customers WHERE id = ?').get(customerId);
   if (!cur) return;
@@ -37,7 +44,7 @@ function maybeUpgradeSegment(customerId) {
 const routes = [
   {
     method: 'GET', path: '/api/sales',
-    handler: ({ query }) => {
+    handler: ({ query, session }) => {
       const cond = [];
       const args = [];
       if (query.from) { cond.push('s.created_at >= ?'); args.push(query.from); }
@@ -64,12 +71,13 @@ const routes = [
       const totals = db.prepare(
         `SELECT COUNT(*) AS cnt, COALESCE(SUM(s.total),0) AS sum FROM sales s ${where}`
       ).get(...args);
+      if (session.role !== 'admin') rows.forEach(r => delete r.cost_total);
       return { items: rows, totals };
     },
   },
   {
     method: 'GET', path: '/api/sales/:id',
-    handler: ({ params }) => saleDetail(Number(params.id)),
+    handler: ({ params, session }) => saleDetail(Number(params.id), session.role),
   },
   {
     method: 'POST', path: '/api/sales',
@@ -118,7 +126,22 @@ const routes = [
 
         const afterItems = round2(subtotal - discountItems);
         if (bonusSpent > afterItems) throw new ApiError(400, 'Списание бонусов больше суммы чека');
-        const total = round2(afterItems - bonusSpent);
+
+        // Списанные бонусы распределяем по позициям как скидку — тогда
+        // final_price позиций равен фактически полученным деньгам,
+        // и возвраты/касса/отчёты сходятся копейка в копейку.
+        if (bonusSpent > 0) {
+          let remaining = bonusSpent;
+          prepared.forEach((pr, idx) => {
+            const share = idx === prepared.length - 1
+              ? remaining
+              : Math.min(round2(bonusSpent * pr.final / (afterItems || 1)), remaining);
+            pr.discount = round2(pr.discount + share);
+            pr.final = round2(pr.price - pr.discount);
+            remaining = round2(remaining - share);
+          });
+        }
+        const total = round2(prepared.reduce((s, pr) => s + pr.final, 0));
         const bonusPercent = Number(getSetting('bonus_percent', '3')) || 0;
         const bonusEarned = customer ? round2(total * bonusPercent / 100) : 0;
 
@@ -155,7 +178,7 @@ const routes = [
 
         maybeUpgradeSegment(customerId);
         audit(session.userId, 'sale', 'sale', saleId, `${number} на ${total}`);
-        return saleDetail(saleId);
+        return saleDetail(saleId, session.role);
       });
     },
   },
@@ -180,12 +203,14 @@ const routes = [
           db.prepare(`UPDATE products SET status = 'in_stock', sold_at = NULL WHERE id = ?`).run(it.product_id);
           refund = round2(refund + it.final_price);
         }
-        // возврат бонусов: снимаем начисленные пропорционально возвращаемой сумме
-        if (sale.customer_id && sale.bonus_earned > 0) {
-          const base = Math.max(sale.total, 0.01);
-          const bonusBack = round2(sale.bonus_earned * Math.min(refund / base, 1));
-          db.prepare('UPDATE customers SET bonus_points = max(0, round(bonus_points - ?, 2)) WHERE id = ?')
-            .run(bonusBack, sale.customer_id);
+        // бонусы: начисленные снимаем, списанные возвращаем — пропорционально доле возврата
+        // (final_price позиций уже нетто бонусов, поэтому база у долей общая — sale.total)
+        if (sale.customer_id && (sale.bonus_earned > 0 || sale.bonus_spent > 0)) {
+          const share = Math.min(refund / Math.max(sale.total, 0.01), 1);
+          const earnedBack = round2(sale.bonus_earned * share);
+          const spentBack = round2(sale.bonus_spent * share);
+          db.prepare('UPDATE customers SET bonus_points = max(0, round(bonus_points - ? + ?, 2)) WHERE id = ?')
+            .run(earnedBack, spentBack, sale.customer_id);
         }
         const left = db.prepare(
           'SELECT COUNT(*) AS c FROM sale_items WHERE sale_id = ? AND returned = 0'
@@ -199,7 +224,7 @@ const routes = [
         ).run(refund, `Возврат по чеку ${sale.number}`, saleId, session.userId, ts);
 
         audit(session.userId, 'return', 'sale', saleId, `${sale.number}: возврат ${refund}`);
-        return saleDetail(saleId);
+        return saleDetail(saleId, session.role);
       });
     },
   },

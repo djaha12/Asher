@@ -12,12 +12,15 @@ window.Pages.sales = (() => {
     return d.toISOString();
   }
 
+  let refreshSeq = 0;
   async function refresh(el) {
+    const my = ++refreshSeq;
     const q = new URLSearchParams();
     if (filters.period) q.set('from', periodFrom(filters.period));
     if (filters.payment_method) q.set('payment_method', filters.payment_method);
     if (filters.search) q.set('search', filters.search);
     const { items, totals } = await api.get('/api/sales?' + q.toString());
+    if (my !== refreshSeq || !el.isConnected) return;
     const listEl = el.querySelector('#sales-list');
     listEl.innerHTML = `<div class="muted" style="margin-bottom:8px">Чеков: ${totals.cnt} на сумму <b>${ui.money(totals.sum)}</b></div>` +
       ui.table([
@@ -43,10 +46,11 @@ window.Pages.sales = (() => {
       <div class="r-line"></div>
       <table>${s.items.map(i => `
         <tr><td>${ui.esc(i.name)}<br><small>${ui.esc(i.sku)}${i.metal ? ' · ' + ui.esc(i.metal) : ''}${i.weight ? ' · ' + i.weight + ' г' : ''}</small></td>
-        <td style="text-align:right;vertical-align:top">${ui.money(i.final_price)}</td></tr>`).join('')}
+        <td style="text-align:right;vertical-align:top">${ui.money(i.price)}</td></tr>`).join('')}
       </table>
       <div class="r-line"></div>
-      ${s.discount_total > 0 ? `<div class="r-row"><span>Скидка</span><span>−${ui.money(s.discount_total)}</span></div>` : ''}
+      <div class="r-row"><span>Сумма</span><span>${ui.money(s.subtotal)}</span></div>
+      ${s.discount_total > 0 ? `<div class="r-row"><span>Скидка${s.bonus_spent > 0 ? ' (в т.ч. бонусы)' : ''}</span><span>−${ui.money(s.discount_total)}</span></div>` : ''}
       <div class="r-row"><b>ИТОГО</b><b>${ui.money(s.total)}</b></div>
       <div class="r-row"><span>Оплата</span><span>${ui.L.payment[s.payment_method]}</span></div>
       ${s.customer_name ? `<div class="r-row"><span>Клиент</span><span>${ui.esc(s.customer_name)}</span></div>` : ''}
@@ -238,14 +242,19 @@ window.Pages.sales = (() => {
 
     // Поиск изделий (+ сканер штрихкодов: ввод + Enter)
     const searchInput = m.body.querySelector('#pos-search');
-    let resultsBox = null, lastResults = [];
+    const searchWrap = searchInput.closest('.rel');
+    const clearResults = () => searchWrap.querySelectorAll('.search-results').forEach(b => b.remove());
+    let searchSeq = 0, lastResults = [];
     const doSearch = ui.debounce(async () => {
+      const my = ++searchSeq;
       const q = searchInput.value.trim();
-      if (resultsBox) { resultsBox.remove(); resultsBox = null; }
+      clearResults();
       if (q.length < 2) return;
       const { items } = await api.get('/api/products?search=' + encodeURIComponent(q));
+      if (my !== searchSeq) return; // ответ устарел
+      clearResults();
       lastResults = items.filter(p => p.status === 'in_stock' || p.status === 'reserved');
-      resultsBox = document.createElement('div');
+      const resultsBox = document.createElement('div');
       resultsBox.className = 'search-results';
       resultsBox.innerHTML = lastResults.slice(0, 8).map((p, i) => `
         <div class="sr-item" data-i="${i}">
@@ -255,11 +264,12 @@ window.Pages.sales = (() => {
       resultsBox.querySelectorAll('.sr-item[data-i]').forEach(el => {
         el.addEventListener('mousedown', () => {
           addProduct(lastResults[Number(el.dataset.i)]);
-          searchInput.value = ''; resultsBox.remove(); resultsBox = null;
+          searchInput.value = '';
+          clearResults();
           searchInput.focus();
         });
       });
-      searchInput.closest('.rel').appendChild(resultsBox);
+      searchWrap.appendChild(resultsBox);
     }, 200);
     searchInput.addEventListener('input', doSearch);
     searchInput.addEventListener('keydown', async e => {
@@ -274,10 +284,10 @@ window.Pages.sales = (() => {
       if (pick) {
         addProduct(pick);
         searchInput.value = '';
-        if (resultsBox) { resultsBox.remove(); resultsBox = null; }
+        clearResults();
       }
     });
-    searchInput.addEventListener('blur', () => setTimeout(() => { if (resultsBox) { resultsBox.remove(); resultsBox = null; } }, 150));
+    searchInput.addEventListener('blur', () => setTimeout(clearResults, 150));
 
     // Выбор клиента
     const custInput = m.body.querySelector('#pos-customer');

@@ -51,16 +51,22 @@ function parseCsv(text, delimiter) {
 function parseNumber(s) {
   if (s === undefined || s === null) return 0;
   const cleaned = String(s).replace(/[\s ₽руб.]/gi, '').replace(',', '.').replace(/[^0-9.\-]/g, '');
-  return Number(cleaned) || 0;
+  return Math.max(Number(cleaned) || 0, 0); // цены и веса не бывают отрицательными
 }
 
 // "31.12.1985" / "1985-12-31" → "1985-12-31"
 function parseDate(s) {
   const t = String(s || '').trim();
-  if (/^\d{4}-\d{2}-\d{2}/.test(t)) return t.slice(0, 10);
+  let iso = '';
+  if (/^\d{4}-\d{2}-\d{2}/.test(t)) iso = t.slice(0, 10);
   const m = t.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
-  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
-  return '';
+  if (m) iso = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  if (!iso) return '';
+  // несуществующие даты («1985-99-99») отбрасываем
+  const [y, mo, d] = iso.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  const ok = dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
+  return ok ? iso : '';
 }
 
 // ---------- Автоматический маппинг колонок (типичные заголовки 1С) ----------

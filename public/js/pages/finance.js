@@ -12,11 +12,14 @@ window.Pages.finance = (() => {
     return d.toISOString();
   }
 
+  let opsSeq = 0;
   async function renderOps(box) {
+    const my = ++opsSeq;
     const q = new URLSearchParams();
     if (period) q.set('from', periodFrom(period));
     if (typeFilter) q.set('type', typeFilter);
     const { items, totals } = await api.get('/api/finance?' + q.toString());
+    if (my !== opsSeq || !box.isConnected) return; // фильтры уже сменились
     box.innerHTML = `
       <div class="grid grid-3" style="margin-bottom:16px">
         <div class="stat-tile"><div class="stat-label">Приход</div>
@@ -106,6 +109,8 @@ window.Pages.finance = (() => {
               `<td class="num">${ui.money(data.months.reduce((s, m) => s + m[k], 0))}</td>`).join('')}
           </tr></tfoot>
         </table></div>
+        <p class="muted" style="margin:10px 0 0;font-size:12.5px">Закупка товара не входит в «Расходы» —
+          стоимость изделий учитывается в «Себестоимости» в момент продажи. Возвраты уже вычтены из выручки.</p>
       </div>
       <div class="card" style="max-width:640px">
         <h3 class="card-title">Расходы по категориям · ${year}</h3>

@@ -74,8 +74,12 @@ window.App = (() => {
     document.querySelectorAll('.nav-item').forEach(el =>
       el.classList.toggle('active', el.dataset.key === (Pages[key] ? key : 'dashboard')));
     document.getElementById('page-title').textContent = page.title;
-    const el = document.getElementById('page');
+    // каждой навигации — свой контейнер: запоздавший рендер прошлой страницы
+    // пишет в отсоединённый узел и не затирает текущую
+    const host = document.getElementById('page');
+    const el = document.createElement('div');
     el.innerHTML = '<div class="empty"><p>Загрузка…</p></div>';
+    host.replaceChildren(el);
     try {
       await page.render(el, param);
     } catch (e) {

@@ -37,7 +37,7 @@ function periodStats(from, to) {
 const routes = [
   {
     method: 'GET', path: '/api/dashboard',
-    handler: ({ query }) => {
+    handler: ({ query, session }) => {
       const now = new Date();
       const tz = Number(query.tz) || 0;
       const local = new Date(now.getTime() + tz * 60000);
@@ -83,7 +83,7 @@ const routes = [
          ORDER BY s.created_at DESC LIMIT 6`
       ).all();
 
-      return {
+      const result = {
         today, month,
         stock: { count: Number(stock.cnt), retail_value: round2(stock.retail), cost_value: round2(stock.cost) },
         reserved: Number(reserved.cnt),
@@ -93,6 +93,13 @@ const routes = [
         recent_sales: recentSales,
         store_name: getSetting('store_name'),
       };
+      // прибыль, себестоимость и оценка склада — только администратору
+      if (session.role !== 'admin') {
+        for (const p of [result.today, result.month]) { delete p.profit; delete p.cogs; }
+        delete result.stock.cost_value;
+        delete result.stock.retail_value;
+      }
+      return result;
     },
   },
   {

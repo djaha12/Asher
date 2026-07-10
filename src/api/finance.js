@@ -54,8 +54,7 @@ const routes = [
       if (!(amount > 0)) throw new ApiError(400, 'Сумма должна быть больше нуля');
       const info = db.prepare(
         `INSERT INTO finance_ops (type, category, amount, note, user_id, created_at) VALUES (?,?,?,?,?,?)`
-      ).run(type, category, amount, String(body.note || ''), session.userId,
-        body.created_at || nowIso());
+      ).run(type, category, amount, String(body.note || ''), session.userId, nowIso());
       audit(session.userId, 'create', 'finance', Number(info.lastInsertRowid),
         `${type === 'income' ? 'Приход' : 'Расход'} ${category}: ${amount}`);
       return { id: Number(info.lastInsertRowid) };
@@ -115,9 +114,12 @@ const routes = [
          GROUP BY ym, type, category`
       ).all(year);
       const expenseByCat = {};
+      // «Возврат покупателю» уже учтён в returns, «Закупка товара» — в себестоимости
+      // проданного (COGS): включать их в расходы значило бы посчитать дважды.
+      const EXCLUDED_EXPENSES = ['Возврат покупателю', 'Закупка товара'];
       for (const r of opRows) {
         if (!months[r.ym]) continue;
-        if (r.type === 'expense' && r.category !== 'Возврат покупателю') {
+        if (r.type === 'expense' && !EXCLUDED_EXPENSES.includes(r.category)) {
           months[r.ym].expenses = round2(months[r.ym].expenses + r.sum);
           expenseByCat[r.category] = round2((expenseByCat[r.category] || 0) + r.sum);
         }

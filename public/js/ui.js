@@ -1,10 +1,11 @@
 'use strict';
 // Общие компоненты интерфейса и форматирование
 window.ui = (() => {
-  const escDiv = document.createElement('div');
+  // экранируем и кавычки — строки подставляются в том числе в атрибуты value="…"
+  const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
   function esc(s) {
-    escDiv.textContent = s === null || s === undefined ? '' : String(s);
-    return escDiv.innerHTML;
+    if (s === null || s === undefined) return '';
+    return String(s).replace(/[&<>"']/g, ch => ESC_MAP[ch]);
   }
 
   const moneyFmt = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 });
@@ -80,13 +81,20 @@ window.ui = (() => {
     else if (footer) footEl.appendChild(footer);
     else footEl.remove();
 
+    let closed = false;
     function close() {
+      if (closed) return;
+      closed = true;
+      document.removeEventListener('keydown', escHandler);
       overlay.remove();
       if (onClose) onClose();
     }
+    // Escape закрывает только верхнюю модалку (важно для вложенных подтверждений)
+    const escHandler = e => {
+      if (e.key === 'Escape' && overlay === modalRoot().lastElementChild) close();
+    };
     overlay.addEventListener('mousedown', e => { if (e.target === overlay) close(); });
     overlay.querySelector('.modal-close').addEventListener('click', close);
-    const escHandler = e => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', escHandler); } };
     document.addEventListener('keydown', escHandler);
     modalRoot().appendChild(overlay);
     return { overlay, body: bodyEl, foot: footEl, close };
@@ -104,7 +112,7 @@ window.ui = (() => {
         onClose: () => resolve(false),
       });
       m.foot.querySelector('[data-act=cancel]').onclick = () => { m.close(); };
-      m.foot.querySelector('[data-act=ok]').onclick = () => { resolve(true); m.overlay.remove(); };
+      m.foot.querySelector('[data-act=ok]').onclick = () => { resolve(true); m.close(); };
     });
   }
 

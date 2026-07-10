@@ -65,12 +65,15 @@ window.Pages.settings = (() => {
       </div>`;
 
     const redraw = () => renderCatalogRefs(box).catch(ui.toastErr);
-    box.querySelector('#cat-add').addEventListener('click', async () => {
-      const name = box.querySelector('#cat-new').value.trim();
+    // обработчики вешаем на пересоздаваемый контейнер, а не на постоянный box —
+    // иначе при каждой перерисовке они дублируются
+    const root = box.querySelector('.grid');
+    root.querySelector('#cat-add').addEventListener('click', async () => {
+      const name = root.querySelector('#cat-new').value.trim();
       if (!name) return;
       try { await api.post('/api/categories', { name }); redraw(); } catch (e) { ui.toastErr(e); }
     });
-    box.addEventListener('click', async e => {
+    root.addEventListener('click', async e => {
       const catDel = e.target.dataset && e.target.dataset.catDel;
       const supDel = e.target.dataset && e.target.dataset.supDel;
       const supEdit = e.target.dataset && e.target.dataset.supEdit;
@@ -84,7 +87,7 @@ window.Pages.settings = (() => {
         if (supEdit) supplierDialog(sups.find(s => s.id === Number(supEdit)), redraw);
       } catch (err) { ui.toastErr(err); }
     });
-    box.querySelector('#sup-add').addEventListener('click', () => supplierDialog(null, redraw));
+    root.querySelector('#sup-add').addEventListener('click', () => supplierDialog(null, redraw));
   }
 
   function supplierDialog(s, onChange) {

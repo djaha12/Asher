@@ -18,10 +18,14 @@ window.Pages.products = (() => {
     ).join('; ');
   }
 
+  let refreshSeq = 0;
   async function refresh(container) {
+    const my = ++refreshSeq;
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(filters)) if (v) q.set(k, v);
     const { items, total } = await api.get('/api/products?' + q.toString());
+    // устаревший ответ (быстрая смена фильтров) или уже покинули страницу
+    if (my !== refreshSeq || !container.isConnected) return;
     const listEl = container.querySelector('#prod-list');
     const admin = App.isAdmin();
     const cols = [
@@ -144,13 +148,17 @@ window.Pages.products = (() => {
   // общий поисковый дропдаун клиентов (используется и в POS)
   function attachCustomerSearch(input, onPick) {
     const wrap = input.closest('.rel');
-    let box = null;
+    let seq = 0;
+    const clear = () => wrap.querySelectorAll('.search-results').forEach(b => b.remove());
     const search = ui.debounce(async () => {
+      const my = ++seq;
       const q = input.value.trim();
-      if (box) { box.remove(); box = null; }
+      clear();
       if (q.length < 2) return;
       const { items } = await api.get('/api/customers?search=' + encodeURIComponent(q));
-      box = document.createElement('div');
+      if (my !== seq) return; // ответ устарел — уже идёт новый поиск
+      clear();
+      const box = document.createElement('div');
       box.className = 'search-results';
       box.innerHTML = items.slice(0, 8).map((c, i) => `
         <div class="sr-item" data-i="${i}">
@@ -160,13 +168,13 @@ window.Pages.products = (() => {
         el.addEventListener('mousedown', () => {
           onPick(items[Number(el.dataset.i)]);
           input.value = items[Number(el.dataset.i)].name;
-          box.remove(); box = null;
+          clear();
         });
       });
       wrap.appendChild(box);
     });
     input.addEventListener('input', search);
-    input.addEventListener('blur', () => setTimeout(() => { if (box) { box.remove(); box = null; } }, 150));
+    input.addEventListener('blur', () => setTimeout(clear, 150));
   }
 
   function gemRow(g = {}) {
@@ -257,7 +265,11 @@ window.Pages.products = (() => {
 
   return {
     title: 'Каталог изделий',
-    openEditor: (p) => openEditor(p, () => { const el = document.getElementById('page'); if (Pages._prodRefresh) Pages._prodRefresh(); }),
+    // справочники нужны до открытия редактора (быстрое действие с главной)
+    openEditor: async (p) => {
+      await loadRefs();
+      openEditor(p, () => { if (Pages._prodRefresh) Pages._prodRefresh(); });
+    },
     attachCustomerSearch,
     async render(el) {
       await loadRefs();
@@ -283,7 +295,7 @@ window.Pages.products = (() => {
         <div id="prod-list"></div>`;
 
       filters = { search: '', status: '', category_id: '', metal: '' };
-      const doRefresh = () => refresh(el).catch(ui.toastErr);
+      const doRefresh = () => { if (el.isConnected) refresh(el).catch(ui.toastErr); };
       Pages._prodRefresh = doRefresh;
 
       el.querySelector('#pf-search').addEventListener('input', ui.debounce(e => { filters.search = e.target.value.trim(); doRefresh(); }));

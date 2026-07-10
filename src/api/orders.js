@@ -96,7 +96,17 @@ const routes = [
         if (!TYPES.includes(body.type)) throw new ApiError(400, 'Недопустимый тип заказа');
         upd.type = body.type;
       }
-      if (body.customer_id !== undefined) upd.customer_id = body.customer_id ? Number(body.customer_id) : null;
+      if (body.customer_id !== undefined) {
+        if (body.customer_id) {
+          const cid = Number(body.customer_id);
+          if (!Number.isInteger(cid) || !db.prepare('SELECT 1 FROM customers WHERE id = ?').get(cid)) {
+            throw new ApiError(400, 'Клиент не найден');
+          }
+          upd.customer_id = cid;
+        } else {
+          upd.customer_id = null;
+        }
+      }
       if (body.estimate !== undefined) {
         upd.estimate = round2(body.estimate);
         if (upd.estimate < 0) throw new ApiError(400, 'Сумма не может быть отрицательной');
@@ -126,9 +136,19 @@ const routes = [
       if (o.status === 'delivered' && status !== 'delivered') {
         throw new ApiError(400, 'Заказ уже выдан — статус изменить нельзя');
       }
+      if (o.status === 'cancelled' && status !== 'cancelled') {
+        throw new ApiError(400, 'Заказ отменён — создайте новый, если работа возобновилась');
+      }
       return transaction(() => {
         db.prepare('UPDATE service_orders SET status = ?, delivered_at = ? WHERE id = ?')
           .run(status, status === 'delivered' ? nowIso() : o.delivered_at, id);
+        // при отмене возвращаем клиенту всё оплаченное — фиксируем расход
+        if (status === 'cancelled' && o.paid > 0) {
+          db.prepare(
+            `INSERT INTO finance_ops (type, category, amount, note, order_id, user_id, created_at)
+             VALUES ('expense', 'Возврат покупателю', ?, ?, ?, ?, ?)`
+          ).run(o.paid, `Возврат оплаты по отменённому заказу ${o.number}`, id, session.userId, nowIso());
+        }
         audit(session.userId, 'status', 'order', id, `${o.number}: ${o.status} → ${status}`);
         return orderDetail(id);
       });

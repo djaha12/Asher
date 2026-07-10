@@ -4,10 +4,13 @@ window.Pages = window.Pages || {};
 window.Pages.customers = (() => {
   let filters = { search: '', segment: '' };
 
+  let refreshSeq = 0;
   async function refresh(el) {
+    const my = ++refreshSeq;
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(filters)) if (v) q.set(k, v);
     const { items } = await api.get('/api/customers?' + q.toString());
+    if (my !== refreshSeq || !el.isConnected) return;
     const listEl = el.querySelector('#cust-list');
     listEl.innerHTML = ui.table([
       { title: 'Клиент', render: r => `<span class="strong">${ui.esc(r.name)}</span>` },
@@ -117,7 +120,7 @@ window.Pages.customers = (() => {
 
   return {
     title: 'Клиенты',
-    openEditor: (c) => openEditor(c, () => {}),
+    openEditor: (c) => openEditor(c, () => { if (Pages._custRefresh) Pages._custRefresh(); }),
     openDetail,
     async render(el, param) {
       el.innerHTML = `
@@ -136,7 +139,8 @@ window.Pages.customers = (() => {
         <div id="cust-list"></div>`;
 
       filters = { search: '', segment: '' };
-      const doRefresh = () => refresh(el).catch(ui.toastErr);
+      const doRefresh = () => { if (el.isConnected) refresh(el).catch(ui.toastErr); };
+      Pages._custRefresh = doRefresh;
       el.querySelector('#cf-search').addEventListener('input', ui.debounce(e => { filters.search = e.target.value.trim(); doRefresh(); }));
       el.querySelector('#cf-chips').addEventListener('click', e => {
         const chip = e.target.closest('.chip');

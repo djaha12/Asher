@@ -41,14 +41,24 @@ window.charts = (() => {
     const padL = 52, padR = 14, padT = 14, padB = 26;
     const iw = W - padL - padR, ih = H - padT - padB;
     const n = labels.length;
-    const maxV = Math.max(1, ...series.flatMap(s => s.values));
+    const allVals = series.flatMap(s => s.values);
+    const maxV = Math.max(1, ...allVals);
+    const minV = Math.min(0, ...allVals);
     const { ticks, top } = niceTicks(maxV);
+    // отрицательные значения (например, прибыль в минусе) расширяют шкалу вниз
+    let bottom = 0;
+    let allTicks = ticks;
+    if (minV < 0) {
+      const nt = niceTicks(-minV);
+      bottom = -nt.top;
+      allTicks = [...nt.ticks.filter(t => t > 0).map(t => -t).reverse(), ...ticks];
+    }
     const x = i => padL + (n <= 1 ? iw / 2 : (i / (n - 1)) * iw);
-    const y = v => padT + ih - (v / top) * ih;
+    const y = v => padT + ih * (top - v) / (top - bottom);
     const fmtLabel = opts.labelFmt || (l => l.slice(8, 10) + '.' + l.slice(5, 7));
 
     let g = '';
-    for (const t of ticks) {
+    for (const t of allTicks) {
       g += `<line x1="${padL}" y1="${y(t)}" x2="${W - padR}" y2="${y(t)}" stroke="${GRID}" stroke-width="1"/>`;
       g += `<text x="${padL - 8}" y="${y(t) + 4}" text-anchor="end" font-size="11" fill="${MUTED}">${compact(t)}</text>`;
     }

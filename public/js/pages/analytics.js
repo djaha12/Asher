@@ -12,7 +12,9 @@ window.Pages.analytics = (() => {
     return { from: d.toISOString(), to: new Date().toISOString() };
   }
 
+  let loadSeq = 0;
   async function load(el) {
+    const my = ++loadSeq;
     const { from, to } = range();
     const q = new URLSearchParams({ tz: api.tz() });
     if (from) { q.set('from', from); q.set('to', to); }
@@ -28,6 +30,7 @@ window.Pages.analytics = (() => {
       api.get('/api/analytics/by-payment?' + q),
       api.get('/api/analytics/stock'),
     ]);
+    if (my !== loadSeq || !el.isConnected) return; // период уже сменился
 
     const body = el.querySelector('#an-body');
     body.innerHTML = `

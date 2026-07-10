@@ -23,9 +23,15 @@ function validateProduct(body, { partial = false } = {}) {
     out.name = String(body.name || '').trim();
     if (!out.name) throw new ApiError(400, 'Наименование обязательно');
   }
+  const toId = (v, label) => {
+    if (!v) return null;
+    const n = Number(v);
+    if (!Number.isInteger(n) || n <= 0) throw new ApiError(400, `Некорректное значение поля «${label}»`);
+    return n;
+  };
   if (body.barcode !== undefined) out.barcode = String(body.barcode || '').trim();
-  if (body.category_id !== undefined) out.category_id = body.category_id ? Number(body.category_id) : null;
-  if (body.supplier_id !== undefined) out.supplier_id = body.supplier_id ? Number(body.supplier_id) : null;
+  if (body.category_id !== undefined) out.category_id = toId(body.category_id, 'категория');
+  if (body.supplier_id !== undefined) out.supplier_id = toId(body.supplier_id, 'поставщик');
   if (body.metal !== undefined) out.metal = String(body.metal || '').trim();
   if (body.size !== undefined) out.size = String(body.size || '').trim();
   if (body.location !== undefined) out.location = String(body.location || '').trim();
@@ -47,7 +53,12 @@ function validateProduct(body, { partial = false } = {}) {
     }
     out.status = body.status;
   }
-  if (body.reserved_for !== undefined) out.reserved_for = body.reserved_for ? Number(body.reserved_for) : null;
+  if (body.reserved_for !== undefined) {
+    out.reserved_for = toId(body.reserved_for, 'клиент резерва');
+    if (out.reserved_for && !db.prepare('SELECT 1 FROM customers WHERE id = ?').get(out.reserved_for)) {
+      throw new ApiError(400, 'Клиент для резерва не найден');
+    }
+  }
   if (body.gems !== undefined) {
     if (!Array.isArray(body.gems)) throw new ApiError(400, 'Вставки должны быть списком');
     out.gems = JSON.stringify(body.gems.map(g => ({
@@ -65,7 +76,7 @@ function validateProduct(body, { partial = false } = {}) {
 const routes = [
   {
     method: 'GET', path: '/api/products',
-    handler: ({ query }) => {
+    handler: ({ query, session }) => {
       const cond = [];
       const args = [];
       if (query.search) {
@@ -88,7 +99,10 @@ const routes = [
          ${where} ORDER BY p.created_at DESC, p.id DESC LIMIT ? OFFSET ?`
       ).all(...args, limit, offset);
       const totalRow = db.prepare(`SELECT COUNT(*) AS c FROM products p ${where}`).get(...args);
-      return { items: rows.map(rowToProduct), total: Number(totalRow.c) };
+      const items = rows.map(rowToProduct);
+      // закупочные цены — только администратору
+      if (session.role !== 'admin') items.forEach(p => delete p.purchase_price);
+      return { items, total: Number(totalRow.c) };
     },
   },
   {
@@ -101,7 +115,7 @@ const routes = [
   },
   {
     method: 'GET', path: '/api/products/:id',
-    handler: ({ params }) => {
+    handler: ({ params, session }) => {
       const p = db.prepare(
         `SELECT p.*, c.name AS category_name, s.name AS supplier_name, cu.name AS reserved_for_name
          FROM products p
@@ -117,7 +131,12 @@ const routes = [
          LEFT JOIN customers cu ON cu.id = s.customer_id
          WHERE si.product_id = ? ORDER BY s.created_at DESC`
       ).all(Number(params.id));
-      return { ...rowToProduct(p), history };
+      const product = { ...rowToProduct(p), history };
+      if (session.role !== 'admin') {
+        delete product.purchase_price;
+        history.forEach(h => delete h.cost);
+      }
+      return product;
     },
   },
   {
@@ -144,7 +163,15 @@ const routes = [
         const dup = db.prepare('SELECT id FROM products WHERE sku = ? AND id != ?').get(data.sku, id);
         if (dup) throw new ApiError(400, `Артикул «${data.sku}» уже существует`);
       }
-      // продажа/возврат меняют статус сами; вручную из sold можно вернуть только через возврат
+      // статусы «продано» ставит только продажа, снимает — только возврат по чеку
+      if (data.status !== undefined && data.status !== existing.status) {
+        if (existing.status === 'sold') {
+          throw new ApiError(400, 'Изделие продано — вернуть его на витрину можно только возвратом по чеку.');
+        }
+        if (data.status === 'sold') {
+          throw new ApiError(400, 'Статус «Продано» ставится только оформлением продажи.');
+        }
+      }
       const fields = PRODUCT_FIELDS.filter(f => data[f] !== undefined);
       if (!fields.length) return { ok: true };
       const sql = `UPDATE products SET ${fields.map(f => `${f} = ?`).join(', ')} WHERE id = ?`;

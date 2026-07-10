@@ -213,8 +213,9 @@ window.Pages.orders = (() => {
 
   return {
     title: 'Заказы и ремонт',
-    openEditor: (o) => openEditor(o, () => {}),
+    openEditor: (o) => openEditor(o, () => { if (Pages._ordersRefresh) Pages._ordersRefresh(); }),
     async render(el, param) {
+      showArchive = false; // чекбокс рисуется снятым — состояние должно совпадать
       el.innerHTML = `
         <div class="toolbar">
           <label style="display:flex;align-items:center;gap:7px;font-size:13px;color:var(--ink-2)">
@@ -225,7 +226,8 @@ window.Pages.orders = (() => {
         </div>
         <div class="kanban" id="orders-kanban"></div>
         <div id="orders-cancelled" style="margin-top:12px"></div>`;
-      const doRefresh = () => refresh(el).catch(ui.toastErr);
+      const doRefresh = () => { if (el.isConnected) refresh(el).catch(ui.toastErr); };
+      Pages._ordersRefresh = doRefresh;
       el.querySelector('#of-add').addEventListener('click', () => openEditor(null, doRefresh));
       el.querySelector('#of-archive').addEventListener('change', e => { showArchive = e.target.checked; doRefresh(); });
       await refresh(el);

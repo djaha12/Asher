@@ -5,6 +5,14 @@ const { ApiError } = require('./util');
 const FIELDS = ['name', 'phone', 'email', 'birthday', 'anniversary', 'segment', 'discount',
   'bonus_points', 'ring_size', 'preferences', 'notes'];
 
+// «2020-13-45» не пройдёт: проверяем, что дата существует в календаре
+function isValidDate(s) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const [y, m, d] = s.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
 function validateCustomer(body, { partial = false } = {}) {
   const out = {};
   if (!partial || body.name !== undefined) {
@@ -15,8 +23,8 @@ function validateCustomer(body, { partial = false } = {}) {
     if (body[f] !== undefined) out[f] = String(body[f] || '').trim();
   }
   for (const f of ['birthday', 'anniversary']) {
-    if (out[f] && !/^\d{4}-\d{2}-\d{2}$/.test(out[f])) {
-      throw new ApiError(400, 'Дата должна быть в формате ГГГГ-ММ-ДД');
+    if (out[f] && !isValidDate(out[f])) {
+      throw new ApiError(400, 'Дата должна быть реальной датой в формате ГГГГ-ММ-ДД');
     }
   }
   if (body.segment !== undefined) {
@@ -34,9 +42,12 @@ function validateCustomer(body, { partial = false } = {}) {
   return out;
 }
 
+// статистика по фактически оплаченным позициям (возвраты не считаются)
 const STATS_SQL = `
-  SELECT COUNT(*) AS purchases, COALESCE(SUM(total), 0) AS total_spent, MAX(created_at) AS last_purchase
-  FROM sales WHERE customer_id = ? AND status != 'returned'`;
+  SELECT COUNT(DISTINCT s.id) AS purchases, COALESCE(SUM(si.final_price), 0) AS total_spent,
+         MAX(s.created_at) AS last_purchase
+  FROM sales s JOIN sale_items si ON si.sale_id = s.id
+  WHERE s.customer_id = ? AND si.returned = 0`;
 
 const routes = [
   {
@@ -53,8 +64,10 @@ const routes = [
       const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
       const rows = db.prepare(
         `SELECT c.*,
-           (SELECT COUNT(*) FROM sales s WHERE s.customer_id = c.id AND s.status != 'returned') AS purchases,
-           (SELECT COALESCE(SUM(s.total), 0) FROM sales s WHERE s.customer_id = c.id AND s.status != 'returned') AS total_spent
+           (SELECT COUNT(DISTINCT s.id) FROM sales s JOIN sale_items si ON si.sale_id = s.id
+             WHERE s.customer_id = c.id AND si.returned = 0) AS purchases,
+           (SELECT COALESCE(SUM(si.final_price), 0) FROM sales s JOIN sale_items si ON si.sale_id = s.id
+             WHERE s.customer_id = c.id AND si.returned = 0) AS total_spent
          FROM customers c ${where} ORDER BY total_spent DESC, c.name LIMIT 1000`
       ).all(...args);
       return { items: rows };
@@ -153,6 +166,11 @@ const routes = [
       if (!existing) throw new ApiError(404, 'Клиент не найден');
       const hasSales = db.prepare('SELECT 1 FROM sales WHERE customer_id = ? LIMIT 1').get(id);
       if (hasSales) throw new ApiError(400, 'У клиента есть история покупок — удалить нельзя.');
+      const hasOrders = db.prepare('SELECT 1 FROM service_orders WHERE customer_id = ? LIMIT 1').get(id);
+      if (hasOrders) throw new ApiError(400, 'У клиента есть заказы или ремонт — удалить нельзя.');
+      // резервы за клиентом освобождаем, чтобы изделия не зависли
+      db.prepare(`UPDATE products SET status = 'in_stock', reserved_for = NULL
+                  WHERE reserved_for = ? AND status = 'reserved'`).run(id);
       db.prepare('DELETE FROM customers WHERE id = ?').run(id);
       audit(session.userId, 'delete', 'customer', id, existing.name);
       return { ok: true };
