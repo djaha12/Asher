@@ -1,0 +1,216 @@
+'use strict';
+/*
+ * Asher — CRM для ювелирного магазина.
+ * Запуск: node server.js  (Node.js >= 22.5, внешние зависимости не нужны)
+ */
+const http = require('node:http');
+const path = require('node:path');
+const fs = require('node:fs');
+
+const { getSetting } = require('./src/db');
+const auth = require('./src/auth');
+const { ApiError } = require('./src/api/util');
+
+const PORT = Number(process.env.ASHER_PORT || process.env.PORT || 3000);
+const PUBLIC_DIR = path.join(__dirname, 'public');
+const BODY_LIMIT = 25 * 1024 * 1024; // 25 МБ — с запасом для CSV-импорта
+
+// ---------- Маршруты API ----------
+
+const modules = ['products', 'customers', 'sales', 'orders', 'finance', 'analytics', 'settings', 'importexport'];
+const routes = [];
+for (const m of modules) {
+  for (const r of require(`./src/api/${m}`).routes) {
+    const names = [];
+    const pattern = r.path.replace(/:[a-zA-Z_]+/g, seg => {
+      names.push(seg.slice(1));
+      return '([^/]+)';
+    });
+    routes.push({ ...r, regex: new RegExp(`^${pattern}$`), paramNames: names });
+  }
+}
+
+// ---------- Утилиты HTTP ----------
+
+function sendJson(res, status, data) {
+  const body = JSON.stringify(data);
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(body);
+}
+
+function parseCookies(req) {
+  const out = {};
+  const raw = req.headers.cookie || '';
+  for (const part of raw.split(';')) {
+    const i = part.indexOf('=');
+    if (i > -1) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return out;
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', c => {
+      size += c.length;
+      if (size > BODY_LIMIT) {
+        reject(new ApiError(413, 'Файл слишком большой'));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+// защита от перебора пароля: после 10 неудач — пауза минута
+const loginFails = new Map();
+function loginAllowed(ip) {
+  const rec = loginFails.get(ip);
+  if (!rec) return true;
+  if (rec.count < 10) return true;
+  return Date.now() - rec.last > 60000;
+}
+function noteLoginFail(ip) {
+  const rec = loginFails.get(ip) || { count: 0, last: 0 };
+  if (Date.now() - rec.last > 60000) rec.count = 0;
+  rec.count++;
+  rec.last = Date.now();
+  loginFails.set(ip, rec);
+}
+
+// ---------- Статика ----------
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+};
+
+function serveStatic(req, res, pathname) {
+  let rel = pathname === '/' ? '/index.html' : pathname;
+  const file = path.normalize(path.join(PUBLIC_DIR, rel));
+  if (!file.startsWith(PUBLIC_DIR)) {
+    res.writeHead(403); res.end('Forbidden'); return;
+  }
+  fs.readFile(file, (err, data) => {
+    if (err) {
+      // SPA: любые прочие адреса отдают index.html
+      fs.readFile(path.join(PUBLIC_DIR, 'index.html'), (e2, index) => {
+        if (e2) { res.writeHead(404); res.end('Not found'); return; }
+        res.writeHead(200, { 'Content-Type': MIME['.html'] });
+        res.end(index);
+      });
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
+    res.end(data);
+  });
+}
+
+// ---------- Сервер ----------
+
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, 'http://localhost');
+  const pathname = decodeURIComponent(url.pathname);
+
+  try {
+    if (!pathname.startsWith('/api/')) {
+      serveStatic(req, res, pathname);
+      return;
+    }
+
+    const cookies = parseCookies(req);
+    const session = auth.getSession(cookies.asher_session);
+
+    // --- вход/выход/кто я ---
+    if (pathname === '/api/login' && req.method === 'POST') {
+      const ip = req.socket.remoteAddress || '?';
+      if (!loginAllowed(ip)) throw new ApiError(429, 'Слишком много попыток. Подождите минуту.');
+      const body = JSON.parse((await readBody(req)).toString('utf8') || '{}');
+      const result = auth.login(body.username, body.password);
+      if (!result) {
+        noteLoginFail(ip);
+        throw new ApiError(401, 'Неверный логин или пароль');
+      }
+      loginFails.delete(ip);
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Set-Cookie': `asher_session=${result.session.token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${30 * 86400}`,
+      });
+      res.end(JSON.stringify({ user: result.user, store_name: getSetting('store_name') }));
+      return;
+    }
+    if (pathname === '/api/logout' && req.method === 'POST') {
+      auth.destroySession(cookies.asher_session);
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Set-Cookie': 'asher_session=; HttpOnly; Path=/; Max-Age=0',
+      });
+      res.end('{"ok":true}');
+      return;
+    }
+    if (pathname === '/api/me' && req.method === 'GET') {
+      if (!session) throw new ApiError(401, 'Не авторизован');
+      sendJson(res, 200, {
+        user: { id: session.userId, username: session.username, name: session.name, role: session.role },
+        store_name: getSetting('store_name'),
+        currency: getSetting('currency', '₽'),
+      });
+      return;
+    }
+
+    // --- все остальные /api/* требуют сессию ---
+    if (!session) throw new ApiError(401, 'Не авторизован');
+
+    const route = routes.find(r => r.method === req.method && r.regex.test(pathname));
+    if (!route) throw new ApiError(404, 'Не найдено');
+    if (route.admin && session.role !== 'admin') {
+      throw new ApiError(403, 'Доступно только администратору');
+    }
+
+    const match = pathname.match(route.regex);
+    const params = {};
+    route.paramNames.forEach((n, i) => { params[n] = match[i + 1]; });
+    const query = Object.fromEntries(url.searchParams.entries());
+
+    let body = {};
+    if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+      const raw = (await readBody(req)).toString('utf8');
+      if (raw) {
+        try { body = JSON.parse(raw); }
+        catch { throw new ApiError(400, 'Некорректный JSON'); }
+      }
+    }
+
+    const ctx = { req, res, params, query, body, session };
+    if (route.raw) {
+      await route.handler(ctx); // маршрут сам пишет ответ (например, CSV)
+      return;
+    }
+    const result = await route.handler(ctx);
+    sendJson(res, 200, result ?? { ok: true });
+  } catch (e) {
+    if (e instanceof ApiError) {
+      sendJson(res, e.status, { error: e.message });
+    } else {
+      console.error(`[${new Date().toISOString()}]`, req.method, pathname, e);
+      sendJson(res, 500, { error: 'Внутренняя ошибка сервера' });
+    }
+  }
+});
+
+auth.cleanupSessions();
+setInterval(() => auth.cleanupSessions(), 6 * 3600 * 1000).unref();
+
+server.listen(PORT, () => {
+  console.log(`\n  Asher CRM запущена: http://localhost:${PORT}\n`);
+  console.log('  Вход по умолчанию: admin / admin123 (смените пароль в Настройках!)\n');
+});

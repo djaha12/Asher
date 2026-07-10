@@ -1,0 +1,17 @@
+{
+  "name": "asher-jewelry-crm",
+  "version": "1.0.0",
+  "description": "Asher — CRM и учётная платформа для ювелирного магазина: каталог изделий, клиенты, продажи, заказы, финансы, аналитика, импорт из 1С",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node src/seed.js",
+    "reset": "node src/seed.js --reset"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}

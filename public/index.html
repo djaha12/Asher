@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Asher — ювелирная CRM</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%92%8E%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <!-- Экран входа -->
+  <div id="login-screen" class="login-screen hidden">
+    <div class="login-card">
+      <div class="login-brand">
+        <div class="login-gem">◆</div>
+        <h1 id="login-title">Asher</h1>
+        <p class="login-sub">Ювелирная CRM-платформа</p>
+      </div>
+      <form id="login-form">
+        <label class="field">
+          <span>Логин</span>
+          <input type="text" id="login-username" autocomplete="username" required>
+        </label>
+        <label class="field">
+          <span>Пароль</span>
+          <input type="password" id="login-password" autocomplete="current-password" required>
+        </label>
+        <div id="login-error" class="login-error hidden"></div>
+        <button type="submit" class="btn btn-primary btn-block">Войти</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Приложение -->
+  <div id="app" class="app hidden">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-gem">◆</span>
+        <div>
+          <div class="brand-name" id="brand-name">Asher</div>
+          <div class="brand-sub">ювелирная CRM</div>
+        </div>
+      </div>
+      <nav id="nav" class="nav"></nav>
+      <div class="sidebar-footer">
+        <div class="user-chip">
+          <div class="user-avatar" id="user-avatar">А</div>
+          <div class="user-info">
+            <div class="user-name" id="user-name">—</div>
+            <div class="user-role" id="user-role">—</div>
+          </div>
+        </div>
+        <button class="btn-logout" id="btn-logout" title="Выйти">⎋</button>
+      </div>
+    </aside>
+
+    <div class="main-wrap">
+      <header class="topbar">
+        <h1 id="page-title" class="page-title">—</h1>
+        <div class="topbar-actions">
+          <button class="btn btn-primary" id="btn-quick-sale">+ Продажа</button>
+        </div>
+      </header>
+      <main id="page" class="page"></main>
+    </div>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast-root" class="toast-root"></div>
+  <div id="print-root" class="print-root"></div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/ui.js"></script>
+  <script src="/js/charts.js"></script>
+  <script src="/js/pages/dashboard.js"></script>
+  <script src="/js/pages/products.js"></script>
+  <script src="/js/pages/customers.js"></script>
+  <script src="/js/pages/sales.js"></script>
+  <script src="/js/pages/orders.js"></script>
+  <script src="/js/pages/finance.js"></script>
+  <script src="/js/pages/analytics.js"></script>
+  <script src="/js/pages/import.js"></script>
+  <script src="/js/pages/settings.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
