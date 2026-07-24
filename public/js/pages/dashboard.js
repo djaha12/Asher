@@ -23,21 +23,21 @@ window.Pages.dashboard = {
       <div class="grid grid-4">
         <div class="big-stat accent-good">
           <div class="bs-label">Продали сегодня</div>
-          <div class="bs-value">${ui.money(d.today.revenue)}</div>
+          <div class="bs-value">${ui.moneyRich(d.today.revenue)}</div>
           <div class="bs-sub">${d.today.sales_count
             ? `${d.today.sales_count} продаж, средний чек ${ui.money(d.today.avg_check)}`
             : 'Продаж пока не было'}</div>
         </div>
         <div class="big-stat accent-gold">
           <div class="bs-label">Продали за месяц</div>
-          <div class="bs-value">${ui.money(d.month.revenue)}</div>
+          <div class="bs-value">${ui.moneyRich(d.month.revenue)}</div>
           <div class="bs-sub">${admin
             ? `Заработали чистыми <b class="good">${ui.money(d.month.profit)}</b>`
             : `${d.month.sales_count} продаж`}</div>
         </div>
         <div class="big-stat ${debts.overdue > 0 ? 'accent-crit' : ''}">
           <div class="bs-label">Должны нам</div>
-          <div class="bs-value ${debts.overdue > 0 ? 'crit' : ''}">${ui.money(debts.customers_owe)}</div>
+          <div class="bs-value ${debts.overdue > 0 ? 'crit' : ''}">${ui.moneyRich(debts.customers_owe)}</div>
           <div class="bs-sub">${debts.customers_owe > 0
             ? `${debts.debtors_count} чел.` + (debts.overdue > 0
               ? ` · <b class="crit">просрочено ${ui.money(debts.overdue)}</b>` : ' · всё в срок')
@@ -45,7 +45,7 @@ window.Pages.dashboard = {
         </div>
         <div class="big-stat">
           <div class="bs-label">Товара на складе</div>
-          <div class="bs-value">${admin ? ui.money(d.stock.retail_value) : ui.num(d.stock.count) + ' шт'}</div>
+          <div class="bs-value">${admin ? ui.moneyRich(d.stock.retail_value) : ui.num(d.stock.count) + ' шт'}</div>
           <div class="bs-sub">${ui.num(d.stock.count)} изделий · <b>${ui.num(d.stock.weight)} г</b>
             ${d.reserved ? ` · ${d.reserved} в резерве` : ''}</div>
         </div>
@@ -56,7 +56,7 @@ window.Pages.dashboard = {
           <div class="row">
             <div class="grow">
               <div class="stat-label">Мы должны поставщикам</div>
-              <div class="big-money">${ui.money(debts.we_owe)}</div>
+              <div class="big-money">${ui.moneyRich(debts.we_owe)}</div>
             </div>
             <button class="btn" id="qa-suppliers">Открыть расчёты</button>
           </div>
@@ -85,7 +85,7 @@ window.Pages.dashboard = {
           <div class="card">
             <h3 class="card-title">Быстрые действия</h3>
             <div style="display:flex;flex-direction:column;gap:9px">
-              <button class="btn btn-primary" id="qa-sale">₽ &nbsp;Оформить продажу</button>
+              <button class="btn btn-primary" id="qa-sale">¤ &nbsp;Оформить продажу</button>
               <button class="btn" id="qa-pay">💰 &nbsp;Принять оплату долга</button>
               <button class="btn" id="qa-product">💍 &nbsp;Добавить изделие</button>
               <button class="btn" id="qa-customer">👤 &nbsp;Новый клиент</button>
@@ -141,7 +141,7 @@ window.Pages.dashboard = {
             <div class="dr-sub">${ui.esc(t.phone || 'телефон не указан')}</div>
           </div>
           <div class="dr-sum">
-            <div class="dr-amount">${ui.money(t.debt)}</div>
+            <div class="dr-amount">${ui.moneyRich(t.debt)}</div>
             ${t.overdue ? '<div class="dr-sub crit">просрочено</div>' : ''}
           </div>
         </div>`).join('');

@@ -47,11 +47,42 @@ function parseCsv(text, delimiter) {
   return rows;
 }
 
-// "12 345,67" / "12345.67" → 12345.67
+/*
+ * Разбор числа из выгрузки: «12 345,67», «12,345.67», «45 000 сом», «3,15».
+ *
+ * Формат зависит и от страны, и от того, чем сделан файл: 1С отдаёт русский
+ * формат с запятой, Excel в английской локали — с точкой. Поэтому не полагаемся
+ * на один вариант, а определяем разделитель дробной части по самой строке:
+ * им считается последний из встретившихся знаков, если после него не ровно три
+ * цифры. Три цифры — это разряды тысяч: «1,500» — это полторы тысячи, а не 1,5.
+ */
 function parseNumber(s) {
-  if (s === undefined || s === null) return 0;
-  const cleaned = String(s).replace(/[\s ₽руб.]/gi, '').replace(',', '.').replace(/[^0-9.\-]/g, '');
-  return Math.max(Number(cleaned) || 0, 0); // цены и веса не бывают отрицательными
+  if (s === undefined || s === null || s === '') return 0;
+  // Убираем всё, что не цифра и не разделитель: подпись валюты отбрасывается,
+  // какой бы она ни была — «сом», «₸», «₽», «$».
+  let t = String(s).replace(/[^\d.,]/g, '');
+  if (!t) return 0;
+
+  const lastComma = t.lastIndexOf(',');
+  const lastDot = t.lastIndexOf('.');
+  let sep = '';
+  if (lastComma > -1 && lastDot > -1) {
+    sep = lastComma > lastDot ? ',' : '.';   // что стоит позже, то и дробная часть
+  } else if (lastComma > -1) {
+    sep = /,\d{3}$/.test(t) ? '' : ',';
+  } else if (lastDot > -1) {
+    sep = /\.\d{3}$/.test(t) ? '' : '.';
+  }
+
+  if (sep) {
+    const i = t.lastIndexOf(sep);
+    t = t.slice(0, i).replace(/[.,]/g, '') + '.' + t.slice(i + 1).replace(/[.,]/g, '');
+  } else {
+    t = t.replace(/[.,]/g, '');
+  }
+  const v = Number(t);
+  // Цены и веса не бывают отрицательными.
+  return Number.isFinite(v) ? Math.max(v, 0) : 0;
 }
 
 // "31.12.1985" / "1985-12-31" → "1985-12-31"

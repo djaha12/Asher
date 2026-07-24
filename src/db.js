@@ -390,7 +390,21 @@ function ensureDefaults() {
   }
   if (!getSetting('store_name')) setSetting('store_name', 'Asher Jewelry');
   if (!getSetting('bonus_percent')) setSetting('bonus_percent', '3');
-  if (!getSetting('currency')) setSetting('currency', '₽');
+
+  // Локаль: при первом запуске подставляем набор страны по умолчанию.
+  // Дальше владелец может сменить страну или отдельные поля в Настройках.
+  const { presetFor, DEFAULT_COUNTRY, LOCALE_KEYS } = require('./locale');
+  if (!getSetting('country')) {
+    // Базы, созданные до появления локали, работали в рублях — не меняем им валюту молча.
+    const legacyCurrency = getSetting('currency');
+    const country = legacyCurrency === '₽' ? 'RU' : DEFAULT_COUNTRY;
+    const preset = presetFor(country);
+    setSetting('country', country);
+    for (const key of LOCALE_KEYS) {
+      if (key === 'country') continue;
+      if (!getSetting(key)) setSetting(key, preset[key]);
+    }
+  }
 
   // Точка продаж должна быть всегда хотя бы одна — к ней привязывается весь товар.
   const hasStores = db.prepare('SELECT COUNT(*) AS c FROM stores').get().c > 0;

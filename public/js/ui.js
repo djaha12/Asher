@@ -8,14 +8,53 @@ window.ui = (() => {
     return String(s).replace(/[&<>"']/g, ch => ESC_MAP[ch]);
   }
 
-  const moneyFmt = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 });
+  // ---------- Деньги и числа ----------
+  // Формат зависит от страны магазина: в сомах и тенге разменной монеты нет,
+  // поэтому «45 000 сом», а не «45 000,00». Настройки приходят с сервера,
+  // здесь только запасные значения на случай, если страница открылась раньше их загрузки.
+  const FALLBACK = { currency: 'сом', money_decimals: 0, number_locale: 'ru-RU' };
+  function loc() { return (window.App && window.App.locale) || FALLBACK; }
+
+  // Форматтеры дорогие, а вызываются на каждую ячейку таблицы — держим готовые.
+  const fmtCache = new Map();
+  function formatter(locale, decimals) {
+    const key = locale + '|' + decimals;
+    if (!fmtCache.has(key)) {
+      let fmt;
+      try {
+        fmt = new Intl.NumberFormat(locale, {
+          minimumFractionDigits: 0, maximumFractionDigits: decimals,
+        });
+      } catch {
+        // Неизвестный браузеру код локали не должен ронять всю страницу.
+        fmt = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: decimals });
+      }
+      fmtCache.set(key, fmt);
+    }
+    return fmtCache.get(key);
+  }
+
   function money(n, withSign) {
     const v = Number(n) || 0;
-    const cur = (window.App && window.App.currency) || '₽';
-    const s = moneyFmt.format(v) + ' ' + cur;
+    const l = loc();
+    const s = formatter(l.number_locale, l.money_decimals).format(v) + ' ' + (l.currency || '');
     return withSign && v > 0 ? '+' + s : s;
   }
-  function num(n) { return moneyFmt.format(Number(n) || 0); }
+
+  // Крупные суммы на плитках: цифра большая, подпись валюты мельче и приглушённее.
+  // Со словом «сом» вместо знака «₽» сумма иначе не помещается в плитку,
+  // а дробить число переносом строки нельзя — его перестаёт быть видно с прилавка.
+  function moneyRich(n) {
+    const l = loc();
+    const value = formatter(l.number_locale, l.money_decimals).format(Number(n) || 0);
+    return `${esc(value)}<span class="cur">${esc(l.currency || '')}</span>`;
+  }
+
+  // Не деньги: вес в граммах, количество, бонусы. Здесь дробная часть нужна всегда,
+  // иначе «3,15 г» превратится в «3 г».
+  function num(n, decimals = 2) {
+    return formatter(loc().number_locale, decimals).format(Number(n) || 0);
+  }
 
   function dt(iso) {
     if (!iso) return '—';
@@ -260,17 +299,43 @@ window.ui = (() => {
     return s.slice(0, idx) + '<mark>' + s.slice(idx, idx + q.length) + '</mark>' + s.slice(idx + q.length);
   }
 
+  /*
+   * Приведение телефона к международному виду.
+   *
+   * Клиент может быть записан как «0555 12-34-56», «+996 555 123456» или
+   * «555123456» — все три варианта должны дать одну ссылку. Номер, не похожий
+   * на местный, оставляем как есть: у клиента-иностранца свой код страны.
+   * Та же логика продублирована на сервере в src/locale.js.
+   */
+  function normalizePhone(raw) {
+    const digits = String(raw || '').replace(/\D/g, '');
+    if (digits.length < 7) return '';
+    const l = loc();
+    const code = String(l.phone_code || '');
+    const trunk = String(l.phone_trunk || '');
+    const length = Number(l.phone_length) || 0;
+    if (!code) return digits;
+
+    if (length && digits.length === length && digits.startsWith(code)) return digits;
+    if (trunk && digits.startsWith(trunk)) {
+      const local = code + digits.slice(trunk.length);
+      if (!length || local.length === length) return local;
+    }
+    const withCode = code + digits;
+    if (!length || withCode.length === length) return withCode;
+    return digits;
+  }
+
   // Ссылка «написать в WhatsApp» с готовым текстом.
   function whatsappLink(phone, text) {
-    const digits = String(phone || '').replace(/\D/g, '');
-    if (digits.length < 10) return '';
-    const normalized = digits.length === 11 && digits[0] === '8' ? '7' + digits.slice(1) : digits;
+    const normalized = normalizePhone(phone);
+    if (!normalized) return '';
     return `https://wa.me/${normalized}?text=${encodeURIComponent(text || '')}`;
   }
 
-  return { esc, money, num, dt, dateOnly, monthName, badge, L, modal, confirmDialog, toast, toastErr,
+  return { esc, money, moneyRich, num, dt, dateOnly, monthName, badge, L, modal, confirmDialog, toast, toastErr,
     table, bindRows, formValues, debounce, currentTheme, applyTheme, toggleTheme, lightbox,
-    barcodeSvg, photoUrl, highlight, whatsappLink };
+    barcodeSvg, photoUrl, highlight, whatsappLink, normalizePhone, locale: loc };
 })();
 
 // Тему применяем сразу при загрузке, до первого кадра — чтобы не мигало белым.

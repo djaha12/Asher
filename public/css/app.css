@@ -659,3 +659,12 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 15px; }
   padding: 14px 16px; font-size: 14.5px; color: var(--ink-2); margin-bottom: 16px; line-height: 1.5;
 }
 .hint-box strong { color: var(--ink); }
+
+/* Подпись валюты внутри крупной суммы: «1 242 800 сом» — цифра большая,
+   слово мельче. Иначе длинные названия валют («сом», «сум», «AED»)
+   переносят число на вторую строку и плитка перестаёт читаться с расстояния. */
+.bs-value .cur, .big-money .cur, .stat-value .cur, .dr-amount .cur {
+  font-size: .5em; font-weight: 600; color: var(--muted);
+  margin-left: .22em; letter-spacing: .02em;
+}
+.bs-value, .stat-value, .dr-amount { white-space: nowrap; }

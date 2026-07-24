@@ -10,7 +10,18 @@ const fs = require('node:fs');
 const { getSetting } = require('./src/db');
 const auth = require('./src/auth');
 const media = require('./src/api/images');
+const { presetFor, LOCALE_KEYS } = require('./src/locale');
 const { ApiError } = require('./src/api/util');
+
+// Настройки локали одним объектом — интерфейс форматирует по ним суммы и телефоны.
+function currentLocale() {
+  const fallback = presetFor(getSetting('country'));
+  const out = {};
+  for (const key of LOCALE_KEYS) out[key] = getSetting(key) || String(fallback[key] ?? '');
+  out.money_decimals = Number(out.money_decimals) || 0;
+  out.phone_length = Number(out.phone_length) || 0;
+  return out;
+}
 
 const PORT = Number(process.env.ASHER_PORT || process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -171,7 +182,11 @@ const server = http.createServer(async (req, res) => {
         'Content-Type': 'application/json; charset=utf-8',
         'Set-Cookie': `asher_session=${result.session.token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${30 * 86400}`,
       });
-      res.end(JSON.stringify({ user: result.user, store_name: getSetting('store_name') }));
+      res.end(JSON.stringify({
+        user: result.user,
+        store_name: getSetting('store_name'),
+        locale: currentLocale(),
+      }));
       return;
     }
     if (pathname === '/api/logout' && req.method === 'POST') {
@@ -188,7 +203,8 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 200, {
         user: { id: session.userId, username: session.username, name: session.name, role: session.role },
         store_name: getSetting('store_name'),
-        currency: getSetting('currency', '₽'),
+        currency: getSetting('currency'),
+        locale: currentLocale(),
       });
       return;
     }
@@ -236,7 +252,24 @@ const server = http.createServer(async (req, res) => {
 auth.cleanupSessions();
 setInterval(() => auth.cleanupSessions(), 6 * 3600 * 1000).unref();
 
+// Адреса в локальной сети — чтобы открыть систему с телефона по Wi-Fi магазина.
+function lanAddresses() {
+  const out = [];
+  for (const list of Object.values(require('node:os').networkInterfaces())) {
+    for (const iface of list || []) {
+      if (iface.family === 'IPv4' && !iface.internal) out.push(`http://${iface.address}:${PORT}`);
+    }
+  }
+  return out;
+}
+
 server.listen(PORT, () => {
-  console.log(`\n  Asher CRM запущена: http://localhost:${PORT}\n`);
-  console.log('  Вход по умолчанию: admin / admin123 (смените пароль в Настройках!)\n');
+  console.log(`\n  Asher CRM запущена`);
+  console.log(`  На этом компьютере:  http://localhost:${PORT}`);
+  const lan = lanAddresses();
+  if (lan.length) {
+    console.log(`\n  С телефона или планшета (в той же сети Wi-Fi):`);
+    for (const addr of lan) console.log(`     ${addr}`);
+  }
+  console.log('\n  Вход по умолчанию: admin / admin123 (смените пароль в Настройках!)\n');
 });

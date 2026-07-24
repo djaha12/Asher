@@ -7,7 +7,7 @@ window.App = (() => {
     { section: 'Обзор' },
     { key: 'dashboard', title: 'Главная', ico: '◆' },
     { section: 'Торговля' },
-    { key: 'sales', title: 'Продажи', ico: '₽' },
+    { key: 'sales', title: 'Продажи', ico: '¤' },
     { key: 'products', title: 'Каталог изделий', ico: '💍' },
     { key: 'customers', title: 'Клиенты', ico: '👤' },
     { key: 'debts', title: 'Долги', ico: '⏳' },
@@ -27,15 +27,21 @@ window.App = (() => {
   const MOBILE_NAV = [
     { key: 'dashboard', title: 'Главная', ico: '◆' },
     { key: 'products', title: 'Каталог', ico: '💍' },
-    { key: 'sales', title: 'Продажи', ico: '₽' },
+    { key: 'sales', title: 'Продажи', ico: '¤' },
     { key: 'debts', title: 'Долги', ico: '⏳' },
     { key: 'customers', title: 'Клиенты', ico: '👤' },
   ];
 
   const App = {
     user: null,
-    currency: '₽',
+    // Локаль магазина: валюта, формат сумм, телефонный код страны.
+    // Приходит с сервера при входе, задаётся в Настройках.
+    locale: { currency: 'сом', money_decimals: 0, number_locale: 'ru-RU',
+      phone_code: '996', phone_trunk: '0', phone_length: 12 },
     storeName: 'Asher',
+
+    // Совместимость: страницы обращаются к App.currency как к подписи валюты.
+    get currency() { return App.locale.currency || ''; },
 
     showLogin() {
       document.getElementById('app').classList.add('hidden');
@@ -161,8 +167,7 @@ window.App = (() => {
       });
       App.user = res.user;
       App.storeName = res.store_name || 'Asher';
-      const me = await api.get('/api/me');
-      App.currency = me.currency || '₽';
+      if (res.locale) App.locale = res.locale;
       document.getElementById('login-password').value = '';
       App.showApp();
     } catch (err) {
@@ -188,7 +193,7 @@ window.App = (() => {
       const me = await api.get('/api/me');
       App.user = me.user;
       App.storeName = me.store_name || 'Asher';
-      App.currency = me.currency || '₽';
+      if (me.locale) App.locale = me.locale;
       App.showApp();
     } catch {
       App.showLogin();

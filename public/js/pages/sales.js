@@ -116,7 +116,7 @@ window.Pages.sales = (() => {
           ${s.note ? `<p class="muted">Комментарий: ${ui.esc(s.note)}</p>` : ''}`,
         footer: `
           ${canReturn ? '<button class="btn btn-danger left" data-act="return" disabled>Оформить возврат</button>' : ''}
-          ${s.debt > 0 ? '<button class="btn btn-primary" data-act="pay">₽ Принять оплату</button>' : ''}
+          ${s.debt > 0 ? '<button class="btn btn-primary" data-act="pay">¤ Принять оплату</button>' : ''}
           <button class="btn" data-act="print">🖨 Печать чека</button>
           <button class="btn" data-act="close">Закрыть</button>`,
       });
@@ -240,7 +240,7 @@ window.Pages.sales = (() => {
               <div class="pi-sub">${ui.esc(it.product.sku)}${it.product.metal ? ' · ' + ui.esc(it.product.metal) : ''}${it.product.status === 'reserved' ? ' · <b>из резерва</b>' : ''}</div>
             </div>
             <div class="num money">${ui.money(it.product.retail_price)}</div>
-            <input type="number" class="input" data-i="${i}" min="0" max="${it.product.retail_price}" step="1" value="${it.discount || ''}" placeholder="скидка ₽">
+            <input type="number" class="input" data-i="${i}" min="0" max="${it.product.retail_price}" step="1" value="${it.discount || ''}" placeholder="скидка">
             <button class="btn btn-sm btn-danger" data-del="${i}">×</button>
           </div>`).join('');
       }

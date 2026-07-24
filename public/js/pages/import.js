@@ -72,7 +72,7 @@ window.Pages.import = (() => {
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <a class="btn" href="/api/export/products" download>💍 Изделия</a>
           <a class="btn" href="/api/export/customers" download>👤 Клиенты</a>
-          <a class="btn" href="/api/export/sales" download>₽ Продажи</a>
+          <a class="btn" href="/api/export/sales" download>¤ Продажи</a>
         </div>
       </div>`;
 

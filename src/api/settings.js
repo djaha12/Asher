@@ -1,9 +1,12 @@
 'use strict';
+const os = require('node:os');
 const { db, nowIso, audit, getSetting, setSetting, hashPassword, makeSalt } = require('../db');
 const { ApiError } = require('./util');
 const { changePassword } = require('../auth');
+const { PRESETS, LOCALE_KEYS, presetFor } = require('../locale');
 
-const SETTING_KEYS = ['store_name', 'store_address', 'store_phone', 'bonus_percent', 'vip_threshold', 'currency'];
+const SETTING_KEYS = ['store_name', 'store_address', 'store_phone', 'bonus_percent', 'vip_threshold',
+  ...LOCALE_KEYS];
 
 const routes = [
   // --- Общие настройки ---
@@ -18,11 +21,45 @@ const routes = [
   {
     method: 'PUT', path: '/api/settings', admin: true,
     handler: ({ body, session }) => {
+      // Смена страны подставляет весь набор сразу: валюту, формат сумм, телефонный код.
+      // Поля, переданные явно вместе со страной, имеют приоритет — можно взять
+      // набор Кыргызстана, но оставить свою подпись валюты.
+      if (body.country !== undefined && body.country !== getSetting('country')) {
+        const preset = presetFor(body.country);
+        for (const k of LOCALE_KEYS) {
+          if (k === 'country') continue;
+          if (body[k] === undefined) setSetting(k, String(preset[k]));
+        }
+      }
       for (const k of SETTING_KEYS) {
         if (body[k] !== undefined) setSetting(k, String(body[k]));
       }
       audit(session.userId, 'update', 'settings', null, 'Изменены настройки магазина');
       return { ok: true };
+    },
+  },
+  {
+    // Список стран для выпадающего списка в настройках.
+    method: 'GET', path: '/api/settings/countries',
+    handler: () => ({
+      items: Object.entries(PRESETS).map(([code, p]) => ({ code, ...p })),
+    }),
+  },
+  {
+    // Адреса, по которым система открывается с телефона в той же сети Wi-Fi.
+    // Владелец работает за компьютером, а смотрит каталог с телефона — без этой
+    // подсказки пришлось бы искать IP-адрес в настройках операционной системы.
+    method: 'GET', path: '/api/settings/network', admin: true,
+    handler: ({ req }) => {
+      const port = Number(process.env.ASHER_PORT || process.env.PORT || 3000);
+      const addresses = [];
+      for (const list of Object.values(os.networkInterfaces())) {
+        for (const iface of list || []) {
+          if (iface.family !== 'IPv4' || iface.internal) continue;
+          addresses.push(`http://${iface.address}:${port}`);
+        }
+      }
+      return { addresses, port, hostname: os.hostname() };
     },
   },
 

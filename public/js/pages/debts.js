@@ -26,17 +26,17 @@ window.Pages.debts = (() => {
       <div class="grid grid-3" style="margin-bottom:18px">
         <div class="big-stat accent-gold">
           <div class="bs-label">Всего должны нам</div>
-          <div class="bs-value">${ui.money(totals.debt)}</div>
+          <div class="bs-value">${ui.moneyRich(totals.debt)}</div>
           <div class="bs-sub">человек: ${summary.debtors_count} · документов: ${summary.documents_count}</div>
         </div>
         <div class="big-stat ${totals.overdue > 0 ? 'accent-crit' : 'accent-good'}">
           <div class="bs-label">Из них просрочено</div>
-          <div class="bs-value ${totals.overdue > 0 ? 'crit' : ''}">${ui.money(totals.overdue)}</div>
+          <div class="bs-value ${totals.overdue > 0 ? 'crit' : ''}">${ui.moneyRich(totals.overdue)}</div>
           <div class="bs-sub">${totals.overdue > 0 ? 'Срок оплаты уже прошёл' : 'Просроченных долгов нет'}</div>
         </div>
         <div class="big-stat">
           <div class="bs-label">Средний долг</div>
-          <div class="bs-value">${ui.money(items.length ? totals.debt / items.length : 0)}</div>
+          <div class="bs-value">${ui.moneyRich(items.length ? totals.debt / items.length : 0)}</div>
           <div class="bs-sub">на одного должника</div>
         </div>
       </div>
@@ -45,7 +45,7 @@ window.Pages.debts = (() => {
         <input type="text" class="input search" id="d-search" placeholder="Поиск по имени или телефону…" autocomplete="off">
         <button class="chip" id="d-overdue">Только просроченные</button>
         <div class="spacer"></div>
-        <button class="btn btn-primary" id="d-pay">₽ Принять оплату</button>
+        <button class="btn btn-primary" id="d-pay">¤ Принять оплату</button>
       </div>
 
       <div class="card"><div id="d-list"></div></div>`;
@@ -67,7 +67,7 @@ window.Pages.debts = (() => {
               документов: ${r.documents}${r.oldest_due ? ' · срок ' + ui.dateOnly(r.oldest_due) : ''}</div>
           </div>
           <div class="dr-sum">
-            <div class="dr-amount">${ui.money(r.debt)}</div>
+            <div class="dr-amount">${ui.moneyRich(r.debt)}</div>
             ${r.overdue_debt > 0
               ? `<div class="dr-sub crit">просрочено ${ui.money(r.overdue_debt)}, ${r.max_days_overdue} дн.</div>`
               : '<div class="dr-sub">в срок</div>'}
@@ -132,7 +132,7 @@ window.Pages.debts = (() => {
 
     const wa = ui.whatsappLink(data.customer.phone,
       `Здравствуйте, ${data.customer.name}! Напоминаем об остатке по вашей покупке: ` +
-      `${data.total_debt.toLocaleString('ru-RU')} ${App.currency}. Будем рады видеть вас снова!`);
+      `${ui.money(data.total_debt)}. Будем рады видеть вас снова!`);
 
     const m = ui.modal({
       title: 'Долг: ' + data.customer.name,
@@ -141,7 +141,7 @@ window.Pages.debts = (() => {
         <div class="row" style="margin-bottom:16px">
           <div class="big-stat accent-crit grow">
             <div class="bs-label">Остаток долга</div>
-            <div class="bs-value">${ui.money(data.total_debt)}</div>
+            <div class="bs-value">${ui.moneyRich(data.total_debt)}</div>
             <div class="bs-sub">${ui.esc(data.customer.phone || 'телефон не указан')}</div>
           </div>
         </div>
@@ -157,7 +157,7 @@ window.Pages.debts = (() => {
       footer: `
         ${wa ? `<a class="btn left" href="${ui.esc(wa)}" target="_blank" rel="noopener">💬 Написать в WhatsApp</a>` : ''}
         <button class="btn" data-act="close">Закрыть</button>
-        <button class="btn btn-primary" data-act="pay">₽ Принять оплату</button>`,
+        <button class="btn btn-primary" data-act="pay">¤ Принять оплату</button>`,
     });
 
     m.foot.querySelector('[data-act=close]').onclick = m.close;
@@ -229,7 +229,7 @@ window.Pages.debts = (() => {
         <div class="debt-row" data-i="${i}">
           <div><div class="dr-name">${ui.esc(r.customer_name)}</div>
             <div class="dr-sub">${ui.esc(r.customer_phone || '')}</div></div>
-          <div class="dr-sum"><div class="dr-amount">${ui.money(r.debt)}</div></div>
+          <div class="dr-sum"><div class="dr-amount">${ui.moneyRich(r.debt)}</div></div>
         </div>`).join('')}</div>`,
     });
     m.body.querySelectorAll('.debt-row').forEach(el => {
@@ -255,7 +255,7 @@ window.Pages.debts = (() => {
       <div class="grid grid-3" style="margin-bottom:18px">
         <div class="big-stat accent-crit">
           <div class="bs-label">Всего должны поставщикам</div>
-          <div class="bs-value">${ui.money(total)}</div>
+          <div class="bs-value">${ui.moneyRich(total)}</div>
           <div class="bs-sub">поставщиков с долгом: ${owing.filter(s => s.balance > 0).length}</div>
         </div>
       </div>
@@ -320,7 +320,7 @@ window.Pages.debts = (() => {
         <div class="grid grid-2" style="margin-bottom:16px">
           <div class="big-stat ${data.balance > 0.009 ? 'accent-crit' : 'accent-good'}">
             <div class="bs-label">Текущий долг перед поставщиком</div>
-            <div class="bs-value">${ui.money(Math.max(0, data.balance))}</div>
+            <div class="bs-value">${ui.moneyRich(Math.max(0, data.balance))}</div>
             <div class="bs-sub">${data.balance < -0.009
               ? 'Переплата ' + ui.money(-data.balance)
               : (data.balance > 0.009 ? 'к оплате' : 'рассчитались полностью')}</div>
@@ -333,7 +333,7 @@ window.Pages.debts = (() => {
         </div>
         <div class="row" style="margin-bottom:12px">
           <button class="btn" data-act="invoice">+ Поставка</button>
-          <button class="btn btn-primary" data-act="payment">₽ Оплатить</button>
+          <button class="btn btn-primary" data-act="payment">¤ Оплатить</button>
           <button class="btn btn-ghost" data-act="adjust">Корректировка</button>
         </div>
         ${data.ops.length ? `<div class="table-wrap"><table class="tbl">
@@ -427,7 +427,7 @@ window.Pages.debts = (() => {
         </div>
         <div class="big-stat accent-crit">
           <div class="bs-label">Продано с реализации</div>
-          <div class="bs-value">${ui.money(data.sold_value)}</div>
+          <div class="bs-value">${ui.moneyRich(data.sold_value)}</div>
           <div class="bs-sub">записей: ${data.sold.length} — гасится оплатой поставщику</div>
         </div>
       </div>

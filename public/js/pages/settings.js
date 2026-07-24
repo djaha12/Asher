@@ -3,31 +3,154 @@ window.Pages = window.Pages || {};
 
 window.Pages.settings = (() => {
   async function renderStore(box) {
-    const s = await api.get('/api/settings');
+    const [s, countries, network] = await Promise.all([
+      api.get('/api/settings'),
+      api.get('/api/settings/countries').then(r => r.items),
+      api.get('/api/settings/network').catch(() => ({ addresses: [] })),
+    ]);
+    const cur = s.currency || 'сом';
+
     box.innerHTML = `
-      <div class="card" style="max-width:560px">
-        <h3 class="card-title">Магазин</h3>
-        <form id="st-form">
-          <label class="field"><span>Название (печатается на чеках)</span><input name="store_name" value="${ui.esc(s.store_name)}"></label>
-          <div class="form-grid">
-            <label class="field"><span>Адрес</span><input name="store_address" value="${ui.esc(s.store_address)}"></label>
-            <label class="field"><span>Телефон</span><input name="store_phone" value="${ui.esc(s.store_phone)}"></label>
+      <div class="two-col">
+        <div>
+          <div class="card">
+            <h3 class="card-title">Магазин</h3>
+            <form id="st-form">
+              <label class="field"><span>Название (печатается на чеках)</span><input name="store_name" value="${ui.esc(s.store_name)}"></label>
+              <div class="form-grid">
+                <label class="field"><span>Адрес</span><input name="store_address" value="${ui.esc(s.store_address)}"></label>
+                <label class="field"><span>Телефон</span><input name="store_phone" value="${ui.esc(s.store_phone)}"></label>
+              </div>
+              <div class="form-grid">
+                <label class="field"><span>Бонусы с покупки, %</span><input name="bonus_percent" type="number" min="0" max="50" step="0.5" value="${ui.esc(s.bonus_percent)}"></label>
+                <label class="field"><span>Порог VIP-сегмента, ${ui.esc(cur)}</span><input name="vip_threshold" type="number" min="0" step="10000" value="${ui.esc(s.vip_threshold || 500000)}"></label>
+              </div>
+              <button type="button" class="btn btn-primary" id="st-save">Сохранить</button>
+            </form>
           </div>
-          <div class="form-grid">
-            <label class="field"><span>Бонусы с покупки, %</span><input name="bonus_percent" type="number" min="0" max="50" step="0.5" value="${ui.esc(s.bonus_percent)}"></label>
-            <label class="field"><span>Порог VIP-сегмента, ₽</span><input name="vip_threshold" type="number" min="0" step="10000" value="${ui.esc(s.vip_threshold || 500000)}"></label>
+
+          <div class="card">
+            <h3 class="card-title">Страна и валюта</h3>
+            <div class="hint-box">
+              Выберите страну — подставятся валюта, формат сумм и телефонный код.
+              Дальше при желании можно поправить любое поле вручную.
+            </div>
+            <form id="loc-form">
+              <label class="field"><span>Страна</span>
+                <select name="country" id="loc-country">
+                  ${countries.map(c => `<option value="${c.code}" ${s.country === c.code ? 'selected' : ''}>${ui.esc(c.name)}</option>`).join('')}
+                </select></label>
+              <div class="form-grid">
+                <label class="field"><span>Подпись валюты</span>
+                  <input name="currency" value="${ui.esc(s.currency)}" placeholder="сом"></label>
+                <label class="field"><span>Знаков после запятой в суммах</span>
+                  <select name="money_decimals">
+                    <option value="0" ${String(s.money_decimals) === '0' ? 'selected' : ''}>0 — «45 000 ${ui.esc(cur)}»</option>
+                    <option value="2" ${String(s.money_decimals) === '2' ? 'selected' : ''}>2 — «45 000,00 ${ui.esc(cur)}»</option>
+                  </select></label>
+              </div>
+              <div class="form-grid-3">
+                <label class="field"><span>Код страны</span>
+                  <input name="phone_code" value="${ui.esc(s.phone_code)}" placeholder="996"></label>
+                <label class="field"><span>Местная приставка</span>
+                  <input name="phone_trunk" value="${ui.esc(s.phone_trunk)}" placeholder="0"></label>
+                <label class="field"><span>Всего цифр в номере</span>
+                  <input name="phone_length" type="number" min="0" max="15" value="${ui.esc(s.phone_length)}"></label>
+              </div>
+              <p class="form-hint" id="loc-preview"></p>
+              <button type="button" class="btn btn-primary" id="loc-save">Сохранить</button>
+            </form>
           </div>
-          <button type="button" class="btn btn-primary" id="st-save">Сохранить</button>
-        </form>
+        </div>
+
+        <div>
+          <div class="card">
+            <h3 class="card-title">Открыть на телефоне 📱</h3>
+            ${network.addresses.length ? `
+              <p class="muted" style="margin-top:0">Наберите этот адрес в браузере телефона.
+              Телефон должен быть подключён к тому же Wi-Fi, что и этот компьютер.</p>
+              ${network.addresses.map(a => `
+                <div class="row" style="margin-bottom:8px">
+                  <code style="font-size:19px;font-weight:600;flex:1;word-break:break-all">${ui.esc(a)}</code>
+                  <button class="btn btn-sm" data-copy="${ui.esc(a)}">Копировать</button>
+                </div>`).join('')}
+              <p class="muted" style="font-size:13px">Добавьте страницу на главный экран телефона —
+              и система будет открываться как обычное приложение.</p>
+            ` : `<p class="muted">Компьютер не подключён к сети — адрес появится, когда включите Wi-Fi.</p>`}
+          </div>
+        </div>
       </div>`;
+
     box.querySelector('#st-save').addEventListener('click', async () => {
       try {
         await api.put('/api/settings', ui.formValues(box.querySelector('#st-form')));
         ui.toast('Настройки сохранены');
         App.storeName = box.querySelector('[name=store_name]').value || 'Asher';
         document.getElementById('brand-name').textContent = App.storeName;
+        document.getElementById('brand-name-mobile').textContent = App.storeName;
       } catch (e) { ui.toastErr(e); }
     });
+
+    // Смена страны в списке сразу подставляет её набор в поля — до сохранения.
+    const locForm = box.querySelector('#loc-form');
+    const preview = box.querySelector('#loc-preview');
+    // Образец считаем по значениям в форме, а не по сохранённым: владелец должен
+    // видеть, что получится, ещё до нажатия «Сохранить».
+    function updatePreview() {
+      const v = ui.formValues(locForm);
+      const country = countries.find(c => c.code === v.country);
+      const numberLocale = country ? country.number_locale : 'ru-RU';
+      let sum;
+      try {
+        sum = (45000).toLocaleString(numberLocale, {
+          minimumFractionDigits: Number(v.money_decimals) || 0,
+          maximumFractionDigits: Number(v.money_decimals) || 0,
+        });
+      } catch { sum = '45 000'; }
+
+      const example = country ? country.phone_example : '';
+      const digits = String(example).replace(/\D/g, '');
+      const code = String(v.phone_code || '');
+      const trunk = String(v.phone_trunk || '');
+      const length = Number(v.phone_length) || 0;
+      let wa = digits.startsWith(trunk) && trunk ? code + digits.slice(trunk.length) : code + digits;
+      if (length && wa.length !== length) wa = digits;
+
+      preview.innerHTML = `Сумма будет выглядеть так: <b>${ui.esc(sum)} ${ui.esc(v.currency || '')}</b>` +
+        (example ? ` · телефон «${ui.esc(example)}» → WhatsApp <b>+${ui.esc(wa)}</b>` : '');
+    }
+    box.querySelector('#loc-country').addEventListener('change', e => {
+      const c = countries.find(x => x.code === e.target.value);
+      if (!c) return;
+      locForm.querySelector('[name=currency]').value = c.currency;
+      locForm.querySelector('[name=money_decimals]').value = String(c.money_decimals);
+      locForm.querySelector('[name=phone_code]').value = c.phone_code;
+      locForm.querySelector('[name=phone_trunk]').value = c.phone_trunk;
+      locForm.querySelector('[name=phone_length]').value = String(c.phone_length);
+      updatePreview();
+    });
+    box.querySelector('#loc-save').addEventListener('click', async () => {
+      try {
+        const v = ui.formValues(locForm);
+        const country = countries.find(c => c.code === v.country);
+        if (country) { v.number_locale = country.number_locale; v.fineness = country.fineness; v.phone_example = country.phone_example; }
+        await api.put('/api/settings', v);
+        // Обновляем локаль в памяти — иначе суммы останутся в старом формате до перезагрузки.
+        const me = await api.get('/api/me');
+        if (me.locale) App.locale = me.locale;
+        ui.toast('Сохранено. Суммы и телефоны теперь в новом формате.');
+        renderStore(box);
+      } catch (e) { ui.toastErr(e); }
+    });
+
+    box.querySelectorAll('[data-copy]').forEach(btn => btn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(btn.dataset.copy);
+        ui.toast('Адрес скопирован');
+      } catch { ui.toast('Скопируйте адрес вручную', true); }
+    }));
+
+    updatePreview();
   }
 
   async function renderCatalogRefs(box) {

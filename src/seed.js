@@ -49,27 +49,32 @@ const userIds = db.prepare('SELECT id FROM users').all().map(r => r.id);
 
 // ---------- Настройки ----------
 setSetting('store_name', 'Asher Jewelry');
-setSetting('store_address', 'Москва, Столешников пер., 7');
-setSetting('store_phone', '+7 495 120-45-67');
+setSetting('store_address', 'Бишкек, ул. Киевская, 95');
+setSetting('store_phone', '+996 312 66-12-34');
 setSetting('bonus_percent', '3');
 setSetting('vip_threshold', '500000');
 
 // ---------- Поставщики ----------
 const supplierNames = [
-  ['АлмазХолдинг', 'Отдел опта', '+7 495 780-11-22'],
-  ['Московский ювелирный завод', 'Ирина Салтыкова', '+7 495 234-56-78'],
-  ['Diamond District', 'Давид Аронов', '+7 926 111-22-33'],
-  ['Эстет', 'Менеджер Ольга', '+7 495 456-78-90'],
+  ['Алтын Групп', 'Отдел опта', '+996 312 88-11-22'],
+  ['Кыргыз Алтын', 'Айгуль Асанова', '+996 555 234-56-78'],
+  ['Diamond District (импорт)', 'Давид Аронов', '+996 770 111-22-33'],
+  ['Эстет', 'Менеджер Ольга', '+996 312 45-67-89'],
 ];
 const insSup = db.prepare('INSERT INTO suppliers (name, contact, phone, notes) VALUES (?,?,?,?)');
 for (const [n, c, p] of supplierNames) insSup.run(n, c, p, '');
 const supplierIds = db.prepare('SELECT id FROM suppliers').all().map(r => r.id);
 
 // ---------- Клиенты ----------
-const FIRST_F = ['Анна', 'Мария', 'Елена', 'Ольга', 'Наталья', 'Ирина', 'Светлана', 'Екатерина', 'Виктория', 'Дарья', 'Алина', 'Полина'];
-const LAST_F = ['Иванова', 'Смирнова', 'Кузнецова', 'Попова', 'Соколова', 'Лебедева', 'Козлова', 'Новикова', 'Морозова', 'Волкова'];
-const FIRST_M = ['Александр', 'Дмитрий', 'Сергей', 'Андрей', 'Алексей', 'Михаил', 'Владимир', 'Игорь', 'Николай', 'Тимур'];
-const LAST_M = ['Иванов', 'Петров', 'Сидоров', 'Кузнецов', 'Соколов', 'Михайлов', 'Фёдоров', 'Морозов', 'Волков', 'Богданов'];
+const MOBILE_PREFIX = ['500', '550', '555', '700', '705', '755', '770', '772', '990', '995'];
+const FIRST_F = ['Анна', 'Мария', 'Елена', 'Айгуль', 'Наталья', 'Жылдыз', 'Светлана', 'Айпери',
+  'Виктория', 'Гульнара', 'Алина', 'Бермет', 'Асель', 'Нургуль', 'Дарья', 'Чолпон'];
+const LAST_F = ['Иванова', 'Асанова', 'Кузнецова', 'Жумабаева', 'Соколова', 'Токтогулова',
+  'Бекова', 'Новикова', 'Садыкова', 'Осмонова', 'Мамытова', 'Абдырахманова'];
+const FIRST_M = ['Александр', 'Азамат', 'Сергей', 'Нурлан', 'Алексей', 'Тилек', 'Владимир',
+  'Эрлан', 'Николай', 'Тимур', 'Бакыт', 'Улан', 'Дмитрий', 'Мирлан'];
+const LAST_M = ['Иванов', 'Асанов', 'Сидоров', 'Жумабаев', 'Соколов', 'Токтогулов',
+  'Беков', 'Осмонов', 'Садыков', 'Мамытов', 'Абдырахманов', 'Волков'];
 const MID_F = ['Сергеевна', 'Александровна', 'Владимировна', 'Андреевна', 'Игоревна'];
 const MID_M = ['Сергеевич', 'Александрович', 'Владимирович', 'Андреевич', 'Игоревич'];
 const PREFS = ['Белое золото, бриллианты', 'Классика, жемчуг', 'Розовое золото, минимализм', 'Крупные камни, статусные вещи',
@@ -85,11 +90,11 @@ for (let i = 0; i < 26; i++) {
   const name = female
     ? `${pick(LAST_F)} ${pick(FIRST_F)} ${pick(MID_F)}`
     : `${pick(LAST_M)} ${pick(FIRST_M)} ${pick(MID_M)}`;
-  const phone = `+7 9${ri(10, 99)} ${ri(100, 999)}-${String(ri(0, 99)).padStart(2, '0')}-${String(ri(0, 99)).padStart(2, '0')}`;
+  const phone = `+996 ${pick(MOBILE_PREFIX)} ${ri(100, 999)}-${String(ri(0, 99)).padStart(2, '0')}-${String(ri(0, 99)).padStart(2, '0')}`;
   const birthday = chance(0.8) ? `${ri(1965, 2000)}-${String(ri(1, 12)).padStart(2, '0')}-${String(ri(1, 28)).padStart(2, '0')}` : '';
   const anniversary = chance(0.3) ? `${ri(2005, 2022)}-${String(ri(1, 12)).padStart(2, '0')}-${String(ri(1, 28)).padStart(2, '0')}` : '';
   const info = insCust.run(name, phone,
-    chance(0.5) ? `client${i + 1}@mail.ru` : '',
+    chance(0.5) ? `client${i + 1}@${pick(['mail.ru', 'gmail.com'])}` : '',
     birthday, anniversary, 'new', chance(0.3) ? pick([3, 5, 7, 10]) : 0, 0,
     female && chance(0.7) ? pick(['15,5', '16', '16,5', '17', '17,5', '18']) : '',
     pick(PREFS), '', isoDaysAgo(ri(30, 400)));
@@ -365,7 +370,7 @@ for (let m = 1; m <= 7; m++) {
   d.setDate(28);
   d.setHours(12, 0, 0, 0);
   if (d.getTime() > NOW) continue;
-  insFin.run('expense', 'Налоги', ri(40, 90) * 1000, 'УСН, взносы', null, null, userIds[0], d.toISOString());
+  insFin.run('expense', 'Налоги', ri(40, 90) * 1000, 'Патент, Соцфонд', null, null, userIds[0], d.toISOString());
 }
 
 // ---------- Точки, товар на реализации, расчёты с поставщиками ----------
@@ -376,7 +381,7 @@ if (demoStoreId) db.prepare('UPDATE products SET store_id = ? WHERE store_id IS 
 // Вторая точка и несколько перемещённых на неё изделий.
 const secondStore = Number(db.prepare(
   'INSERT INTO stores (name, address, phone, is_default, sort) VALUES (?,?,?,0,1)'
-).run('Салон на Тверской', 'ул. Тверская, 18', '+7 495 120-45-67').lastInsertRowid);
+).run('Салон на Чуй', 'пр. Чуй, 155, Бишкек', '+996 312 90-45-67').lastInsertRowid);
 const toMove = db.prepare(`SELECT id FROM products WHERE status='in_stock' ORDER BY RANDOM() LIMIT 12`).all();
 for (const p of toMove) {
   db.prepare('UPDATE products SET store_id = ? WHERE id = ?').run(secondStore, p.id);
