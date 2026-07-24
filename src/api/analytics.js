@@ -238,7 +238,7 @@ const routes = [
       const { cond, args } = rangeCond(query);
       const where = cond.length ? 'AND ' + cond.join(' AND ') : '';
       const rows = db.prepare(
-        `SELECT c.id, c.name, c.phone, c.segment,
+        `SELECT c.id, c.name, c.phone,
                 COUNT(DISTINCT s.id) AS purchases,
                 COALESCE(SUM(si.final_price), 0) AS spent
          FROM sale_items si JOIN sales s ON s.id = si.sale_id JOIN customers c ON c.id = s.customer_id

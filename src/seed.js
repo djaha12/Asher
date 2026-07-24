@@ -51,8 +51,6 @@ const userIds = db.prepare('SELECT id FROM users').all().map(r => r.id);
 setSetting('store_name', 'Asher Jewelry');
 setSetting('store_address', 'Бишкек, ул. Киевская, 95');
 setSetting('store_phone', '+996 312 66-12-34');
-setSetting('bonus_percent', '3');
-setSetting('vip_threshold', '500000');
 
 // ---------- Поставщики ----------
 const supplierNames = [
@@ -81,8 +79,8 @@ const PREFS = ['Белое золото, бриллианты', 'Классик�
   'Сапфиры, синий цвет', 'Изумруды', 'Только платина', 'Винтажный стиль', ''];
 
 const insCust = db.prepare(
-  `INSERT INTO customers (name, phone, email, birthday, anniversary, segment, discount, bonus_points, ring_size, preferences, notes, created_at)
-   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
+  `INSERT INTO customers (name, phone, email, birthday, anniversary, discount, ring_size, preferences, notes, created_at)
+   VALUES (?,?,?,?,?,?,?,?,?,?)`
 );
 const customers = [];
 for (let i = 0; i < 26; i++) {
@@ -95,7 +93,7 @@ for (let i = 0; i < 26; i++) {
   const anniversary = chance(0.3) ? `${ri(2005, 2022)}-${String(ri(1, 12)).padStart(2, '0')}-${String(ri(1, 28)).padStart(2, '0')}` : '';
   const info = insCust.run(name, phone,
     chance(0.5) ? `client${i + 1}@${pick(['mail.ru', 'gmail.com'])}` : '',
-    birthday, anniversary, 'new', chance(0.3) ? pick([3, 5, 7, 10]) : 0, 0,
+    birthday, anniversary, chance(0.3) ? pick([3, 5, 7, 10]) : 0,
     female && chance(0.7) ? pick(['15,5', '16', '16,5', '17', '17,5', '18']) : '',
     pick(PREFS), '', isoDaysAgo(ri(30, 400)));
   customers.push(Number(info.lastInsertRowid));
@@ -170,7 +168,6 @@ for (const [catName, spec] of Object.entries(CATEGORY_SPECS)) {
 }
 
 // ---------- Продажи за последние ~8 месяцев ----------
-const bonusPct = 3;
 const available = [...products];
 const salesPlan = [];
 for (let day = 240; day >= 0; day--) {
@@ -200,8 +197,6 @@ const insFin = db.prepare(
   `INSERT INTO finance_ops (type, category, amount, note, sale_id, order_id, user_id, created_at)
    VALUES (?,?,?,?,?,?,?,?)`
 );
-const custBonus = new Map();
-const custSpent = new Map();
 
 let saleN = 0;
 const saleIds = [];
@@ -230,7 +225,6 @@ for (const day of salesPlan) {
     return { p, d, final: p.retail - d };
   });
   const total = round2(subtotal - discount);
-  const bonusEarned = customerId ? round2(total * bonusPct / 100) : 0;
 
   // Примерно каждая восьмая покупка с клиентом — в рассрочку: так в демо-данных
   // видно, как работает раздел долгов. Остальные оплачены полностью.
@@ -243,9 +237,9 @@ for (const day of salesPlan) {
   const method = inDebt ? 'installment' : pick(['cash', 'card', 'card', 'card', 'transfer']);
 
   const info = insSale.run(number, customerId, pick(userIds), subtotal, discount, total, cost,
-    bonusEarned, 0, method, paid, dueDate, demoStoreId, ts);
+    0, 0, method, paid, dueDate, demoStoreId, ts);
   const saleId = Number(info.lastInsertRowid);
-  saleIds.push({ saleId, number, total, customerId, ts, bonusEarned });
+  saleIds.push({ saleId, number, total, customerId, ts });
   for (const pr of prepared) {
     insItem.run(saleId, pr.p.id, pr.p.retail, pr.d, pr.final, pr.p.purchase);
     markSold.run(ts, pr.p.id);
@@ -255,10 +249,6 @@ for (const day of salesPlan) {
     insFin.run('income', 'Продажа', paid, `Чек ${number}`, saleId, null, userIds[0], ts);
     insPayment.run(customerId, saleId, paid, method === 'installment' ? 'cash' : method,
       inDebt ? 'Первый взнос' : 'Оплата чека', userIds[0], ts);
-  }
-  if (customerId) {
-    custBonus.set(customerId, round2((custBonus.get(customerId) || 0) + bonusEarned));
-    custSpent.set(customerId, round2((custSpent.get(customerId) || 0) + total));
   }
 }
 
@@ -283,15 +273,6 @@ if (saleIds.length > 10) {
   }
   const av = products.find(p => p.id === item.product_id);
   if (av) available.push(av);
-}
-
-// бонусы и сегменты клиентов
-for (const [cid, bonus] of custBonus) {
-  const spent = custSpent.get(cid) || 0;
-  const purchases = db.prepare(`SELECT COUNT(*) AS c FROM sales WHERE customer_id = ? AND status != 'returned'`).get(cid).c;
-  const segment = spent >= 500000 ? 'vip' : (Number(purchases) >= 2 ? 'regular' : 'new');
-  db.prepare('UPDATE customers SET bonus_points = ?, segment = ? WHERE id = ?')
-    .run(round2(bonus * 0.6), segment, cid); // часть бонусов «потрачена» ранее
 }
 
 // пара резервов

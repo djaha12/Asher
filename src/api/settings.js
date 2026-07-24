@@ -5,8 +5,7 @@ const { ApiError } = require('./util');
 const { changePassword } = require('../auth');
 const { PRESETS, LOCALE_KEYS, presetFor } = require('../locale');
 
-const SETTING_KEYS = ['store_name', 'store_address', 'store_phone', 'bonus_percent', 'vip_threshold',
-  ...LOCALE_KEYS];
+const SETTING_KEYS = ['store_name', 'store_address', 'store_phone', ...LOCALE_KEYS];
 
 const routes = [
   // --- Общие настройки ---

@@ -305,8 +305,8 @@ const routes = [
         } else {
           const phoneExists = db.prepare(`SELECT 1 FROM customers WHERE phone = ? AND phone != ''`);
           const ins = db.prepare(
-            `INSERT INTO customers (name, phone, email, birthday, discount, notes, segment, created_at)
-             VALUES (?,?,?,?,?,?, 'new', ?)`
+            `INSERT INTO customers (name, phone, email, birthday, discount, notes, created_at)
+             VALUES (?,?,?,?,?,?,?)`
           );
           for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
@@ -356,11 +356,9 @@ const routes = [
         `SELECT c.*, (SELECT COALESCE(SUM(s.total),0) FROM sales s WHERE s.customer_id = c.id AND s.status != 'returned') AS total_spent
          FROM customers c ORDER BY c.id`
       ).all();
-      const segRu = { new: 'Новый', regular: 'Постоянный', vip: 'VIP' };
       csvResponse(res, 'клиенты.csv', toCsv(
-        ['Имя', 'Телефон', 'E-mail', 'Дата рождения', 'Сегмент', 'Скидка %', 'Бонусы', 'Сумма покупок', 'Заметки'],
-        rows.map(r => [r.name, r.phone, r.email, r.birthday, segRu[r.segment] || r.segment,
-          r.discount, r.bonus_points, r.total_spent, r.notes])
+        ['Имя', 'Телефон', 'E-mail', 'Дата рождения', 'Скидка %', 'Сумма покупок', 'Заметки'],
+        rows.map(r => [r.name, r.phone, r.email, r.birthday, r.discount, r.total_spent, r.notes])
       ));
     },
   },

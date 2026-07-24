@@ -1,5 +1,5 @@
 'use strict';
-const { db, nowIso, round2, audit, nextNumber, transaction, getSetting } = require('../db');
+const { db, nowIso, round2, audit, nextNumber, transaction } = require('../db');
 const { ApiError } = require('./util');
 const { recordConsignmentSale, revokeConsignmentSale } = require('./debts');
 
@@ -33,24 +33,157 @@ function saleDetail(id, role = 'admin') {
   return { ...s, items, payments, effective_total: effective, debt };
 }
 
-// после продажи пересматриваем сегмент клиента (только повышение);
-// считаем по фактически оплаченным (не возвращённым) позициям
-function maybeUpgradeSegment(customerId) {
-  if (!customerId) return;
-  const vipThreshold = Number(getSetting('vip_threshold', '500000')) || 500000;
-  const st = db.prepare(
-    `SELECT COUNT(DISTINCT s.id) AS purchases, COALESCE(SUM(si.final_price),0) AS spent
-     FROM sales s JOIN sale_items si ON si.sale_id = s.id
-     WHERE s.customer_id = ? AND si.returned = 0`
-  ).get(customerId);
-  const cur = db.prepare('SELECT segment FROM customers WHERE id = ?').get(customerId);
-  if (!cur) return;
-  let target = cur.segment;
-  if (st.spent >= vipThreshold) target = 'vip';
-  else if (st.purchases >= 2 && cur.segment === 'new') target = 'regular';
-  if (target !== cur.segment && !(cur.segment === 'vip')) {
-    db.prepare('UPDATE customers SET segment = ? WHERE id = ?').run(target, customerId);
+/*
+ * Оформление продажи. Вызывается из двух мест: обычная продажа (POST /api/sales)
+ * и обмен, где новый чек создаётся вместе с возвратом по старому.
+ * Работает только внутри открытой транзакции.
+ *
+ * opts.paymentNote — подпись платежа («Оплата чека» / «Обмен: зачёт + доплата»).
+ */
+function createSaleTx(body, session, opts = {}) {
+  const items = Array.isArray(body.items) ? body.items : [];
+  if (!items.length) throw new ApiError(400, 'В чеке нет ни одной позиции');
+  const customerId = body.customer_id ? Number(body.customer_id) : null;
+  const payment = ['cash', 'card', 'transfer', 'installment'].includes(body.payment_method)
+    ? body.payment_method : 'cash';
+  const dueDate = String(body.due_date || '').trim();
+  const storeId = body.store_id ? Number(body.store_id) : null;
+
+  let customer = null;
+  if (customerId) {
+    customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(customerId);
+    if (!customer) throw new ApiError(400, 'Клиент не найден');
   }
+
+  let subtotal = 0, discountItems = 0, costTotal = 0;
+  const prepared = [];
+  const seen = new Set();
+  for (const it of items) {
+    const pid = Number(it.product_id);
+    if (seen.has(pid)) throw new ApiError(400, 'Одно изделие дважды в чеке');
+    seen.add(pid);
+    const p = db.prepare('SELECT * FROM products WHERE id = ?').get(pid);
+    if (!p) throw new ApiError(400, `Изделие #${pid} не найдено`);
+    if (p.status === 'sold') throw new ApiError(400, `«${p.name}» уже продано`);
+    if (p.status === 'written_off') throw new ApiError(400, `«${p.name}» списано`);
+    if (p.status === 'reserved' && p.reserved_for && customerId !== p.reserved_for) {
+      throw new ApiError(400, `«${p.name}» в резерве за другим клиентом`);
+    }
+    const price = round2(p.retail_price);
+    const discount = round2(it.discount || 0);
+    if (discount < 0 || discount > price) throw new ApiError(400, `Недопустимая скидка на «${p.name}»`);
+    subtotal = round2(subtotal + price);
+    discountItems = round2(discountItems + discount);
+    costTotal = round2(costTotal + p.purchase_price);
+    prepared.push({ product: p, price, discount, final: round2(price - discount) });
+  }
+
+  const total = round2(prepared.reduce((s, pr) => s + pr.final, 0));
+
+  // Оплачено может быть меньше суммы чека — остаток становится долгом клиента.
+  // Если поле не передано, считаем чек оплаченным полностью (обычная продажа).
+  const paid = body.paid === undefined || body.paid === null || body.paid === ''
+    ? total : round2(body.paid);
+  if (paid < 0) throw new ApiError(400, 'Оплаченная сумма не может быть отрицательной');
+  if (paid > total) throw new ApiError(400, 'Оплачено больше суммы чека — проверьте сумму');
+  const debt = round2(total - paid);
+  if (debt > 0 && !customer) {
+    throw new ApiError(400, 'Продажа в долг возможна только с указанием клиента');
+  }
+
+  const number = nextNumber('П', 'sales');
+  const createdAt = nowIso();
+  const info = db.prepare(
+    `INSERT INTO sales (number, customer_id, user_id, subtotal, discount_total, total, cost_total,
+       bonus_earned, bonus_spent, payment_method, status, paid, due_date, store_id, note, created_at)
+     VALUES (?,?,?,?,?,?,?,0,0,?,'completed',?,?,?,?,?)`
+  ).run(number, customerId, session.userId, subtotal, discountItems, total,
+    costTotal, payment, paid, dueDate, storeId, String(body.note || ''), createdAt);
+  const saleId = Number(info.lastInsertRowid);
+
+  const insItem = db.prepare(
+    'INSERT INTO sale_items (sale_id, product_id, price, discount, final_price, cost) VALUES (?,?,?,?,?,?)'
+  );
+  const markSold = db.prepare(
+    `UPDATE products SET status = 'sold', sold_at = ?, reserved_for = NULL WHERE id = ?`
+  );
+  for (const pr of prepared) {
+    insItem.run(saleId, pr.product.id, pr.price, pr.discount, pr.final, pr.product.purchase_price);
+    markSold.run(createdAt, pr.product.id);
+    // Продали чужое изделие — сразу становимся должны его владельцу.
+    recordConsignmentSale(pr.product, saleId, session.userId);
+  }
+
+  // В кассу попадает только фактически полученное, остальное — долг.
+  if (paid > 0) {
+    db.prepare(
+      `INSERT INTO finance_ops (type, category, amount, note, sale_id, user_id, created_at)
+       VALUES ('income', 'Продажа', ?, ?, ?, ?, ?)`
+    ).run(paid, `Чек ${number}`, saleId, session.userId, createdAt);
+    db.prepare(
+      `INSERT INTO payments (customer_id, sale_id, amount, method, note, user_id, created_at)
+       VALUES (?,?,?,?,?,?,?)`
+    ).run(customerId, saleId, paid, payment === 'installment' ? 'cash' : payment,
+      opts.paymentNote || (debt > 0 ? 'Первый взнос' : 'Оплата чека'), session.userId, createdAt);
+  }
+
+  audit(session.userId, 'sale', 'sale', saleId,
+    `${number} на ${total}${debt > 0 ? `, в долг ${debt}` : ''}`);
+  return { saleId, number, total, paid, debt };
+}
+
+/*
+ * Возврат позиций чека. Тоже общий для двух сценариев: обычный возврат
+ * и обмен. При обмене деньги не выдаются на руки, а идут в зачёт нового
+ * чека — за это отвечает holdCash: сумма к выдаче возвращается наружу,
+ * но расход в кассе не записывается (его запишет вызывающая сторона
+ * с правильной формулировкой).
+ */
+function returnItemsTx(saleId, itemIds, session, { holdCash = false } = {}) {
+  const sale = db.prepare('SELECT * FROM sales WHERE id = ?').get(saleId);
+  if (!sale) throw new ApiError(404, 'Продажа не найдена');
+  const items = db.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all(saleId);
+  const toReturn = items.filter(i => itemIds.includes(i.id) && !i.returned);
+  if (!toReturn.length) throw new ApiError(400, 'Эти позиции уже возвращены или не найдены');
+
+  const ts = nowIso();
+  let returnedValue = 0;
+  for (const it of toReturn) {
+    db.prepare('UPDATE sale_items SET returned = 1, returned_at = ? WHERE id = ?').run(ts, it.id);
+    db.prepare(`UPDATE products SET status = 'in_stock', sold_at = NULL WHERE id = ?`).run(it.product_id);
+    // Изделие вернулось на витрину — долг перед его владельцем снимаем.
+    revokeConsignmentSale(it.product_id, saleId);
+    returnedValue = round2(returnedValue + it.final_price);
+  }
+  const left = db.prepare(
+    'SELECT COUNT(*) AS c FROM sale_items WHERE sale_id = ? AND returned = 0'
+  ).get(saleId).c;
+  db.prepare('UPDATE sales SET status = ? WHERE id = ?')
+    .run(Number(left) === 0 ? 'returned' : 'partial_return', saleId);
+
+  // Возврат сначала гасит долг клиента и только потом возвращается деньгами:
+  // если чек был не оплачен, отдавать из кассы нечего.
+  const newEffective = round2(
+    db.prepare('SELECT COALESCE(SUM(final_price), 0) AS s FROM sale_items WHERE sale_id = ? AND returned = 0')
+      .get(saleId).s
+  );
+  const cashRefund = round2(Math.max(0, sale.paid - newEffective));
+  const debtCut = round2(returnedValue - cashRefund);
+  if (cashRefund > 0) {
+    db.prepare('UPDATE sales SET paid = ? WHERE id = ?').run(newEffective, saleId);
+    if (!holdCash) {
+      db.prepare(
+        `INSERT INTO finance_ops (type, category, amount, note, sale_id, user_id, created_at)
+         VALUES ('expense', 'Возврат покупателю', ?, ?, ?, ?, ?)`
+      ).run(cashRefund, `Возврат по чеку ${sale.number}`, saleId, session.userId, ts);
+      db.prepare(
+        `INSERT INTO payments (customer_id, sale_id, amount, method, note, user_id, created_at)
+         VALUES (?,?,?,?,?,?,?)`
+      ).run(sale.customer_id, saleId, -cashRefund, 'cash', `Возврат по чеку ${sale.number}`,
+        session.userId, ts);
+    }
+  }
+  return { sale, returnedValue, cashRefund, debtCut, ts };
 }
 
 const routes = [
@@ -103,131 +236,10 @@ const routes = [
   },
   {
     method: 'POST', path: '/api/sales',
-    handler: ({ body, session }) => {
-      const items = Array.isArray(body.items) ? body.items : [];
-      if (!items.length) throw new ApiError(400, 'В чеке нет ни одной позиции');
-      const customerId = body.customer_id ? Number(body.customer_id) : null;
-      const payment = ['cash', 'card', 'transfer', 'installment'].includes(body.payment_method)
-        ? body.payment_method : 'cash';
-      let bonusSpent = round2(body.bonus_spent || 0);
-      if (bonusSpent < 0) throw new ApiError(400, 'Списание бонусов не может быть отрицательным');
-      const dueDate = String(body.due_date || '').trim();
-      const storeId = body.store_id ? Number(body.store_id) : null;
-
-      return transaction(() => {
-        let customer = null;
-        if (customerId) {
-          customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(customerId);
-          if (!customer) throw new ApiError(400, 'Клиент не найден');
-        }
-        if (bonusSpent > 0 && !customer) throw new ApiError(400, 'Бонусы можно списать только при выбранном клиенте');
-        if (customer && bonusSpent > customer.bonus_points) {
-          throw new ApiError(400, `У клиента только ${customer.bonus_points} бонусов`);
-        }
-
-        let subtotal = 0, discountItems = 0, costTotal = 0;
-        const prepared = [];
-        const seen = new Set();
-        for (const it of items) {
-          const pid = Number(it.product_id);
-          if (seen.has(pid)) throw new ApiError(400, 'Одно изделие дважды в чеке');
-          seen.add(pid);
-          const p = db.prepare('SELECT * FROM products WHERE id = ?').get(pid);
-          if (!p) throw new ApiError(400, `Изделие #${pid} не найдено`);
-          if (p.status === 'sold') throw new ApiError(400, `«${p.name}» уже продано`);
-          if (p.status === 'written_off') throw new ApiError(400, `«${p.name}» списано`);
-          if (p.status === 'reserved' && p.reserved_for && customerId !== p.reserved_for) {
-            throw new ApiError(400, `«${p.name}» в резерве за другим клиентом`);
-          }
-          const price = round2(p.retail_price);
-          const discount = round2(it.discount || 0);
-          if (discount < 0 || discount > price) throw new ApiError(400, `Недопустимая скидка на «${p.name}»`);
-          subtotal = round2(subtotal + price);
-          discountItems = round2(discountItems + discount);
-          costTotal = round2(costTotal + p.purchase_price);
-          prepared.push({ product: p, price, discount, final: round2(price - discount) });
-        }
-
-        const afterItems = round2(subtotal - discountItems);
-        if (bonusSpent > afterItems) throw new ApiError(400, 'Списание бонусов больше суммы чека');
-
-        // Списанные бонусы распределяем по позициям как скидку — тогда
-        // final_price позиций равен фактически полученным деньгам,
-        // и возвраты/касса/отчёты сходятся копейка в копейку.
-        if (bonusSpent > 0) {
-          let remaining = bonusSpent;
-          prepared.forEach((pr, idx) => {
-            const share = idx === prepared.length - 1
-              ? remaining
-              : Math.min(round2(bonusSpent * pr.final / (afterItems || 1)), remaining);
-            pr.discount = round2(pr.discount + share);
-            pr.final = round2(pr.price - pr.discount);
-            remaining = round2(remaining - share);
-          });
-        }
-        const total = round2(prepared.reduce((s, pr) => s + pr.final, 0));
-        const bonusPercent = Number(getSetting('bonus_percent', '3')) || 0;
-        const bonusEarned = customer ? round2(total * bonusPercent / 100) : 0;
-
-        // Оплачено может быть меньше суммы чека — остаток становится долгом клиента.
-        // Если поле не передано, считаем чек оплаченным полностью (обычная продажа).
-        const paid = body.paid === undefined || body.paid === null || body.paid === ''
-          ? total : round2(body.paid);
-        if (paid < 0) throw new ApiError(400, 'Оплаченная сумма не может быть отрицательной');
-        if (paid > total) throw new ApiError(400, 'Оплачено больше суммы чека — проверьте сумму');
-        const debt = round2(total - paid);
-        if (debt > 0 && !customer) {
-          throw new ApiError(400, 'Продажа в долг возможна только с указанием клиента');
-        }
-
-        const number = nextNumber('П', 'sales');
-        const createdAt = nowIso();
-        const info = db.prepare(
-          `INSERT INTO sales (number, customer_id, user_id, subtotal, discount_total, total, cost_total,
-             bonus_earned, bonus_spent, payment_method, status, paid, due_date, store_id, note, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,'completed',?,?,?,?,?)`
-        ).run(number, customerId, session.userId, subtotal, round2(discountItems + bonusSpent), total,
-          costTotal, bonusEarned, bonusSpent, payment, paid, dueDate, storeId,
-          String(body.note || ''), createdAt);
-        const saleId = Number(info.lastInsertRowid);
-
-        const insItem = db.prepare(
-          'INSERT INTO sale_items (sale_id, product_id, price, discount, final_price, cost) VALUES (?,?,?,?,?,?)'
-        );
-        const markSold = db.prepare(
-          `UPDATE products SET status = 'sold', sold_at = ?, reserved_for = NULL WHERE id = ?`
-        );
-        for (const pr of prepared) {
-          insItem.run(saleId, pr.product.id, pr.price, pr.discount, pr.final, pr.product.purchase_price);
-          markSold.run(createdAt, pr.product.id);
-          // Продали чужое изделие — сразу становимся должны его владельцу.
-          recordConsignmentSale(pr.product, saleId, session.userId);
-        }
-
-        if (customer) {
-          db.prepare('UPDATE customers SET bonus_points = round(bonus_points - ? + ?, 2) WHERE id = ?')
-            .run(bonusSpent, bonusEarned, customerId);
-        }
-
-        // В кассу попадает только фактически полученное, остальное — долг.
-        if (paid > 0) {
-          db.prepare(
-            `INSERT INTO finance_ops (type, category, amount, note, sale_id, user_id, created_at)
-             VALUES ('income', 'Продажа', ?, ?, ?, ?, ?)`
-          ).run(paid, `Чек ${number}`, saleId, session.userId, createdAt);
-          db.prepare(
-            `INSERT INTO payments (customer_id, sale_id, amount, method, note, user_id, created_at)
-             VALUES (?,?,?,?,?,?,?)`
-          ).run(customerId, saleId, paid, payment === 'installment' ? 'cash' : payment,
-            debt > 0 ? 'Первый взнос' : 'Оплата чека', session.userId, createdAt);
-        }
-
-        maybeUpgradeSegment(customerId);
-        audit(session.userId, 'sale', 'sale', saleId,
-          `${number} на ${total}${debt > 0 ? `, в долг ${debt}` : ''}`);
-        return saleDetail(saleId, session.role);
-      });
-    },
+    handler: ({ body, session }) => transaction(() => {
+      const { saleId } = createSaleTx(body, session);
+      return saleDetail(saleId, session.role);
+    }),
   },
   {
     method: 'POST', path: '/api/sales/:id/return',
@@ -237,62 +249,108 @@ const routes = [
       if (!itemIds.length) throw new ApiError(400, 'Не выбраны позиции для возврата');
 
       return transaction(() => {
-        const sale = db.prepare('SELECT * FROM sales WHERE id = ?').get(saleId);
-        if (!sale) throw new ApiError(404, 'Продажа не найдена');
-        const items = db.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all(saleId);
-        const toReturn = items.filter(i => itemIds.includes(i.id) && !i.returned);
-        if (!toReturn.length) throw new ApiError(400, 'Эти позиции уже возвращены или не найдены');
-
-        const ts = nowIso();
-        let returnedValue = 0;
-        for (const it of toReturn) {
-          db.prepare('UPDATE sale_items SET returned = 1, returned_at = ? WHERE id = ?').run(ts, it.id);
-          db.prepare(`UPDATE products SET status = 'in_stock', sold_at = NULL WHERE id = ?`).run(it.product_id);
-          // Изделие вернулось на витрину — долг перед его владельцем снимаем.
-          revokeConsignmentSale(it.product_id, saleId);
-          returnedValue = round2(returnedValue + it.final_price);
-        }
-        // бонусы: начисленные снимаем, списанные возвращаем — пропорционально доле возврата
-        // (final_price позиций уже нетто бонусов, поэтому база у долей общая — sale.total)
-        if (sale.customer_id && (sale.bonus_earned > 0 || sale.bonus_spent > 0)) {
-          const share = Math.min(returnedValue / Math.max(sale.total, 0.01), 1);
-          const earnedBack = round2(sale.bonus_earned * share);
-          const spentBack = round2(sale.bonus_spent * share);
-          db.prepare('UPDATE customers SET bonus_points = max(0, round(bonus_points - ? + ?, 2)) WHERE id = ?')
-            .run(earnedBack, spentBack, sale.customer_id);
-        }
-        const left = db.prepare(
-          'SELECT COUNT(*) AS c FROM sale_items WHERE sale_id = ? AND returned = 0'
-        ).get(saleId).c;
-        const newStatus = Number(left) === 0 ? 'returned' : 'partial_return';
-        db.prepare('UPDATE sales SET status = ? WHERE id = ?').run(newStatus, saleId);
-
-        // Возврат сначала гасит долг клиента и только потом возвращается деньгами:
-        // если чек был не оплачен, отдавать из кассы нечего.
-        const newEffective = round2(
-          db.prepare('SELECT COALESCE(SUM(final_price), 0) AS s FROM sale_items WHERE sale_id = ? AND returned = 0')
-            .get(saleId).s
-        );
-        const cashRefund = round2(Math.max(0, sale.paid - newEffective));
-        const debtCut = round2(returnedValue - cashRefund);
-        if (cashRefund > 0) {
-          db.prepare('UPDATE sales SET paid = ? WHERE id = ?').run(newEffective, saleId);
-          db.prepare(
-            `INSERT INTO finance_ops (type, category, amount, note, sale_id, user_id, created_at)
-             VALUES ('expense', 'Возврат покупателю', ?, ?, ?, ?, ?)`
-          ).run(cashRefund, `Возврат по чеку ${sale.number}`, saleId, session.userId, ts);
-          db.prepare(
-            `INSERT INTO payments (customer_id, sale_id, amount, method, note, user_id, created_at)
-             VALUES (?,?,?,?,?,?,?)`
-          ).run(sale.customer_id, saleId, -cashRefund, 'cash', `Возврат по чеку ${sale.number}`,
-            session.userId, ts);
-        }
-
+        const { sale, returnedValue, cashRefund, debtCut } = returnItemsTx(saleId, itemIds, session);
         audit(session.userId, 'return', 'sale', saleId,
           `${sale.number}: возврат на ${returnedValue}` +
           (debtCut > 0.009 ? `, списан долг ${debtCut}` : '') +
           (cashRefund > 0 ? `, деньгами ${cashRefund}` : ''));
         return { ...saleDetail(saleId, session.role), cash_refund: cashRefund, debt_written_off: debtCut };
+      });
+    },
+  },
+  {
+    /*
+     * Обмен: клиент возвращает изделия из старого чека и тут же берёт другие.
+     * Одна операция вместо двух: возврат и новый чек оформляются вместе,
+     * а деньги за возвращённое идут в зачёт нового — на руки выдаётся
+     * или доплачивается только разница.
+     *
+     * Деньги в зачёте не покидают кассу, поэтому расход «возврат» и приход
+     * «продажа» записываются только на фактически выданное и доплаченное.
+     */
+    method: 'POST', path: '/api/sales/:id/exchange',
+    handler: ({ params, body, session }) => {
+      const oldId = Number(params.id);
+      const itemIds = Array.isArray(body.return_item_ids) ? body.return_item_ids.map(Number) : [];
+      if (!itemIds.length) throw new ApiError(400, 'Не выбраны позиции для обмена');
+      const newItems = Array.isArray(body.items) ? body.items : [];
+      if (!newItems.length) throw new ApiError(400, 'Не выбрано, что клиент берёт взамен');
+
+      return transaction(() => {
+        // Возврат с удержанием денег: зачёт вместо выдачи на руки.
+        const ret = returnItemsTx(oldId, itemIds, session, { holdCash: true });
+        const credit = ret.cashRefund;
+
+        // Считаем сумму нового чека тем же путём, что и продажа, — через
+        // предварительный проход по позициям здесь не дублируем: создаём чек
+        // с оплатой «зачёт + доплата», а проверку «не больше суммы» делает createSaleTx.
+        const extraPaid = round2(body.extra_paid || 0);
+        if (extraPaid < 0) throw new ApiError(400, 'Доплата не может быть отрицательной');
+
+        // Сначала узнаём сумму нового чека: зачёт не может превысить её.
+        let newTotal = 0;
+        for (const it of newItems) {
+          const p = db.prepare('SELECT retail_price FROM products WHERE id = ?').get(Number(it.product_id));
+          if (!p) throw new ApiError(400, `Изделие #${it.product_id} не найдено`);
+          newTotal = round2(newTotal + round2(p.retail_price) - round2(it.discount || 0));
+        }
+        const creditApplied = round2(Math.min(credit, newTotal));
+        const cashBack = round2(credit - creditApplied);
+        const paidNew = round2(Math.min(creditApplied + extraPaid, newTotal));
+
+        const created = createSaleTx({
+          customer_id: body.customer_id !== undefined ? body.customer_id : ret.sale.customer_id,
+          items: newItems,
+          payment_method: body.payment_method,
+          paid: paidNew,
+          due_date: body.due_date,
+          store_id: ret.sale.store_id,
+          note: String(body.note || '') || `Обмен по чеку ${ret.sale.number}`,
+        }, session, {
+          paymentNote: `Обмен: зачёт ${creditApplied}` + (extraPaid > 0 ? ` + доплата ${extraPaid}` : ''),
+        });
+
+        // Кассовые движения обмена — только реальные деньги.
+        // Зачтённая часть кассу не трогает: расход по возврату записываем
+        // лишь на сумму, выданную на руки, а приход «Продажа» уже записан
+        // createSaleTx на paidNew — корректируем его до фактической доплаты.
+        if (cashBack > 0) {
+          db.prepare(
+            `INSERT INTO finance_ops (type, category, amount, note, sale_id, user_id, created_at)
+             VALUES ('expense', 'Возврат покупателю', ?, ?, ?, ?, ?)`
+          ).run(cashBack, `Обмен по чеку ${ret.sale.number}: разница на руки`, oldId, session.userId, ret.ts);
+          db.prepare(
+            `INSERT INTO payments (customer_id, sale_id, amount, method, note, user_id, created_at)
+             VALUES (?,?,?,?,?,?,?)`
+          ).run(ret.sale.customer_id, oldId, -cashBack, 'cash',
+            `Обмен: возврат разницы`, session.userId, ret.ts);
+        }
+        if (creditApplied > 0) {
+          // Приход по новому чеку записан на «зачёт + доплата», но живых денег
+          // пришло только «доплата». Компенсируем зачёт расходной записью,
+          // чтобы касса за день сошлась с фактической выручкой.
+          db.prepare(
+            `INSERT INTO finance_ops (type, category, amount, note, sale_id, user_id, created_at)
+             VALUES ('expense', 'Возврат покупателю', ?, ?, ?, ?, ?)`
+          ).run(creditApplied, `Обмен: зачёт возврата по чеку ${ret.sale.number} в чек ${created.number}`,
+            oldId, session.userId, ret.ts);
+        }
+
+        audit(session.userId, 'exchange', 'sale', oldId,
+          `${ret.sale.number} → ${created.number}: зачёт ${creditApplied}` +
+          (extraPaid > 0 ? `, доплата ${extraPaid}` : '') +
+          (cashBack > 0 ? `, на руки ${cashBack}` : '') +
+          (created.debt > 0 ? `, долг ${created.debt}` : ''));
+
+        return {
+          old: saleDetail(oldId, session.role),
+          new: saleDetail(created.saleId, session.role),
+          credit,
+          credit_applied: creditApplied,
+          extra_paid: extraPaid,
+          cash_back: cashBack,
+          new_debt: created.debt,
+        };
       });
     },
   },

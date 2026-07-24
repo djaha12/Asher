@@ -50,7 +50,7 @@ window.ui = (() => {
     return `${esc(value)}<span class="cur">${esc(l.currency || '')}</span>`;
   }
 
-  // Не деньги: вес в граммах, количество, бонусы. Здесь дробная часть нужна всегда,
+  // Не деньги: вес в граммах, количество. Здесь дробная часть нужна всегда,
   // иначе «3,15 г» превратится в «3 г».
   function num(n, decimals = 2) {
     return formatter(loc().number_locale, decimals).format(Number(n) || 0);
@@ -82,8 +82,6 @@ window.ui = (() => {
   const L = {
     status: { in_stock: 'В наличии', reserved: 'Резерв', sold: 'Продано', written_off: 'Списано' },
     statusBadge: { in_stock: 'good', reserved: 'warn', sold: 'gray', written_off: 'crit' },
-    segment: { new: 'Новый', regular: 'Постоянный', vip: 'VIP' },
-    segmentBadge: { new: 'gray', regular: 'info', vip: 'gold' },
     payment: { cash: 'Наличные', card: 'Карта', transfer: 'Перевод', installment: 'Рассрочка' },
     saleStatus: { completed: 'Завершена', partial_return: 'Част. возврат', returned: 'Возврат' },
     saleStatusBadge: { completed: 'good', partial_return: 'warn', returned: 'crit' },

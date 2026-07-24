@@ -2,7 +2,7 @@
 window.Pages = window.Pages || {};
 
 window.Pages.customers = (() => {
-  let filters = { search: '', segment: '' };
+  let filters = { search: '' };
 
   let refreshSeq = 0;
   async function refresh(el) {
@@ -15,9 +15,7 @@ window.Pages.customers = (() => {
     listEl.innerHTML = ui.table([
       { title: 'Клиент', render: r => `<span class="strong">${ui.esc(r.name)}</span>` },
       { title: 'Телефон', render: r => `<span class="mono">${ui.esc(r.phone || '—')}</span>` },
-      { title: 'Сегмент', render: r => ui.badge('segment', r.segment) },
       { title: 'Скидка', cls: 'num', render: r => r.discount ? r.discount + '%' : '—' },
-      { title: 'Бонусы', cls: 'num', render: r => ui.num(r.bonus_points) },
       { title: 'Покупок', cls: 'num', render: r => r.purchases || 0 },
       { title: 'Сумма покупок', cls: 'num strong', render: r => ui.money(r.total_spent) },
     ], items, { empty: 'Клиентов не найдено. Добавьте первого!' });
@@ -34,7 +32,6 @@ window.Pages.customers = (() => {
         body: `
           <div class="grid grid-2">
             <dl class="kv">
-              <dt>Сегмент</dt><dd>${ui.badge('segment', c.segment)}</dd>
               <dt>Телефон</dt><dd class="mono">${ui.esc(c.phone || '—')}</dd>
               <dt>E-mail</dt><dd>${ui.esc(c.email || '—')}</dd>
               <dt>Памятные даты</dt><dd>${nextDates || '—'}</dd>
@@ -44,7 +41,6 @@ window.Pages.customers = (() => {
               <dt>Покупок</dt><dd>${c.stats.purchases} на <b>${ui.money(c.stats.total_spent)}</b></dd>
               <dt>Последняя</dt><dd>${c.stats.last_purchase ? ui.dt(c.stats.last_purchase) : '—'}</dd>
               <dt>Личная скидка</dt><dd>${c.discount ? c.discount + '%' : '—'}</dd>
-              <dt>Бонусные баллы</dt><dd class="strong">${ui.num(c.bonus_points)}</dd>
               <dt>С нами с</dt><dd>${ui.dateOnly(c.created_at)}</dd>
             </dl>
           </div>
@@ -83,18 +79,14 @@ window.Pages.customers = (() => {
       body: `<form id="cust-form">
         <label class="field"><span>Имя (ФИО) *</span><input name="name" required value="${ui.esc(c.name || '')}" placeholder="Иванова Анна Сергеевна"></label>
         <div class="form-grid">
-          <label class="field"><span>Телефон</span><input name="phone" value="${ui.esc(c.phone || '')}" placeholder="+7 900 000-00-00"></label>
+          <label class="field"><span>Телефон</span><input name="phone" value="${ui.esc(c.phone || '')}" placeholder="0555 12-34-56"></label>
           <label class="field"><span>E-mail</span><input name="email" type="email" value="${ui.esc(c.email || '')}"></label>
         </div>
         <div class="form-grid">
           <label class="field"><span>День рождения</span><input name="birthday" type="date" value="${ui.esc(c.birthday || '')}"></label>
           <label class="field"><span>Годовщина (свадьба и т.п.)</span><input name="anniversary" type="date" value="${ui.esc(c.anniversary || '')}"></label>
         </div>
-        <div class="form-grid-3">
-          <label class="field"><span>Сегмент</span><select name="segment">
-            <option value="new" ${c.segment === 'new' || !c.segment ? 'selected' : ''}>Новый</option>
-            <option value="regular" ${c.segment === 'regular' ? 'selected' : ''}>Постоянный</option>
-            <option value="vip" ${c.segment === 'vip' ? 'selected' : ''}>VIP</option></select></label>
+        <div class="form-grid">
           <label class="field"><span>Личная скидка, %</span><input name="discount" type="number" min="0" max="100" step="0.5" value="${c.discount || ''}"></label>
           <label class="field"><span>Размер кольца</span><input name="ring_size" value="${ui.esc(c.ring_size || '')}" placeholder="16,5"></label>
         </div>
@@ -126,30 +118,16 @@ window.Pages.customers = (() => {
       el.innerHTML = `
         <div class="toolbar">
           <input type="text" class="input search" id="cf-search" placeholder="Поиск: имя, телефон, e-mail…" autocomplete="off">
-          <div class="chip-row" id="cf-chips">
-            <button class="chip active" data-seg="">Все</button>
-            <button class="chip" data-seg="vip">VIP</button>
-            <button class="chip" data-seg="regular">Постоянные</button>
-            <button class="chip" data-seg="new">Новые</button>
-          </div>
           <div class="spacer"></div>
           ${App.isAdmin() ? '<a class="btn" href="/api/export/customers" download>Экспорт CSV</a>' : ''}
           <button class="btn btn-primary" id="cf-add">+ Новый клиент</button>
         </div>
         <div id="cust-list"></div>`;
 
-      filters = { search: '', segment: '' };
+      filters = { search: '' };
       const doRefresh = () => { if (el.isConnected) refresh(el).catch(ui.toastErr); };
       Pages._custRefresh = doRefresh;
       el.querySelector('#cf-search').addEventListener('input', ui.debounce(e => { filters.search = e.target.value.trim(); doRefresh(); }));
-      el.querySelector('#cf-chips').addEventListener('click', e => {
-        const chip = e.target.closest('.chip');
-        if (!chip) return;
-        el.querySelectorAll('#cf-chips .chip').forEach(c => c.classList.remove('active'));
-        chip.classList.add('active');
-        filters.segment = chip.dataset.seg;
-        doRefresh();
-      });
       el.querySelector('#cf-add').addEventListener('click', () => openEditor(null, doRefresh));
       await refresh(el);
       if (param) openDetail(Number(param), doRefresh);

@@ -21,10 +21,6 @@ window.Pages.settings = (() => {
                 <label class="field"><span>Адрес</span><input name="store_address" value="${ui.esc(s.store_address)}"></label>
                 <label class="field"><span>Телефон</span><input name="store_phone" value="${ui.esc(s.store_phone)}"></label>
               </div>
-              <div class="form-grid">
-                <label class="field"><span>Бонусы с покупки, %</span><input name="bonus_percent" type="number" min="0" max="50" step="0.5" value="${ui.esc(s.bonus_percent)}"></label>
-                <label class="field"><span>Порог VIP-сегмента, ${ui.esc(cur)}</span><input name="vip_threshold" type="number" min="0" step="10000" value="${ui.esc(s.vip_threshold || 500000)}"></label>
-              </div>
               <button type="button" class="btn btn-primary" id="st-save">Сохранить</button>
             </form>
           </div>
