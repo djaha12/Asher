@@ -179,9 +179,14 @@ salesPlan.sort((a, b) => b - a);
 
 const insSale = db.prepare(
   `INSERT INTO sales (number, customer_id, user_id, subtotal, discount_total, total, cost_total,
-     bonus_earned, bonus_spent, payment_method, status, note, created_at)
-   VALUES (?,?,?,?,?,?,?,?,?,?,'completed','',?)`
+     bonus_earned, bonus_spent, payment_method, status, paid, due_date, store_id, note, created_at)
+   VALUES (?,?,?,?,?,?,?,?,?,?,'completed',?,?,?,'',?)`
 );
+const insPayment = db.prepare(
+  `INSERT INTO payments (customer_id, sale_id, amount, method, note, user_id, created_at)
+   VALUES (?,?,?,?,?,?,?)`
+);
+const demoStoreId = (db.prepare('SELECT id FROM stores ORDER BY is_default DESC, id LIMIT 1').get() || {}).id || null;
 const insItem = db.prepare(
   'INSERT INTO sale_items (sale_id, product_id, price, discount, final_price, cost) VALUES (?,?,?,?,?,?)'
 );
@@ -221,15 +226,31 @@ for (const day of salesPlan) {
   });
   const total = round2(subtotal - discount);
   const bonusEarned = customerId ? round2(total * bonusPct / 100) : 0;
+
+  // Примерно каждая восьмая покупка с клиентом — в рассрочку: так в демо-данных
+  // видно, как работает раздел долгов. Остальные оплачены полностью.
+  const inDebt = customerId && chance(0.12);
+  const paid = inDebt ? Math.round(total * pick([0.2, 0.3, 0.5]) / 100) * 100 : total;
+  // Часть долгов делаем просроченными, часть — со сроком в будущем.
+  const dueDate = inDebt
+    ? new Date(new Date(ts).getTime() + pick([-20, -5, 14, 40]) * DAY).toISOString().slice(0, 10)
+    : '';
+  const method = inDebt ? 'installment' : pick(['cash', 'card', 'card', 'card', 'transfer']);
+
   const info = insSale.run(number, customerId, pick(userIds), subtotal, discount, total, cost,
-    bonusEarned, 0, pick(['cash', 'card', 'card', 'card', 'transfer']), ts);
+    bonusEarned, 0, method, paid, dueDate, demoStoreId, ts);
   const saleId = Number(info.lastInsertRowid);
   saleIds.push({ saleId, number, total, customerId, ts, bonusEarned });
   for (const pr of prepared) {
     insItem.run(saleId, pr.p.id, pr.p.retail, pr.d, pr.final, pr.p.purchase);
     markSold.run(ts, pr.p.id);
   }
-  insFin.run('income', 'Продажа', total, `Чек ${number}`, saleId, null, userIds[0], ts);
+  // В кассу попадает только фактически полученное — как и в рабочем режиме.
+  if (paid > 0) {
+    insFin.run('income', 'Продажа', paid, `Чек ${number}`, saleId, null, userIds[0], ts);
+    insPayment.run(customerId, saleId, paid, method === 'installment' ? 'cash' : method,
+      inDebt ? 'Первый взнос' : 'Оплата чека', userIds[0], ts);
+  }
   if (customerId) {
     custBonus.set(customerId, round2((custBonus.get(customerId) || 0) + bonusEarned));
     custSpent.set(customerId, round2((custSpent.get(customerId) || 0) + total));
@@ -245,7 +266,16 @@ if (saleIds.length > 10) {
   db.prepare(`UPDATE products SET status='in_stock', sold_at=NULL WHERE id = ?`).run(item.product_id);
   const left = db.prepare('SELECT COUNT(*) AS c FROM sale_items WHERE sale_id = ? AND returned = 0').get(target.saleId).c;
   db.prepare('UPDATE sales SET status = ? WHERE id = ?').run(Number(left) ? 'partial_return' : 'returned', target.saleId);
-  insFin.run('expense', 'Возврат покупателю', item.final_price, `Возврат по чеку ${target.number}`, target.saleId, null, userIds[0], retTs);
+  // Возвращаем деньгами только полученное: если чек был в рассрочку, часть суммы гасит долг.
+  const sale = db.prepare('SELECT paid FROM sales WHERE id = ?').get(target.saleId);
+  const newEffective = round2(db.prepare(
+    'SELECT COALESCE(SUM(final_price),0) AS s FROM sale_items WHERE sale_id = ? AND returned = 0'
+  ).get(target.saleId).s);
+  const cashRefund = round2(Math.max(0, sale.paid - newEffective));
+  if (cashRefund > 0) {
+    db.prepare('UPDATE sales SET paid = ? WHERE id = ?').run(newEffective, target.saleId);
+    insFin.run('expense', 'Возврат покупателю', cashRefund, `Возврат по чеку ${target.number}`, target.saleId, null, userIds[0], retTs);
+  }
   const av = products.find(p => p.id === item.product_id);
   if (av) available.push(av);
 }
@@ -338,12 +368,66 @@ for (let m = 1; m <= 7; m++) {
   insFin.run('expense', 'Налоги', ri(40, 90) * 1000, 'УСН, взносы', null, null, userIds[0], d.toISOString());
 }
 
+// ---------- Точки, товар на реализации, расчёты с поставщиками ----------
+
+// Весь товар должен где-то лежать — иначе его не увидит инвентаризация.
+if (demoStoreId) db.prepare('UPDATE products SET store_id = ? WHERE store_id IS NULL').run(demoStoreId);
+
+// Вторая точка и несколько перемещённых на неё изделий.
+const secondStore = Number(db.prepare(
+  'INSERT INTO stores (name, address, phone, is_default, sort) VALUES (?,?,?,0,1)'
+).run('Салон на Тверской', 'ул. Тверская, 18', '+7 495 120-45-67').lastInsertRowid);
+const toMove = db.prepare(`SELECT id FROM products WHERE status='in_stock' ORDER BY RANDOM() LIMIT 12`).all();
+for (const p of toMove) {
+  db.prepare('UPDATE products SET store_id = ? WHERE id = ?').run(secondStore, p.id);
+  db.prepare(
+    `INSERT INTO stock_transfers (product_id, from_store_id, to_store_id, note, user_id, created_at)
+     VALUES (?,?,?,?,?,?)`
+  ).run(p.id, demoStoreId, secondStore, 'Пополнение витрины', userIds[0], isoDaysAgo(ri(3, 30)));
+}
+
+// Часть изделий берём на реализацию — так видно раздел «На реализации».
+const consignmentSupplier = supplierIds[0];
+const toConsign = db.prepare(`SELECT id FROM products WHERE status='in_stock' ORDER BY RANDOM() LIMIT 9`).all();
+for (const p of toConsign) {
+  db.prepare(`UPDATE products SET ownership='consignment', supplier_id=? WHERE id=?`)
+    .run(consignmentSupplier, p.id);
+}
+
+// Расчёты с поставщиками: поставки и частичные оплаты.
+const insSupOp = db.prepare(
+  `INSERT INTO supplier_ops (supplier_id, type, amount, doc_number, doc_date, due_date, note, method, user_id, created_at)
+   VALUES (?,?,?,?,?,?,?,?,?,?)`
+);
+supplierIds.forEach((sid, i) => {
+  for (let k = 0; k < 2; k++) {
+    const days = ri(20, 150);
+    const ts = isoDaysAgo(days);
+    const amount = ri(250, 800) * 1000;
+    insSupOp.run(sid, 'invoice', amount, `НК-${100 + i * 10 + k}`, ts.slice(0, 10),
+      new Date(new Date(ts).getTime() + 45 * DAY).toISOString().slice(0, 10),
+      'Поставка изделий', '', userIds[0], ts);
+    // Большую часть поставок оплатили, одну оставляем висеть долгом.
+    if (!(i === 0 && k === 0)) {
+      const payTs = isoDaysAgo(Math.max(1, days - ri(5, 15)));
+      insSupOp.run(sid, 'payment', amount, '', payTs.slice(0, 10), '', 'Оплата по накладной',
+        'transfer', userIds[0], payTs);
+      insFin.run('expense', 'Оплата поставщику', amount, `Расчёт с поставщиком`, null, null, userIds[0], payTs);
+    }
+  }
+});
+
 const stats = {
   users: db.prepare('SELECT COUNT(*) c FROM users').get().c,
   products: db.prepare('SELECT COUNT(*) c FROM products').get().c,
   sold: db.prepare(`SELECT COUNT(*) c FROM products WHERE status='sold'`).get().c,
+  consignment: db.prepare(`SELECT COUNT(*) c FROM products WHERE ownership='consignment'`).get().c,
   customers: db.prepare('SELECT COUNT(*) c FROM customers').get().c,
   sales: db.prepare('SELECT COUNT(*) c FROM sales').get().c,
+  debtors: db.prepare(
+    `SELECT COUNT(DISTINCT customer_id) c FROM sales s
+     WHERE (SELECT COALESCE(SUM(final_price),0) FROM sale_items WHERE sale_id=s.id AND returned=0) - s.paid > 0.009`
+  ).get().c,
   orders: db.prepare('SELECT COUNT(*) c FROM service_orders').get().c,
   finance: db.prepare('SELECT COUNT(*) c FROM finance_ops').get().c,
 };

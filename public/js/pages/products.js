@@ -2,12 +2,17 @@
 window.Pages = window.Pages || {};
 
 window.Pages.products = (() => {
-  let cats = [], suppliers = [], filters = { search: '', status: '', category_id: '', metal: '' };
+  let cats = [], suppliers = [], stores = [];
+  let filters = { search: '', status: '', category_id: '', metal: '', store_id: '', has_photo: '', sort: 'new' };
+  // Вид каталога запоминается: кому-то привычнее плитки с фото, кому-то таблица.
+  const VIEW_KEY = 'asher_products_view';
+  let view = localStorage.getItem(VIEW_KEY) || 'grid';
 
   async function loadRefs() {
-    [cats, suppliers] = await Promise.all([
+    [cats, suppliers, stores] = await Promise.all([
       api.get('/api/categories').then(r => r.items),
       api.get('/api/suppliers').then(r => r.items),
+      api.get('/api/stores').then(r => r.items).catch(() => []),
     ]);
   }
 
@@ -28,21 +33,65 @@ window.Pages.products = (() => {
     if (my !== refreshSeq || !container.isConnected) return;
     const listEl = container.querySelector('#prod-list');
     const admin = App.isAdmin();
+    const shown = items.length < total ? `Показано ${items.length} из ${total}` : `Найдено: ${total}`;
+    const onPick = r => openDetail(r.id, () => refresh(container));
+
+    if (view === 'grid') {
+      listEl.innerHTML = `<div class="muted" style="margin-bottom:12px">${shown}</div>` +
+        (items.length ? `<div class="pgrid">${items.map((r, i) => productCard(r, i)).join('')}</div>`
+          : `<div class="empty"><div class="empty-ico">◇</div>
+             <p>Изделий не найдено. Добавьте первое или измените фильтры.</p></div>`);
+      listEl.querySelectorAll('.pcard').forEach(card => {
+        card.addEventListener('click', () => onPick(items[Number(card.dataset.i)]));
+      });
+      return;
+    }
+
     const cols = [
-      { title: 'Артикул', render: r => `<span class="mono strong">${ui.esc(r.sku)}</span>` },
-      { title: 'Наименование', render: r => `${ui.esc(r.name)}${r.gem_summary ? `<div class="dim" style="font-size:12px">${ui.esc(r.gem_summary)}</div>` : ''}` },
+      { title: '', cls: 'nowrap', render: r => r.thumb
+        ? `<img class="thumb-sm" src="${ui.esc(ui.photoUrl(r.thumb))}" alt="" loading="lazy">`
+        : '<div class="thumb-sm-empty">💍</div>' },
+      { title: 'Артикул', render: r => `<span class="mono strong">${ui.highlight(r.sku, filters.search)}</span>` },
+      { title: 'Наименование', render: r => `${ui.highlight(r.name, filters.search)}${r.gem_summary ? `<div class="dim" style="font-size:12px">${ui.esc(r.gem_summary)}</div>` : ''}` },
       { title: 'Категория', render: r => `<span class="dim">${ui.esc(r.category_name || '—')}</span>` },
       { title: 'Металл', render: r => ui.esc(r.metal || '—') },
       { title: 'Вес', cls: 'num', render: r => r.weight ? ui.num(r.weight) + ' г' : '—' },
     ];
+    if (stores.length > 1) cols.push({ title: 'Точка', render: r => `<span class="dim">${ui.esc(r.store_name || '—')}</span>` });
     if (admin) cols.push({ title: 'Закупка', cls: 'num dim', render: r => ui.money(r.purchase_price) });
     cols.push(
       { title: 'Цена', cls: 'num strong', render: r => ui.money(r.retail_price) },
-      { title: 'Статус', render: r => ui.badge('status', r.status) + (r.reserved_for_name ? `<div class="dim" style="font-size:11px">${ui.esc(r.reserved_for_name)}</div>` : '') },
+      { title: 'Статус', render: r => ui.badge('status', r.status) +
+        (r.ownership === 'consignment' ? ' <span class="badge badge-info">реализация</span>' : '') +
+        (r.reserved_for_name ? `<div class="dim" style="font-size:11px">${ui.esc(r.reserved_for_name)}</div>` : '') },
     );
-    listEl.innerHTML = `<div class="muted" style="margin-bottom:8px">Найдено: ${total}</div>` +
+    listEl.innerHTML = `<div class="muted" style="margin-bottom:8px">${shown}</div>` +
       ui.table(cols, items, { empty: 'Изделий не найдено. Добавьте первое или измените фильтры.' });
-    ui.bindRows(listEl, items, r => openDetail(r.id, () => refresh(container)));
+    ui.bindRows(listEl, items, onPick);
+  }
+
+  // Плитка каталога: фото крупно, под ним — то, что спрашивают у прилавка.
+  function productCard(r, index) {
+    const badges = [];
+    if (r.status !== 'in_stock') badges.push(ui.badge('status', r.status));
+    if (r.ownership === 'consignment') badges.push('<span class="badge badge-info">реализация</span>');
+    return `
+      <div class="pcard" data-i="${index}">
+        <div class="pcard-photo">
+          ${r.thumb
+            ? `<img src="${ui.esc(ui.photoUrl(r.thumb))}" alt="${ui.esc(r.name)}" loading="lazy">`
+            : '<div class="no-photo">💍</div>'}
+          ${badges.length ? `<div class="pcard-badges">${badges.join('')}</div>` : ''}
+          ${r.photo_count > 1 ? `<div class="photo-count">${r.photo_count} фото</div>` : ''}
+        </div>
+        <div class="pcard-body">
+          <div class="pcard-sku">${ui.highlight(r.sku, filters.search)}</div>
+          <div class="pcard-name">${ui.highlight(r.name, filters.search)}</div>
+          <div class="pcard-meta">${[r.metal, r.weight ? ui.num(r.weight) + ' г' : '', r.size]
+            .filter(Boolean).map(ui.esc).join(' · ') || '&nbsp;'}</div>
+          <div class="pcard-price">${ui.money(r.retail_price)}</div>
+        </div>
+      </div>`;
   }
 
   function openDetail(id, onChange) {
@@ -56,23 +105,28 @@ window.Pages.products = (() => {
         size: 'lg',
         body: `
           <div class="grid grid-2">
-            <dl class="kv">
-              <dt>Артикул</dt><dd class="mono strong">${ui.esc(p.sku)}</dd>
-              <dt>Штрихкод</dt><dd class="mono">${ui.esc(p.barcode || '—')}</dd>
-              <dt>Категория</dt><dd>${ui.esc(p.category_name || '—')}</dd>
-              <dt>Металл</dt><dd>${ui.esc(p.metal || '—')}</dd>
-              <dt>Вес</dt><dd>${p.weight ? ui.num(p.weight) + ' г' : '—'}</dd>
-              <dt>Размер</dt><dd>${ui.esc(p.size || '—')}</dd>
-            </dl>
-            <dl class="kv">
-              <dt>Статус</dt><dd>${ui.badge('status', p.status)}${p.reserved_for_name ? ' за ' + ui.esc(p.reserved_for_name) : ''}</dd>
-              ${admin ? `<dt>Закупочная</dt><dd>${ui.money(p.purchase_price)}</dd>` : ''}
-              <dt>Розничная</dt><dd class="strong">${ui.money(p.retail_price)}</dd>
-              ${admin && p.purchase_price > 0 ? `<dt>Наценка</dt><dd>${ui.num((p.retail_price / p.purchase_price - 1) * 100)}%</dd>` : ''}
-              <dt>Поставщик</dt><dd>${ui.esc(p.supplier_name || '—')}</dd>
-              <dt>Расположение</dt><dd>${ui.esc(p.location || '—')}</dd>
-              <dt>Добавлено</dt><dd>${ui.dt(p.created_at)}</dd>
-            </dl>
+            <div id="prod-gallery"></div>
+            <div>
+              <dl class="kv">
+                <dt>Артикул</dt><dd class="mono strong">${ui.esc(p.sku)}</dd>
+                <dt>Штрихкод</dt><dd class="mono">${ui.esc(p.barcode || '—')}</dd>
+                <dt>Категория</dt><dd>${ui.esc(p.category_name || '—')}</dd>
+                <dt>Металл</dt><dd>${ui.esc(p.metal || '—')}</dd>
+                <dt>Вес</dt><dd>${p.weight ? ui.num(p.weight) + ' г' : '—'}</dd>
+                <dt>Размер</dt><dd>${ui.esc(p.size || '—')}</dd>
+                <dt>Статус</dt><dd>${ui.badge('status', p.status)}${p.reserved_for_name ? ' за ' + ui.esc(p.reserved_for_name) : ''}</dd>
+                ${admin ? `<dt>Закупочная</dt><dd>${ui.money(p.purchase_price)}</dd>` : ''}
+                <dt>Розничная</dt><dd class="big-money">${ui.money(p.retail_price)}</dd>
+                ${admin && p.purchase_price > 0 ? `<dt>Наценка</dt><dd>${ui.num((p.retail_price / p.purchase_price - 1) * 100)}%</dd>` : ''}
+                <dt>Принадлежность</dt><dd>${p.ownership === 'consignment'
+                  ? `<span class="badge badge-info">На реализации</span> ${ui.esc(p.supplier_name || '')}`
+                  : 'Наш товар'}</dd>
+                <dt>Поставщик</dt><dd>${ui.esc(p.supplier_name || '—')}</dd>
+                <dt>Точка продаж</dt><dd>${ui.esc(p.store_name || '—')}</dd>
+                <dt>Расположение</dt><dd>${ui.esc(p.location || '—')}</dd>
+                <dt>Добавлено</dt><dd>${ui.dt(p.created_at)}</dd>
+              </dl>
+            </div>
           </div>
           ${p.description ? `<p class="muted">${ui.esc(p.description)}</p>` : ''}
           ${gems ? `<h4 style="margin:14px 0 8px">Вставки</h4>
@@ -86,6 +140,7 @@ window.Pages.products = (() => {
         `,
         footer: `
           ${admin ? `<button class="btn btn-danger left" data-act="delete">Удалить</button>` : ''}
+          <button class="btn" data-act="label">🏷 Бирка</button>
           ${p.status === 'in_stock' ? '<button class="btn" data-act="reserve">В резерв</button>' : ''}
           ${p.status === 'reserved' ? '<button class="btn" data-act="unreserve">Снять резерв</button>' : ''}
           ${(p.status === 'in_stock' || p.status === 'reserved') && admin ? '<button class="btn" data-act="writeoff">Списать</button>' : ''}
@@ -93,12 +148,18 @@ window.Pages.products = (() => {
           ${p.status === 'in_stock' || p.status === 'reserved' ? '<button class="btn btn-primary" data-act="sell">Продать</button>' : ''}
         `,
       });
+      // Галерея живёт своей жизнью: загрузка и удаление фото не трогают остальную карточку.
+      Photos.gallery(m.body.querySelector('#prod-gallery'), p.id, p.images || [], {
+        onChange: () => { if (onChange) onChange(); },
+      });
+
       m.foot.addEventListener('click', async e => {
         const act = e.target.dataset && e.target.dataset.act;
         if (!act) return;
         try {
           if (act === 'edit') { m.close(); openEditor(p, onChange); }
           if (act === 'sell') { m.close(); Pages.sales.newSale(p); }
+          if (act === 'label') Pages.labels.printOne(p);
           if (act === 'reserve') { m.close(); reserveDialog(p, onChange); }
           if (act === 'unreserve') {
             await api.put('/api/products/' + p.id, { status: 'in_stock', reserved_for: null });
@@ -194,6 +255,9 @@ window.Pages.products = (() => {
     p = p || {};
     const catOpts = cats.map(c => `<option value="${c.id}" ${p.category_id === c.id ? 'selected' : ''}>${ui.esc(c.name)}</option>`).join('');
     const supOpts = suppliers.map(s => `<option value="${s.id}" ${p.supplier_id === s.id ? 'selected' : ''}>${ui.esc(s.name)}</option>`).join('');
+    // Новое изделие по умолчанию попадает на основную точку — лишний выбор ни к чему.
+    const defaultStore = p.store_id || (stores.find(s => s.is_default) || stores[0] || {}).id;
+    const storeOpts = stores.map(s => `<option value="${s.id}" ${defaultStore === s.id ? 'selected' : ''}>${ui.esc(s.name)}</option>`).join('');
     const m = ui.modal({
       title: isNew ? 'Новое изделие' : 'Изделие: ' + p.name,
       size: 'lg',
@@ -216,10 +280,19 @@ window.Pages.products = (() => {
           <label class="field"><span>Розничная цена *</span><input name="retail_price" type="number" step="0.01" min="0" required value="${p.retail_price || ''}"></label>
           <label class="field"><span>Поставщик</span><select name="supplier_id"><option value="">—</option>${supOpts}</select></label>
         </div>
-        <div class="form-grid">
+        <div class="form-grid-3">
+          <label class="field"><span>Точка продаж</span><select name="store_id">${storeOpts}</select></label>
+          <label class="field"><span>Чей товар</span><select name="ownership">
+            <option value="own" ${p.ownership !== 'consignment' ? 'selected' : ''}>Наш (куплен)</option>
+            <option value="consignment" ${p.ownership === 'consignment' ? 'selected' : ''}>На реализации (чужой)</option>
+          </select></label>
           <label class="field"><span>Расположение</span><input name="location" value="${ui.esc(p.location || '')}" placeholder="Витрина 2 / Сейф"></label>
-          <label class="field"><span>Описание</span><input name="description" value="${ui.esc(p.description || '')}"></label>
         </div>
+        <p class="form-hint" id="own-hint" style="${p.ownership === 'consignment' ? '' : 'display:none'}">
+          Товар на реализации: как только вы его продадите, система сама запишет долг перед
+          поставщиком на закупочную стоимость. Поставщика указать обязательно.
+        </p>
+        <label class="field"><span>Описание</span><input name="description" value="${ui.esc(p.description || '')}"></label>
         <h4 style="margin:6px 0 10px">Вставки (камни)</h4>
         <div id="gems-wrap">${(p.gems || []).map(gemRow).join('')}</div>
         <button type="button" class="btn btn-sm" id="gem-add">+ Добавить камень</button>
@@ -231,6 +304,9 @@ window.Pages.products = (() => {
     m.body.querySelector('#gem-add').onclick = () => {
       m.body.querySelector('#gems-wrap').insertAdjacentHTML('beforeend', gemRow());
     };
+    form.querySelector('[name=ownership]').addEventListener('change', e => {
+      m.body.querySelector('#own-hint').style.display = e.target.value === 'consignment' ? '' : 'none';
+    });
     m.body.addEventListener('click', e => {
       if (e.target.classList.contains('gem-del')) e.target.closest('.gem-row').remove();
     });
@@ -252,12 +328,25 @@ window.Pages.products = (() => {
         metal: v.metal, weight: v.weight, size: v.size,
         purchase_price: v.purchase_price, retail_price: v.retail_price,
         location: v.location, description: v.description,
+        store_id: v.store_id || null, ownership: v.ownership,
         gems, gem_summary: gemsSummary(gems),
       };
+      if (payload.ownership === 'consignment' && !payload.supplier_id) {
+        ui.toast('Для товара на реализации укажите поставщика — владельца изделия', true);
+        return;
+      }
       try {
-        if (isNew) await api.post('/api/products', payload);
-        else await api.put('/api/products/' + p.id, payload);
-        ui.toast(isNew ? 'Изделие добавлено' : 'Сохранено');
+        if (isNew) {
+          const created = await api.post('/api/products', payload);
+          ui.toast('Изделие добавлено');
+          m.close();
+          onChange && onChange();
+          // Сразу предлагаем фото: без него изделие в каталоге выглядит пустым.
+          openDetail(created.id, onChange);
+          return;
+        }
+        await api.put('/api/products/' + p.id, payload);
+        ui.toast('Сохранено');
         m.close(); onChange && onChange();
       } catch (e) { ui.toastErr(e); }
     };
@@ -281,7 +370,17 @@ window.Pages.products = (() => {
             ${cats.map(c => `<option value="${c.id}">${ui.esc(c.name)}</option>`).join('')}</select>
           <select class="input" id="pf-metal"><option value="">Любой металл</option>
             ${meta.metals.map(mt => `<option>${ui.esc(mt)}</option>`).join('')}</select>
+          ${stores.length > 1 ? `<select class="input" id="pf-store"><option value="">Все точки</option>
+            ${stores.map(s => `<option value="${s.id}">${ui.esc(s.name)}</option>`).join('')}</select>` : ''}
+          <select class="input" id="pf-sort">
+            <option value="new">Сначала новые</option>
+            <option value="name">По названию</option>
+            <option value="sku">По артикулу</option>
+            <option value="price_desc">Сначала дорогие</option>
+            <option value="price_asc">Сначала дешёвые</option>
+          </select>
           <div class="spacer"></div>
+          <button class="btn" id="pf-view" title="Плитки или таблица">${view === 'grid' ? '☰ Списком' : '▦ Плитками'}</button>
           ${App.isAdmin() ? '<a class="btn" href="/api/export/products" download>Экспорт CSV</a>' : ''}
           <button class="btn btn-primary" id="pf-add">+ Добавить изделие</button>
         </div>
@@ -291,22 +390,44 @@ window.Pages.products = (() => {
           <button class="chip" data-st="reserved">Резерв</button>
           <button class="chip" data-st="sold">Проданные</button>
           <button class="chip" data-st="written_off">Списанные</button>
+          <span style="width:12px"></span>
+          <button class="chip" data-photo="0">Без фото</button>
+          <button class="chip" data-own="consignment">На реализации</button>
         </div>
         <div id="prod-list"></div>`;
 
-      filters = { search: '', status: '', category_id: '', metal: '' };
+      filters = { search: '', status: '', category_id: '', metal: '', store_id: '', has_photo: '', sort: 'new', ownership: '' };
       const doRefresh = () => { if (el.isConnected) refresh(el).catch(ui.toastErr); };
       Pages._prodRefresh = doRefresh;
 
       el.querySelector('#pf-search').addEventListener('input', ui.debounce(e => { filters.search = e.target.value.trim(); doRefresh(); }));
       el.querySelector('#pf-cat').addEventListener('change', e => { filters.category_id = e.target.value; doRefresh(); });
       el.querySelector('#pf-metal').addEventListener('change', e => { filters.metal = e.target.value; doRefresh(); });
+      el.querySelector('#pf-sort').addEventListener('change', e => { filters.sort = e.target.value; doRefresh(); });
+      const storeSel = el.querySelector('#pf-store');
+      if (storeSel) storeSel.addEventListener('change', e => { filters.store_id = e.target.value; doRefresh(); });
+
       el.querySelector('#pf-chips').addEventListener('click', e => {
         const chip = e.target.closest('.chip');
         if (!chip) return;
-        el.querySelectorAll('#pf-chips .chip').forEach(c => c.classList.remove('active'));
-        chip.classList.add('active');
-        filters.status = chip.dataset.st;
+        // Статусы взаимоисключающие, «без фото» и «на реализации» — независимые переключатели.
+        if (chip.dataset.st !== undefined) {
+          el.querySelectorAll('#pf-chips .chip[data-st]').forEach(c => c.classList.remove('active'));
+          chip.classList.add('active');
+          filters.status = chip.dataset.st;
+        } else if (chip.dataset.photo !== undefined) {
+          const on = chip.classList.toggle('active');
+          filters.has_photo = on ? chip.dataset.photo : '';
+        } else if (chip.dataset.own !== undefined) {
+          const on = chip.classList.toggle('active');
+          filters.ownership = on ? chip.dataset.own : '';
+        }
+        doRefresh();
+      });
+      el.querySelector('#pf-view').addEventListener('click', e => {
+        view = view === 'grid' ? 'list' : 'grid';
+        localStorage.setItem(VIEW_KEY, view);
+        e.target.textContent = view === 'grid' ? '☰ Списком' : '▦ Плитками';
         doRefresh();
       });
       el.querySelector('#pf-add').addEventListener('click', () => openEditor(null, doRefresh));

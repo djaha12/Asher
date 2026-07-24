@@ -31,6 +31,8 @@ window.Pages.sales = (() => {
         { title: 'Позиций', cls: 'num', render: r => r.items_count },
         { title: 'Оплата', render: r => ui.L.payment[r.payment_method] || r.payment_method },
         { title: 'Статус', render: r => ui.badge('saleStatus', r.status) },
+        { title: 'Долг', cls: 'num', render: r => r.debt > 0.009
+          ? `<span class="crit strong">${ui.money(r.debt)}</span>` : '<span class="dim">—</span>' },
         { title: 'Сумма', cls: 'num strong', render: r => ui.money(r.total) },
       ], items, { empty: 'Продаж за выбранный период нет.' });
     ui.bindRows(listEl, items, r => openDetail(r.id, () => refresh(el)));
@@ -79,10 +81,24 @@ window.Pages.sales = (() => {
             <dl class="kv">
               <dt>Оплата</dt><dd>${ui.L.payment[s.payment_method]}</dd>
               <dt>Статус</dt><dd>${ui.badge('saleStatus', s.status)}</dd>
+              <dt>Оплачено</dt><dd>${ui.money(s.paid)}${s.debt > 0
+                ? ` из ${ui.money(s.effective_total)}` : ''}</dd>
+              ${s.debt > 0 ? `<dt>Долг</dt><dd class="big-money crit">${ui.money(s.debt)}${
+                s.due_date ? `<div class="muted" style="font-size:13px;font-weight:400">до ${ui.dateOnly(s.due_date)}</div>` : ''}</dd>` : ''}
               ${s.bonus_spent > 0 ? `<dt>Списано бонусов</dt><dd>${ui.num(s.bonus_spent)}</dd>` : ''}
               ${s.bonus_earned > 0 ? `<dt>Начислено бонусов</dt><dd>${ui.num(s.bonus_earned)}</dd>` : ''}
             </dl>
           </div>
+          ${s.payments && s.payments.length > 1 ? `
+            <h4 style="margin:14px 0 8px">Платежи по чеку</h4>
+            <div class="table-wrap"><table class="tbl">
+              <thead><tr><th>Когда</th><th class="num">Сумма</th><th>Как</th><th>Комментарий</th></tr></thead>
+              <tbody>${s.payments.map(p => `<tr>
+                <td>${ui.dt(p.created_at)}</td>
+                <td class="num ${p.amount < 0 ? 'crit' : 'good'}">${ui.money(p.amount)}</td>
+                <td>${ui.esc(ui.L.payment[p.method] || p.method)}</td>
+                <td class="dim">${ui.esc(p.note || '')}</td></tr>`).join('')}</tbody>
+            </table></div>` : ''}
           <div class="table-wrap"><table class="tbl">
             <thead><tr>${canReturn ? '<th></th>' : ''}<th>Изделие</th><th class="num">Цена</th><th class="num">Скидка</th><th class="num">Итог</th><th></th></tr></thead>
             <tbody>${s.items.map(i => `<tr>
@@ -100,20 +116,37 @@ window.Pages.sales = (() => {
           ${s.note ? `<p class="muted">Комментарий: ${ui.esc(s.note)}</p>` : ''}`,
         footer: `
           ${canReturn ? '<button class="btn btn-danger left" data-act="return" disabled>Оформить возврат</button>' : ''}
+          ${s.debt > 0 ? '<button class="btn btn-primary" data-act="pay">₽ Принять оплату</button>' : ''}
           <button class="btn" data-act="print">🖨 Печать чека</button>
           <button class="btn" data-act="close">Закрыть</button>`,
       });
+      const payBtn = m.foot.querySelector('[data-act=pay]');
+      if (payBtn) payBtn.onclick = () => {
+        m.close();
+        Pages.debts.payDialog({
+          customer: { id: s.customer_id, name: s.customer_name, phone: s.customer_phone },
+          doc: { kind: 'sale', id: s.id, number: s.number, debt: s.debt },
+          maxAmount: s.debt,
+        });
+      };
       const retBtn = m.foot.querySelector('[data-act=return]');
       m.body.querySelectorAll('.ret-chk').forEach(chk => chk.addEventListener('change', () => {
         if (retBtn) retBtn.disabled = !m.body.querySelector('.ret-chk:checked');
       }));
       if (retBtn) retBtn.onclick = async () => {
         const ids = [...m.body.querySelectorAll('.ret-chk:checked')].map(c => Number(c.value));
-        const ok = await ui.confirmDialog(`Оформить возврат ${ids.length} позиц.? Изделия вернутся на витрину, деньги — покупателю.`, { danger: true, okLabel: 'Возврат' });
+        const ok = await ui.confirmDialog(
+          `Оформить возврат ${ids.length} позиц.? Изделия вернутся на витрину.` +
+          (s.debt > 0 ? ' Сначала спишется долг клиента, деньгами вернём только полученное.'
+                      : ' Деньги вернутся покупателю.'),
+          { danger: true, okLabel: 'Возврат' });
         if (!ok) return;
         try {
-          await api.post(`/api/sales/${id}/return`, { item_ids: ids });
-          ui.toast('Возврат оформлен');
+          const res = await api.post(`/api/sales/${id}/return`, { item_ids: ids });
+          ui.toast(res.debt_written_off > 0
+            ? `Возврат оформлен. Списан долг ${ui.money(res.debt_written_off)}` +
+              (res.cash_refund > 0 ? `, деньгами ${ui.money(res.cash_refund)}` : '')
+            : 'Возврат оформлен');
           m.close(); onChange && onChange();
         } catch (e) { ui.toastErr(e); }
       };
@@ -159,6 +192,17 @@ window.Pages.sales = (() => {
           <label class="field"><span>Списать бонусы</span><input type="number" id="pos-bonus" min="0" step="1" placeholder="0" disabled></label>
           <label class="field"><span>Комментарий</span><input type="text" id="pos-note"></label>
         </div>
+
+        <label class="row-tight" style="cursor:pointer;margin-bottom:10px">
+          <input type="checkbox" id="pos-partial" style="width:20px;height:20px;cursor:pointer">
+          <span style="font-weight:600">Платит не всю сумму — оставить долг</span>
+        </label>
+        <div id="pos-debt-fields" class="form-grid hidden">
+          <label class="field"><span>Вносит сейчас</span>
+            <input type="number" id="pos-paid" min="0" step="1" placeholder="0"></label>
+          <label class="field"><span>Обещает погасить до</span><input type="date" id="pos-due"></label>
+        </div>
+
         <div id="pos-summary"></div>`,
       footer: `<button class="btn" data-act="cancel">Отмена</button>
         <button class="btn btn-primary" data-act="submit" disabled>Оформить продажу</button>`,
@@ -169,6 +213,9 @@ window.Pages.sales = (() => {
     const submitBtn = m.foot.querySelector('[data-act=submit]');
     const bonusInput = m.body.querySelector('#pos-bonus');
     const discPctInput = m.body.querySelector('#pos-disc-pct');
+    const partialCb = m.body.querySelector('#pos-partial');
+    const paidInput = m.body.querySelector('#pos-paid');
+    const dueInput = m.body.querySelector('#pos-due');
 
     function calc() {
       let subtotal = 0, discount = 0;
@@ -198,13 +245,32 @@ window.Pages.sales = (() => {
           </div>`).join('');
       }
       const { subtotal, discount, total } = calc();
+      // Долг: сколько остаётся за клиентом после того, что он платит сейчас.
+      const partial = partialCb.checked;
+      paidInput.max = total;
+      const paid = partial ? Math.min(Math.max(Number(paidInput.value) || 0, 0), total) : total;
+      const debt = Math.round((total - paid) * 100) / 100;
+
       summaryEl.innerHTML = `
         <div class="pos-total"><span>Сумма</span><span class="money">${ui.money(subtotal)}</span></div>
         ${discount || state.bonusSpend ? `<div class="pos-total"><span>Скидка${state.bonusSpend ? ' + бонусы' : ''}</span><span class="money">−${ui.money(discount + state.bonusSpend)}</span></div>` : ''}
-        <div class="pos-total grand"><span>К оплате</span><span class="money">${ui.money(total)}</span></div>`;
-      submitBtn.disabled = !state.items.length;
+        <div class="pos-total grand"><span>К оплате</span><span class="money">${ui.money(total)}</span></div>
+        ${debt > 0 ? `
+          <div class="pos-total"><span>Вносит сейчас</span><span class="money good">${ui.money(paid)}</span></div>
+          <div class="pos-total"><span><b>Останется долг</b></span>
+            <span class="money crit" style="font-weight:700">${ui.money(debt)}</span></div>` : ''}`;
+
+      // Долг всегда числится за конкретным человеком — иначе спросить будет не с кого.
+      const needCustomer = debt > 0 && !state.customer;
+      submitBtn.disabled = !state.items.length || needCustomer;
+      submitBtn.textContent = debt > 0 ? 'Оформить с долгом' : 'Оформить продажу';
+      if (needCustomer) {
+        m.body.querySelector('#pos-cust-info').innerHTML =
+          '<span class="crit">Для продажи в долг выберите клиента</span>';
+      }
       bonusInput.disabled = !state.customer;
       bonusInput.placeholder = state.customer ? `доступно ${ui.num(state.customer.bonus_points)}` : 'выберите клиента';
+      state.paid = paid;
     }
 
     itemsEl.addEventListener('input', e => {
@@ -231,7 +297,20 @@ window.Pages.sales = (() => {
     }
     discPctInput.addEventListener('input', ui.debounce(applyPctDiscount, 350));
     bonusInput.addEventListener('input', ui.debounce(renderItems, 300));
-    m.body.querySelector('#pos-payment').addEventListener('change', e => { state.payment = e.target.value; });
+    m.body.querySelector('#pos-payment').addEventListener('change', e => {
+      state.payment = e.target.value;
+      // «Рассрочка» почти всегда означает частичную оплату — включаем поля сразу.
+      if (e.target.value === 'installment' && !partialCb.checked) {
+        partialCb.checked = true;
+        partialCb.dispatchEvent(new Event('change'));
+      }
+    });
+    partialCb.addEventListener('change', () => {
+      m.body.querySelector('#pos-debt-fields').classList.toggle('hidden', !partialCb.checked);
+      if (partialCb.checked && !paidInput.value) paidInput.value = 0;
+      renderItems();
+    });
+    paidInput.addEventListener('input', ui.debounce(renderItems, 250));
 
     function addProduct(p) {
       if (state.items.some(it => it.product.id === p.id)) { ui.toast('Это изделие уже в чеке', true); return; }
@@ -318,11 +397,17 @@ window.Pages.sales = (() => {
         bonus_spent: state.bonusSpend,
         note: m.body.querySelector('#pos-note').value.trim(),
       };
+      if (partialCb.checked) {
+        payload.paid = state.paid;
+        payload.due_date = dueInput.value || '';
+      }
       submitBtn.disabled = true;
       try {
         const sale = await api.post('/api/sales', payload);
         m.close();
-        ui.toast(`Продажа ${sale.number} на ${ui.money(sale.total)} оформлена ✦`);
+        ui.toast(sale.debt > 0
+          ? `Продажа ${sale.number} оформлена. Долг клиента: ${ui.money(sale.debt)}`
+          : `Продажа ${sale.number} на ${ui.money(sale.total)} оформлена ✦`);
         if (Pages._salesRefresh) Pages._salesRefresh();
         if (location.hash.includes('dashboard') || location.hash === '' || location.hash === '#/') {
           window.dispatchEvent(new HashChangeEvent('hashchange'));
