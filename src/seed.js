@@ -370,7 +370,7 @@ for (let m = 1; m <= 7; m++) {
   d.setDate(28);
   d.setHours(12, 0, 0, 0);
   if (d.getTime() > NOW) continue;
-  insFin.run('expense', 'Налоги', ri(40, 90) * 1000, 'Патент, Соцфонд', null, null, userIds[0], d.toISOString());
+  insFin.run('expense', 'Налоги', ri(40, 90) * 1000, '', null, null, userIds[0], d.toISOString());
 }
 
 // ---------- Точки, товар на реализации, расчёты с поставщиками ----------
