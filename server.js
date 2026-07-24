@@ -9,6 +9,7 @@ const fs = require('node:fs');
 
 const { getSetting } = require('./src/db');
 const auth = require('./src/auth');
+const media = require('./src/api/images');
 const { ApiError } = require('./src/api/util');
 
 const PORT = Number(process.env.ASHER_PORT || process.env.PORT || 3000);
@@ -17,7 +18,8 @@ const BODY_LIMIT = 25 * 1024 * 1024; // 25 МБ — с запасом для CSV
 
 // ---------- Маршруты API ----------
 
-const modules = ['products', 'customers', 'sales', 'orders', 'finance', 'analytics', 'settings', 'importexport'];
+const modules = ['products', 'images', 'customers', 'sales', 'orders', 'finance', 'debts',
+  'stores', 'inventory', 'analytics', 'settings', 'importexport'];
 const routes = [];
 for (const m of modules) {
   for (const r of require(`./src/api/${m}`).routes) {
@@ -115,6 +117,26 @@ function serveStatic(req, res, pathname) {
   });
 }
 
+// ---------- Фотографии изделий ----------
+// Отдаются только вошедшим в систему: фотографии товара — такая же
+// коммерческая информация, как цены.
+
+function serveMedia(req, res, rel) {
+  const session = auth.getSession(parseCookies(req).asher_session);
+  if (!session) { res.writeHead(403); res.end('Forbidden'); return; }
+  const file = media.safeMediaPath(rel);
+  if (!file) { res.writeHead(403); res.end('Forbidden'); return; }
+  fs.readFile(file, (err, data) => {
+    if (err) { res.writeHead(404); res.end('Not found'); return; }
+    res.writeHead(200, {
+      'Content-Type': media.mimeForFile(file),
+      // Имя файла содержит uuid и никогда не переиспользуется — кэшируем надолго.
+      'Cache-Control': 'private, max-age=31536000, immutable',
+    });
+    res.end(data);
+  });
+}
+
 // ---------- Сервер ----------
 
 const server = http.createServer(async (req, res) => {
@@ -122,6 +144,10 @@ const server = http.createServer(async (req, res) => {
   const pathname = decodeURIComponent(url.pathname);
 
   try {
+    if (pathname.startsWith('/media/')) {
+      serveMedia(req, res, pathname.slice('/media/'.length));
+      return;
+    }
     if (!pathname.startsWith('/api/')) {
       serveStatic(req, res, pathname);
       return;

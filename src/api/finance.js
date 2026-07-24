@@ -2,9 +2,9 @@
 const { db, nowIso, round2, audit } = require('../db');
 const { ApiError } = require('./util');
 
-const DEFAULT_EXPENSE_CATS = ['Закупка товара', 'Аренда', 'Зарплата', 'Налоги', 'Коммунальные услуги',
-  'Реклама', 'Охрана', 'Банковские услуги', 'Прочие расходы'];
-const DEFAULT_INCOME_CATS = ['Продажа', 'Оплата заказа', 'Прочие доходы'];
+const DEFAULT_EXPENSE_CATS = ['Закупка товара', 'Оплата поставщику', 'Аренда', 'Зарплата', 'Налоги',
+  'Коммунальные услуги', 'Реклама', 'Охрана', 'Банковские услуги', 'Прочие расходы'];
+const DEFAULT_INCOME_CATS = ['Продажа', 'Погашение долга', 'Оплата заказа', 'Прочие доходы'];
 
 const routes = [
   {
@@ -114,16 +114,20 @@ const routes = [
          GROUP BY ym, type, category`
       ).all(year);
       const expenseByCat = {};
-      // «Возврат покупателю» уже учтён в returns, «Закупка товара» — в себестоимости
-      // проданного (COGS): включать их в расходы значило бы посчитать дважды.
-      const EXCLUDED_EXPENSES = ['Возврат покупателю', 'Закупка товара'];
+      // «Возврат покупателю» уже учтён в returns, «Закупка товара» и «Оплата
+      // поставщику» — в себестоимости проданного (COGS): включать их в расходы
+      // значило бы посчитать дважды.
+      const EXCLUDED_EXPENSES = ['Возврат покупателю', 'Закупка товара', 'Оплата поставщику'];
+      // Выручка берётся из позиций чеков в момент продажи, поэтому приход денег
+      // по продаже и позднее погашение долга по ней доходом уже не считаются.
+      const EXCLUDED_INCOMES = ['Продажа', 'Погашение долга'];
       for (const r of opRows) {
         if (!months[r.ym]) continue;
         if (r.type === 'expense' && !EXCLUDED_EXPENSES.includes(r.category)) {
           months[r.ym].expenses = round2(months[r.ym].expenses + r.sum);
           expenseByCat[r.category] = round2((expenseByCat[r.category] || 0) + r.sum);
         }
-        if (r.type === 'income' && r.category !== 'Продажа') {
+        if (r.type === 'income' && !EXCLUDED_INCOMES.includes(r.category)) {
           months[r.ym].other_income = round2(months[r.ym].other_income + r.sum);
         }
       }

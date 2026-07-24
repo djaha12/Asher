@@ -1,10 +1,16 @@
 'use strict';
 const { db, nowIso, round2, audit } = require('../db');
 const { ApiError } = require('./util');
+const { listImages, removeFiles } = require('./images');
 
 const PRODUCT_FIELDS = ['sku', 'barcode', 'name', 'category_id', 'metal', 'weight', 'size', 'gems',
   'gem_summary', 'purchase_price', 'retail_price', 'supplier_id', 'status', 'reserved_for',
-  'location', 'description'];
+  'location', 'description', 'store_id', 'ownership'];
+
+// Миниатюра главного фото — подзапросом, чтобы список каталога грузился одним запросом.
+const MAIN_THUMB = `(SELECT pi.thumb FROM product_images pi
+   WHERE pi.product_id = p.id ORDER BY pi.is_main DESC, pi.sort, pi.id LIMIT 1) AS thumb`;
+const PHOTO_COUNT = `(SELECT COUNT(*) FROM product_images pi WHERE pi.product_id = p.id) AS photo_count`;
 
 function rowToProduct(r) {
   if (!r) return null;
@@ -53,6 +59,24 @@ function validateProduct(body, { partial = false } = {}) {
     }
     out.status = body.status;
   }
+  if (body.store_id !== undefined) {
+    out.store_id = toId(body.store_id, 'точка продаж');
+    if (out.store_id && !db.prepare('SELECT 1 FROM stores WHERE id = ?').get(out.store_id)) {
+      throw new ApiError(400, 'Точка продаж не найдена');
+    }
+  }
+  if (body.ownership !== undefined) {
+    if (!['own', 'consignment'].includes(body.ownership)) {
+      throw new ApiError(400, 'Принадлежность: «own» (наш товар) или «consignment» (на реализации)');
+    }
+    out.ownership = body.ownership;
+    if (out.ownership === 'consignment') {
+      const supplierId = body.supplier_id !== undefined ? out.supplier_id : undefined;
+      if (supplierId === null) {
+        throw new ApiError(400, 'Для товара на реализации нужно указать поставщика — владельца изделия');
+      }
+    }
+  }
   if (body.reserved_for !== undefined) {
     out.reserved_for = toId(body.reserved_for, 'клиент резерва');
     if (out.reserved_for && !db.prepare('SELECT 1 FROM customers WHERE id = ?').get(out.reserved_for)) {
@@ -87,16 +111,30 @@ const routes = [
       if (query.status) { cond.push('p.status = ?'); args.push(query.status); }
       if (query.category_id) { cond.push('p.category_id = ?'); args.push(Number(query.category_id)); }
       if (query.metal) { cond.push('p.metal = ?'); args.push(query.metal); }
+      if (query.store_id) { cond.push('p.store_id = ?'); args.push(Number(query.store_id)); }
+      if (query.ownership) { cond.push('p.ownership = ?'); args.push(query.ownership); }
+      if (query.has_photo === '1') cond.push('EXISTS (SELECT 1 FROM product_images pi WHERE pi.product_id = p.id)');
+      if (query.has_photo === '0') cond.push('NOT EXISTS (SELECT 1 FROM product_images pi WHERE pi.product_id = p.id)');
       const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
+      const SORTS = {
+        new: 'p.created_at DESC, p.id DESC',
+        name: 'p.name COLLATE NOCASE',
+        sku: 'p.sku COLLATE NOCASE',
+        price_asc: 'p.retail_price',
+        price_desc: 'p.retail_price DESC',
+      };
+      const order = SORTS[query.sort] || SORTS.new;
       const limit = Math.min(Number(query.limit) || 500, 2000);
       const offset = Number(query.offset) || 0;
       const rows = db.prepare(
-        `SELECT p.*, c.name AS category_name, s.name AS supplier_name, cu.name AS reserved_for_name
+        `SELECT p.*, c.name AS category_name, s.name AS supplier_name, cu.name AS reserved_for_name,
+                st.name AS store_name, ${MAIN_THUMB}, ${PHOTO_COUNT}
          FROM products p
          LEFT JOIN categories c ON c.id = p.category_id
          LEFT JOIN suppliers s ON s.id = p.supplier_id
          LEFT JOIN customers cu ON cu.id = p.reserved_for
-         ${where} ORDER BY p.created_at DESC, p.id DESC LIMIT ? OFFSET ?`
+         LEFT JOIN stores st ON st.id = p.store_id
+         ${where} ORDER BY ${order} LIMIT ? OFFSET ?`
       ).all(...args, limit, offset);
       const totalRow = db.prepare(`SELECT COUNT(*) AS c FROM products p ${where}`).get(...args);
       const items = rows.map(rowToProduct);
@@ -117,11 +155,13 @@ const routes = [
     method: 'GET', path: '/api/products/:id',
     handler: ({ params, session }) => {
       const p = db.prepare(
-        `SELECT p.*, c.name AS category_name, s.name AS supplier_name, cu.name AS reserved_for_name
+        `SELECT p.*, c.name AS category_name, s.name AS supplier_name, cu.name AS reserved_for_name,
+                st.name AS store_name
          FROM products p
          LEFT JOIN categories c ON c.id = p.category_id
          LEFT JOIN suppliers s ON s.id = p.supplier_id
          LEFT JOIN customers cu ON cu.id = p.reserved_for
+         LEFT JOIN stores st ON st.id = p.store_id
          WHERE p.id = ?`
       ).get(Number(params.id));
       if (!p) throw new ApiError(404, 'Изделие не найдено');
@@ -131,7 +171,15 @@ const routes = [
          LEFT JOIN customers cu ON cu.id = s.customer_id
          WHERE si.product_id = ? ORDER BY s.created_at DESC`
       ).all(Number(params.id));
-      const product = { ...rowToProduct(p), history };
+      const transfers = db.prepare(
+        `SELECT t.*, f.name AS from_name, s.name AS to_name, u.name AS user_name
+         FROM stock_transfers t
+         LEFT JOIN stores f ON f.id = t.from_store_id
+         LEFT JOIN stores s ON s.id = t.to_store_id
+         LEFT JOIN users u ON u.id = t.user_id
+         WHERE t.product_id = ? ORDER BY t.created_at DESC LIMIT 20`
+      ).all(Number(params.id));
+      const product = { ...rowToProduct(p), history, transfers, images: listImages(Number(params.id)) };
       if (session.role !== 'admin') {
         delete product.purchase_price;
         history.forEach(h => delete h.cost);
@@ -193,7 +241,9 @@ const routes = [
       if (usedInSale) {
         throw new ApiError(400, 'Изделие участвует в продажах — удалить нельзя. Используйте статус «Списано».');
       }
+      const images = listImages(id);
       db.prepare('DELETE FROM products WHERE id = ?').run(id);
+      removeFiles(images); // строки удалит каскад, а файлы — мы
       audit(session.userId, 'delete', 'product', id, `${existing.sku} ${existing.name}`);
       return { ok: true };
     },

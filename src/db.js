@@ -10,8 +10,11 @@ const crypto = require('node:crypto');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const DB_PATH = process.env.ASHER_DB || path.join(DATA_DIR, 'asher.db');
+// Фотографии изделий лежат рядом с базой — так резервная копия это одна папка.
+const MEDIA_DIR = process.env.ASHER_MEDIA || path.join(path.dirname(DB_PATH), 'images');
 
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+fs.mkdirSync(MEDIA_DIR, { recursive: true });
 
 const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL');
@@ -72,11 +75,38 @@ CREATE TABLE IF NOT EXISTS products (
   reserved_for INTEGER REFERENCES customers(id) ON DELETE SET NULL,
   location TEXT DEFAULT '',         -- витрина / сейф / на реализации
   description TEXT DEFAULT '',
+  store_id INTEGER REFERENCES stores(id) ON DELETE SET NULL,
+  -- own          — изделие куплено, лежит на нашем балансе
+  -- consignment  — товар поставщика на реализации: платим владельцу только после продажи
+  ownership TEXT NOT NULL DEFAULT 'own' CHECK (ownership IN ('own','consignment')),
   created_at TEXT NOT NULL,
   sold_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_products_status ON products(status);
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id);
+CREATE INDEX IF NOT EXISTS idx_products_store ON products(store_id);
+CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);
+CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
+
+CREATE TABLE IF NOT EXISTS stores (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  address TEXT DEFAULT '',
+  phone TEXT DEFAULT '',
+  is_default INTEGER NOT NULL DEFAULT 0,
+  sort INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS product_images (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  file TEXT NOT NULL,               -- имя файла полноразмерного изображения в data/images
+  thumb TEXT NOT NULL,              -- имя файла миниатюры
+  is_main INTEGER NOT NULL DEFAULT 0,
+  sort INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_images_product ON product_images(product_id);
 
 CREATE TABLE IF NOT EXISTS customers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -108,6 +138,9 @@ CREATE TABLE IF NOT EXISTS sales (
   bonus_spent REAL NOT NULL DEFAULT 0,
   payment_method TEXT NOT NULL DEFAULT 'cash' CHECK (payment_method IN ('cash','card','transfer','installment')),
   status TEXT NOT NULL DEFAULT 'completed' CHECK (status IN ('completed','partial_return','returned')),
+  paid REAL NOT NULL DEFAULT 0,     -- сколько денег фактически получено по чеку
+  due_date TEXT DEFAULT '',         -- когда клиент обещал погасить остаток
+  store_id INTEGER REFERENCES stores(id) ON DELETE SET NULL,
   note TEXT DEFAULT '',
   created_at TEXT NOT NULL
 );
@@ -174,9 +207,110 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL DEFAULT ''
 );
+
+-- Платежи клиентов: и первый взнос при продаже, и последующие погашения долга.
+CREATE TABLE IF NOT EXISTS payments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+  sale_id INTEGER REFERENCES sales(id) ON DELETE CASCADE,
+  order_id INTEGER REFERENCES service_orders(id) ON DELETE CASCADE,
+  amount REAL NOT NULL,
+  method TEXT NOT NULL DEFAULT 'cash' CHECK (method IN ('cash','card','transfer')),
+  note TEXT DEFAULT '',
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_payments_sale ON payments(sale_id);
+CREATE INDEX IF NOT EXISTS idx_payments_customer ON payments(customer_id);
+
+-- Расчёты с поставщиками — единая книга операций.
+--   invoice          — поставка товара (мы стали должны)
+--   consignment_sale — продали чужое изделие (стали должны владельцу)
+--   payment          — заплатили поставщику (долг уменьшился)
+--   adjust           — ручная корректировка (со знаком)
+CREATE TABLE IF NOT EXISTS supplier_ops (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+  type TEXT NOT NULL CHECK (type IN ('invoice','consignment_sale','payment','adjust')),
+  amount REAL NOT NULL,
+  doc_number TEXT DEFAULT '',
+  doc_date TEXT DEFAULT '',
+  due_date TEXT DEFAULT '',
+  note TEXT DEFAULT '',
+  product_id INTEGER REFERENCES products(id) ON DELETE SET NULL,
+  sale_id INTEGER REFERENCES sales(id) ON DELETE SET NULL,
+  method TEXT DEFAULT '',
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_supops_supplier ON supplier_ops(supplier_id);
+CREATE INDEX IF NOT EXISTS idx_supops_sale ON supplier_ops(sale_id);
+
+-- Инвентаризация: сессия пересчёта по точке и отсканированные изделия.
+CREATE TABLE IF NOT EXISTS inventory_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  store_id INTEGER REFERENCES stores(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','finished')),
+  note TEXT DEFAULT '',
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  started_at TEXT NOT NULL,
+  finished_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS inventory_scans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER NOT NULL REFERENCES inventory_sessions(id) ON DELETE CASCADE,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  scanned_at TEXT NOT NULL,
+  UNIQUE (session_id, product_id)
+);
+
+-- Перемещение изделий между точками.
+CREATE TABLE IF NOT EXISTS stock_transfers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  from_store_id INTEGER REFERENCES stores(id) ON DELETE SET NULL,
+  to_store_id INTEGER REFERENCES stores(id) ON DELETE SET NULL,
+  note TEXT DEFAULT '',
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_transfers_product ON stock_transfers(product_id);
 `;
 
 db.exec(SCHEMA);
+
+// ---------- Миграции ранее созданных баз ----------
+// CREATE TABLE IF NOT EXISTS не меняет уже существующие таблицы, поэтому
+// новые колонки добавляем вручную. Каждая проверка идемпотентна.
+
+function columnExists(table, column) {
+  return db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === column);
+}
+
+function addColumn(table, column, definition) {
+  if (!columnExists(table, column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    return true;
+  }
+  return false;
+}
+
+function migrate() {
+  addColumn('products', 'store_id', 'INTEGER REFERENCES stores(id) ON DELETE SET NULL');
+  addColumn('products', 'ownership', `TEXT NOT NULL DEFAULT 'own'`);
+  addColumn('sales', 'paid', 'REAL NOT NULL DEFAULT 0');
+  addColumn('sales', 'due_date', `TEXT DEFAULT ''`);
+  addColumn('sales', 'store_id', 'INTEGER REFERENCES stores(id) ON DELETE SET NULL');
+
+  // Продажи, оформленные до появления долгов, считаем полностью оплаченными:
+  // иначе вся прошлая выручка внезапно превратится в долг клиентов.
+  if (!getSetting('migrated_paid')) {
+    db.exec('UPDATE sales SET paid = total WHERE paid = 0');
+    setSetting('migrated_paid', '1');
+  }
+}
 
 // ---------- Утилиты ----------
 
@@ -257,13 +391,28 @@ function ensureDefaults() {
   if (!getSetting('store_name')) setSetting('store_name', 'Asher Jewelry');
   if (!getSetting('bonus_percent')) setSetting('bonus_percent', '3');
   if (!getSetting('currency')) setSetting('currency', '₽');
+
+  // Точка продаж должна быть всегда хотя бы одна — к ней привязывается весь товар.
+  const hasStores = db.prepare('SELECT COUNT(*) AS c FROM stores').get().c > 0;
+  if (!hasStores) {
+    db.prepare('INSERT INTO stores (name, address, is_default, sort) VALUES (?,?,1,0)')
+      .run(getSetting('store_name', 'Asher Jewelry'), '');
+  }
+  const defaultStore = db.prepare(
+    'SELECT id FROM stores ORDER BY is_default DESC, sort, id LIMIT 1'
+  ).get();
+  if (defaultStore) {
+    db.prepare('UPDATE products SET store_id = ? WHERE store_id IS NULL').run(defaultStore.id);
+  }
 }
 
+migrate();
 ensureDefaults();
 
 module.exports = {
   db,
   DB_PATH,
+  MEDIA_DIR,
   nowIso,
   round2,
   hashPassword,
