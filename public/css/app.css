@@ -643,6 +643,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 15px; }
 .nowrap { white-space: nowrap; }
 .crit { color: var(--crit); }
 .good { color: var(--good); }
+.warn { color: var(--warn); }
 .gold { color: var(--gold-strong); }
 .big-money { font-size: 21px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .thumb-sm {
