@@ -118,6 +118,91 @@ window.Pages.settings = (() => {
     };
   }
 
+  // ---------- Точки продаж ----------
+
+  async function renderStores(box) {
+    const [{ items }, transfers] = await Promise.all([
+      api.get('/api/stores'),
+      api.get('/api/transfers?limit=30').then(r => r.items).catch(() => []),
+    ]);
+    box.innerHTML = `
+      <div class="hint-box">
+        <strong>Точки продаж.</strong> Если магазин один, здесь ничего менять не нужно.
+        Несколько точек нужны, чтобы видеть остатки каждой отдельно и перемещать
+        между ними товар. Удалить точку можно, только когда на ней не осталось изделий.
+      </div>
+      <div class="card">
+        <h3 class="card-title">Точки</h3>
+        ${ui.table([
+          { title: 'Название', render: r => `<span class="strong">${ui.esc(r.name)}</span>` +
+            (r.is_default ? ' <span class="badge badge-gold">основная</span>' : '') },
+          { title: 'Адрес', render: r => `<span class="dim">${ui.esc(r.address || '—')}</span>` },
+          { title: 'Телефон', render: r => ui.esc(r.phone || '—') },
+          { title: 'Изделий', cls: 'num', render: r => ui.num(r.in_stock) },
+          { title: 'Вес', cls: 'num', render: r => ui.num(r.stock_weight) + ' г' },
+          { title: 'На сумму', cls: 'num strong', render: r => ui.money(r.stock_retail) },
+          { title: '', render: r => `<button class="btn btn-sm" data-store-edit="${r.id}">✎</button>
+            <button class="btn btn-sm btn-danger" data-store-del="${r.id}">×</button>` },
+        ], items)}
+        <button class="btn" id="store-add" style="margin-top:12px">+ Точка продаж</button>
+      </div>
+      ${transfers.length ? `<div class="card">
+        <h3 class="card-title">Последние перемещения</h3>
+        ${ui.table([
+          { title: 'Когда', render: r => ui.dt(r.created_at) },
+          { title: 'Изделие', render: r => `<span class="mono">${ui.esc(r.sku || '—')}</span> ${ui.esc(r.product_name || '')}` },
+          { title: 'Откуда', render: r => `<span class="dim">${ui.esc(r.from_name || '—')}</span>` },
+          { title: 'Куда', render: r => ui.esc(r.to_name || '—') },
+          { title: 'Кто', render: r => `<span class="dim">${ui.esc(r.user_name || '—')}</span>` },
+        ], transfers, { empty: '' })}
+      </div>` : ''}`;
+
+    box.querySelector('#store-add').addEventListener('click', () => storeDialog(null, () => renderStores(box)));
+    box.querySelectorAll('[data-store-edit]').forEach(btn => btn.addEventListener('click', () =>
+      storeDialog(items.find(s => s.id === Number(btn.dataset.storeEdit)), () => renderStores(box))));
+    box.querySelectorAll('[data-store-del]').forEach(btn => btn.addEventListener('click', async () => {
+      const store = items.find(s => s.id === Number(btn.dataset.storeDel));
+      if (!await ui.confirmDialog(`Удалить точку «${store.name}»?`, { danger: true, okLabel: 'Удалить' })) return;
+      try {
+        await api.del('/api/stores/' + store.id);
+        ui.toast('Точка удалена');
+        renderStores(box);
+      } catch (e) { ui.toastErr(e); }
+    }));
+  }
+
+  function storeDialog(s, onChange) {
+    const isNew = !s;
+    s = s || {};
+    const m = ui.modal({
+      title: isNew ? 'Новая точка продаж' : 'Точка: ' + s.name,
+      size: 'sm',
+      body: `<form id="store-form">
+        <label class="field"><span>Название *</span><input name="name" required
+          value="${ui.esc(s.name || '')}" placeholder="Салон на Тверской"></label>
+        <label class="field"><span>Адрес</span><input name="address" value="${ui.esc(s.address || '')}"></label>
+        <label class="field"><span>Телефон</span><input name="phone" value="${ui.esc(s.phone || '')}"></label>
+        ${isNew || s.is_default ? '' : `<label class="row-tight" style="cursor:pointer">
+          <input type="checkbox" name="is_default" style="width:20px;height:20px;cursor:pointer">
+          Сделать основной — сюда попадает новый товар</label>`}
+      </form>`,
+      footer: `<button class="btn" data-act="cancel">Отмена</button>
+        <button class="btn btn-primary" data-act="ok">${isNew ? 'Добавить' : 'Сохранить'}</button>`,
+    });
+    m.foot.querySelector('[data-act=cancel]').onclick = m.close;
+    m.foot.querySelector('[data-act=ok]').onclick = async () => {
+      const form = m.body.querySelector('#store-form');
+      if (!form.reportValidity()) return;
+      const v = ui.formValues(form);
+      try {
+        if (isNew) await api.post('/api/stores', v);
+        else await api.put('/api/stores/' + s.id, v);
+        ui.toast(isNew ? 'Точка добавлена' : 'Сохранено');
+        m.close(); onChange && onChange();
+      } catch (e) { ui.toastErr(e); }
+    };
+  }
+
   async function renderUsers(box) {
     const { items } = await api.get('/api/users');
     box.innerHTML = `
@@ -219,7 +304,8 @@ window.Pages.settings = (() => {
     async render(el) {
       const admin = App.isAdmin();
       const tabs = admin
-        ? [['store', 'Магазин'], ['refs', 'Справочники'], ['users', 'Сотрудники'], ['audit', 'Журнал'], ['me', 'Мой пароль']]
+        ? [['store', 'Магазин'], ['stores', 'Точки продаж'], ['refs', 'Справочники'],
+           ['users', 'Сотрудники'], ['audit', 'Журнал'], ['me', 'Мой пароль']]
         : [['me', 'Мой пароль']];
       el.innerHTML = `
         <div class="tabs">${tabs.map(([k, t], i) =>
@@ -230,6 +316,7 @@ window.Pages.settings = (() => {
         body.innerHTML = '<div class="empty"><p>Загрузка…</p></div>';
         try {
           if (key === 'store') await renderStore(body);
+          if (key === 'stores') await renderStores(body);
           if (key === 'refs') await renderCatalogRefs(body);
           if (key === 'users') await renderUsers(body);
           if (key === 'audit') await renderAudit(body);

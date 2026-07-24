@@ -141,6 +141,8 @@ window.Pages.products = (() => {
         footer: `
           ${admin ? `<button class="btn btn-danger left" data-act="delete">Удалить</button>` : ''}
           <button class="btn" data-act="label">🏷 Бирка</button>
+          ${stores.length > 1 && p.status !== 'sold'
+            ? '<button class="btn" data-act="move">→ Переместить</button>' : ''}
           ${p.status === 'in_stock' ? '<button class="btn" data-act="reserve">В резерв</button>' : ''}
           ${p.status === 'reserved' ? '<button class="btn" data-act="unreserve">Снять резерв</button>' : ''}
           ${(p.status === 'in_stock' || p.status === 'reserved') && admin ? '<button class="btn" data-act="writeoff">Списать</button>' : ''}
@@ -160,6 +162,7 @@ window.Pages.products = (() => {
           if (act === 'edit') { m.close(); openEditor(p, onChange); }
           if (act === 'sell') { m.close(); Pages.sales.newSale(p); }
           if (act === 'label') Pages.labels.printOne(p);
+          if (act === 'move') { m.close(); moveDialog(p, onChange); }
           if (act === 'reserve') { m.close(); reserveDialog(p, onChange); }
           if (act === 'unreserve') {
             await api.put('/api/products/' + p.id, { status: 'in_stock', reserved_for: null });
@@ -180,6 +183,37 @@ window.Pages.products = (() => {
         } catch (err) { ui.toastErr(err); }
       });
     }).catch(ui.toastErr);
+  }
+
+  // Перемещение изделия на другую точку — с записью в историю перемещений.
+  function moveDialog(p, onChange) {
+    const targets = stores.filter(s => s.id !== p.store_id);
+    const m = ui.modal({
+      title: 'Переместить: ' + p.name,
+      size: 'sm',
+      body: `<div class="hint-box">Сейчас числится на точке
+          <strong>${ui.esc(p.store_name || 'не указана')}</strong>.</div>
+        <form id="mv-form">
+          <label class="field"><span>Куда переместить</span><select name="to_store_id">
+            ${targets.map(s => `<option value="${s.id}">${ui.esc(s.name)}</option>`).join('')}
+          </select></label>
+          <label class="field"><span>Комментарий</span><input name="note" placeholder="необязательно"></label>
+        </form>`,
+      footer: `<button class="btn" data-act="cancel">Отмена</button>
+        <button class="btn btn-primary" data-act="ok">Переместить</button>`,
+    });
+    m.foot.querySelector('[data-act=cancel]').onclick = m.close;
+    m.foot.querySelector('[data-act=ok]').onclick = async () => {
+      const v = ui.formValues(m.body.querySelector('#mv-form'));
+      try {
+        const res = await api.post('/api/transfers', {
+          product_ids: [p.id], to_store_id: Number(v.to_store_id), note: v.note,
+        });
+        if (res.moved) ui.toast('Изделие перемещено');
+        else ui.toast(res.skipped[0] || 'Переместить не удалось', true);
+        m.close(); onChange && onChange();
+      } catch (e) { ui.toastErr(e); }
+    };
   }
 
   function reserveDialog(p, onChange) {
