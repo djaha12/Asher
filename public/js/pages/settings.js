@@ -61,7 +61,7 @@ window.Pages.settings = (() => {
 
         <div>
           <div class="card">
-            <h3 class="card-title">Открыть на телефоне 📱</h3>
+            <h3 class="card-title">Открыть на телефоне</h3>
             ${network.addresses.length ? `
               <p class="muted" style="margin-top:0">Наберите этот адрес в браузере телефона.
               Телефон должен быть подключён к тому же Wi-Fi, что и этот компьютер.</p>

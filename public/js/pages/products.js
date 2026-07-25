@@ -50,7 +50,7 @@ window.Pages.products = (() => {
     const cols = [
       { title: '', cls: 'nowrap', render: r => r.thumb
         ? `<img class="thumb-sm" src="${ui.esc(ui.photoUrl(r.thumb))}" alt="" loading="lazy">`
-        : '<div class="thumb-sm-empty">💍</div>' },
+        : `<div class="thumb-sm-empty">${ui.icon('gem')}</div>` },
       { title: 'Артикул', render: r => `<span class="mono strong">${ui.highlight(r.sku, filters.search)}</span>` },
       { title: 'Наименование', render: r => `${ui.highlight(r.name, filters.search)}${r.gem_summary ? `<div class="dim" style="font-size:12px">${ui.esc(r.gem_summary)}</div>` : ''}` },
       { title: 'Категория', render: r => `<span class="dim">${ui.esc(r.category_name || '—')}</span>` },
@@ -80,7 +80,7 @@ window.Pages.products = (() => {
         <div class="pcard-photo">
           ${r.thumb
             ? `<img src="${ui.esc(ui.photoUrl(r.thumb))}" alt="${ui.esc(r.name)}" loading="lazy">`
-            : '<div class="no-photo">💍</div>'}
+            : `<div class="no-photo">${ui.icon('diamond')}</div>`}
           ${badges.length ? `<div class="pcard-badges">${badges.join('')}</div>` : ''}
           ${r.photo_count > 1 ? `<div class="photo-count">${r.photo_count} фото</div>` : ''}
         </div>
@@ -140,7 +140,7 @@ window.Pages.products = (() => {
         `,
         footer: `
           ${admin ? `<button class="btn btn-danger left" data-act="delete">Удалить</button>` : ''}
-          <button class="btn" data-act="label">🏷 Бирка</button>
+          <button class="btn" data-act="label">${ui.icon('tag')} Бирка</button>
           ${stores.length > 1 && p.status !== 'sold'
             ? '<button class="btn" data-act="move">→ Переместить</button>' : ''}
           ${p.status === 'in_stock' ? '<button class="btn" data-act="reserve">В резерв</button>' : ''}
@@ -416,7 +416,7 @@ window.Pages.products = (() => {
           <div class="spacer"></div>
           <button class="btn" id="pf-view" title="Плитки или таблица">${view === 'grid' ? '☰ Списком' : '▦ Плитками'}</button>
           ${App.isAdmin() ? '<a class="btn" href="/api/export/products" download>Экспорт CSV</a>' : ''}
-          <button class="btn btn-primary" id="pf-add">+ Добавить изделие</button>
+          <button class="btn btn-primary" id="pf-add">${ui.icon('plus')} Добавить изделие</button>
         </div>
         <div class="chip-row" style="margin-bottom:14px" id="pf-chips">
           <button class="chip active" data-st="">Все</button>

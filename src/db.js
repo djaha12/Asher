@@ -388,7 +388,7 @@ function ensureDefaults() {
     const ins = db.prepare('INSERT INTO categories (name, sort) VALUES (?, ?)');
     cats.forEach((c, i) => ins.run(c, i));
   }
-  if (!getSetting('store_name')) setSetting('store_name', 'Asher Jewelry');
+  if (!getSetting('store_name')) setSetting('store_name', 'Asher Diamonds');
   if (!getSetting('bonus_percent')) setSetting('bonus_percent', '3');
 
   // Локаль: при первом запуске подставляем набор страны по умолчанию.

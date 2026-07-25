@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#191611">
-  <title>Asher — ювелирная CRM</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%92%8E%3C/text%3E%3C/svg%3E">
+  <meta name="theme-color" content="#121110">
+  <title>Asher Diamonds — CRM</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a5813a' stroke-width='1.6'%3E%3Cpath d='M7 3h10l4 6-9 12L3 9l4-6z'/%3E%3Cpath d='M3 9h18M9.5 3 8 9l4 12M14.5 3 16 9l-4 12'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
@@ -13,9 +13,9 @@
   <div id="login-screen" class="login-screen hidden">
     <div class="login-card">
       <div class="login-brand">
-        <div class="login-gem">◆</div>
+        <div class="login-gem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M7 3h10l4 6-9 12L3 9l4-6z"/><path d="M3 9h18M9.5 3 8 9l4 12M14.5 3 16 9l-4 12"/></svg></div>
         <h1 id="login-title">Asher</h1>
-        <p class="login-sub">Ювелирная CRM-платформа</p>
+        <p class="login-sub" id="login-sub">Diamonds</p>
       </div>
       <form id="login-form">
         <label class="field">
@@ -36,10 +36,10 @@
   <div id="app" class="app hidden">
     <aside class="sidebar">
       <div class="brand">
-        <span class="brand-gem">◆</span>
+        <span class="brand-gem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M7 3h10l4 6-9 12L3 9l4-6z"/><path d="M3 9h18M9.5 3 8 9l4 12M14.5 3 16 9l-4 12"/></svg></span>
         <div>
           <div class="brand-name" id="brand-name">Asher</div>
-          <div class="brand-sub">ювелирная CRM</div>
+          <div class="brand-sub" id="brand-sub">Diamonds</div>
         </div>
       </div>
       <nav id="nav" class="nav"></nav>
@@ -51,23 +51,26 @@
             <div class="user-role" id="user-role">—</div>
           </div>
         </div>
-        <button class="btn-logout" id="btn-logout" title="Выйти">⎋</button>
+        <button class="btn-logout" id="btn-logout" title="Выйти"></button>
       </div>
     </aside>
 
     <div class="main-wrap">
       <!-- Шапка телефона -->
       <div class="mobile-head">
-        <div class="mh-brand" id="brand-name-mobile">Asher</div>
-        <button data-theme-icon id="btn-theme-mobile" title="Сменить тему">☾</button>
-        <button id="btn-more" title="Все разделы">☰</button>
+        <div class="mh-brand" id="brand-name-mobile-wrap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M7 3h10l4 6-9 12L3 9l4-6z"/><path d="M3 9h18M9.5 3 8 9l4 12M14.5 3 16 9l-4 12"/></svg>
+          <span id="brand-name-mobile">Asher</span>
+        </div>
+        <button data-theme-icon id="btn-theme-mobile" title="Сменить тему"></button>
+        <button id="btn-more" title="Все разделы"></button>
       </div>
 
       <header class="topbar">
         <h1 id="page-title" class="page-title">—</h1>
         <div class="topbar-actions">
-          <button class="theme-toggle" data-theme-icon id="btn-theme" title="Сменить тему">☾</button>
-          <button class="btn btn-primary" id="btn-quick-sale">+ Продажа</button>
+          <button class="theme-toggle" data-theme-icon id="btn-theme" title="Сменить тему"></button>
+          <button class="btn btn-primary" id="btn-quick-sale"></button>
         </div>
       </header>
       <main id="page" class="page"></main>

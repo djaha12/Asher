@@ -48,7 +48,7 @@ window.Pages.inventory = (() => {
         <select class="input" id="inv-store">
           ${stores.map(s => `<option value="${s.id}">${ui.esc(s.name)} — ${s.in_stock} изделий</option>`).join('')}
         </select>
-        <button class="btn btn-primary" id="inv-start">▶ Начать пересчёт</button>
+        <button class="btn btn-primary" id="inv-start">${ui.icon('scan')} Начать пересчёт</button>
       </div>
 
       <div class="card">
@@ -111,7 +111,7 @@ window.Pages.inventory = (() => {
             placeholder="Отсканируйте или введите артикул" autocomplete="off"
             autocapitalize="none" autocorrect="off" spellcheck="false">
           <div class="row" style="justify-content:center;margin-top:10px">
-            <button class="btn" id="scan-camera">📷 Сканировать камерой</button>
+            <button class="btn" id="scan-camera">${ui.icon('camera')} Сканировать камерой</button>
           </div>
           <div id="camera-wrap" class="hidden" style="margin-top:12px">
             <video class="scan-video" id="scan-video" playsinline muted></video>
@@ -185,7 +185,7 @@ window.Pages.inventory = (() => {
   function thumbCell(r) {
     return r.thumb
       ? `<img class="thumb-sm" src="${ui.esc(ui.photoUrl(r.thumb))}" alt="" loading="lazy">`
-      : '<div class="thumb-sm-empty">💍</div>';
+      : `<div class="thumb-sm-empty">${ui.icon('gem')}</div>`;
   }
 
   function itemsTable(rows, withRemove) {

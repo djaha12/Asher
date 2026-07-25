@@ -5,31 +5,31 @@ window.App = (() => {
 
   const NAV = [
     { section: 'Обзор' },
-    { key: 'dashboard', title: 'Главная', ico: '◆' },
+    { key: 'dashboard', title: 'Главная', ico: 'home' },
     { section: 'Торговля' },
-    { key: 'sales', title: 'Продажи', ico: '¤' },
-    { key: 'products', title: 'Каталог изделий', ico: '💍' },
-    { key: 'customers', title: 'Клиенты', ico: '👤' },
-    { key: 'debts', title: 'Долги', ico: '⏳' },
-    { key: 'orders', title: 'Заказы и ремонт', ico: '🛠' },
+    { key: 'sales', title: 'Продажи', ico: 'sale' },
+    { key: 'products', title: 'Каталог изделий', ico: 'gem' },
+    { key: 'customers', title: 'Клиенты', ico: 'users' },
+    { key: 'debts', title: 'Долги', ico: 'clock' },
+    { key: 'orders', title: 'Заказы и ремонт', ico: 'wrench' },
     { section: 'Склад' },
-    { key: 'inventory', title: 'Инвентаризация', ico: '📋' },
-    { key: 'labels', title: 'Ценники и бирки', ico: '🏷' },
+    { key: 'inventory', title: 'Инвентаризация', ico: 'clipboard' },
+    { key: 'labels', title: 'Ценники и бирки', ico: 'tag' },
     { section: 'Управление', admin: true },
-    { key: 'finance', title: 'Финансы', ico: '📒', admin: true },
-    { key: 'analytics', title: 'Аналитика', ico: '📈', admin: true },
-    { key: 'import', title: 'Импорт из 1С', ico: '⇄', admin: true },
-    { key: 'settings', title: 'Настройки', ico: '⚙' },
+    { key: 'finance', title: 'Финансы', ico: 'wallet', admin: true },
+    { key: 'analytics', title: 'Аналитика', ico: 'chart', admin: true },
+    { key: 'import', title: 'Импорт из 1С', ico: 'sync', admin: true },
+    { key: 'settings', title: 'Настройки', ico: 'gear' },
   ];
 
   // На телефоне внизу помещается пять кнопок — самое частое в работе.
   // Остальное открывается кнопкой «☰» в шапке.
   const MOBILE_NAV = [
-    { key: 'dashboard', title: 'Главная', ico: '◆' },
-    { key: 'products', title: 'Каталог', ico: '💍' },
-    { key: 'sales', title: 'Продажи', ico: '¤' },
-    { key: 'debts', title: 'Долги', ico: '⏳' },
-    { key: 'customers', title: 'Клиенты', ico: '👤' },
+    { key: 'dashboard', title: 'Главная', ico: 'home' },
+    { key: 'products', title: 'Каталог', ico: 'gem' },
+    { key: 'sales', title: 'Продажи', ico: 'sale' },
+    { key: 'debts', title: 'Долги', ico: 'clock' },
+    { key: 'customers', title: 'Клиенты', ico: 'users' },
   ];
 
   const App = {
@@ -52,9 +52,15 @@ window.App = (() => {
     showApp() {
       document.getElementById('login-screen').classList.add('hidden');
       document.getElementById('app').classList.remove('hidden');
-      document.getElementById('brand-name').textContent = App.storeName;
+      // «Asher Diamonds» → крупно ASHER, подстрочно DIAMONDS. Одно слово — без подстрочника.
+      const words = String(App.storeName || 'Asher').trim().split(/\s+/);
+      const first = words[0];
+      const rest = words.slice(1).join(' ');
+      document.getElementById('brand-name').textContent = first;
+      document.getElementById('brand-sub').textContent = rest;
       document.getElementById('brand-name-mobile').textContent = App.storeName;
-      document.getElementById('login-title').textContent = App.storeName;
+      document.getElementById('login-title').textContent = first;
+      document.getElementById('login-sub').textContent = rest;
       document.getElementById('user-name').textContent = App.user.name;
       document.getElementById('user-role').textContent = App.user.role === 'admin' ? 'Администратор' : 'Продавец';
       document.getElementById('user-avatar').textContent = (App.user.name || '?')[0].toUpperCase();
@@ -73,7 +79,7 @@ window.App = (() => {
     nav.innerHTML = NAV.filter(item => !item.admin || App.isAdmin() || item.key === 'settings')
       .map(item => item.section
         ? ((!item.admin || App.isAdmin()) ? `<div class="nav-section">${item.section}</div>` : '')
-        : `<div class="nav-item" data-key="${item.key}"><span class="ico">${item.ico}</span>${item.title}</div>`
+        : `<div class="nav-item" data-key="${item.key}"><span class="ico">${ui.icon(item.ico)}</span>${item.title}</div>`
       ).join('');
     nav.querySelectorAll('.nav-item').forEach(el => {
       el.addEventListener('click', () => App.go('#/' + el.dataset.key));
@@ -84,7 +90,7 @@ window.App = (() => {
     const nav = document.getElementById('mobile-nav');
     nav.innerHTML = MOBILE_NAV.map(item =>
       `<button class="mn-item" data-key="${item.key}">
-         <span class="ico">${item.ico}</span>${item.title}
+         <span class="ico">${ui.icon(item.ico)}</span>${item.title}
        </button>`).join('');
     nav.querySelectorAll('.mn-item').forEach(el => {
       el.addEventListener('click', () => App.go('#/' + el.dataset.key));
@@ -100,10 +106,10 @@ window.App = (() => {
       body: `<div class="chip-row" style="flex-direction:column;gap:8px">
         ${available.map(i => `
           <button class="btn btn-block" data-key="${i.key}" style="justify-content:flex-start;gap:12px">
-            <span style="width:22px;text-align:center">${i.ico}</span>${ui.esc(i.title)}
+            ${ui.icon(i.ico)}${ui.esc(i.title)}
           </button>`).join('')}
         <button class="btn btn-block btn-danger" data-key="__logout" style="justify-content:flex-start;gap:12px">
-          <span style="width:22px;text-align:center">⎋</span>Выйти
+          ${ui.icon('logout')}Выйти
         </button>
       </div>`,
     });
@@ -176,6 +182,9 @@ window.App = (() => {
     }
   });
 
+  document.getElementById('btn-logout').innerHTML = ui.icon('logout');
+  document.getElementById('btn-more').innerHTML = ui.icon('menu');
+  document.getElementById('btn-quick-sale').innerHTML = ui.icon('plus') + ' Продажа';
   document.getElementById('btn-logout').addEventListener('click', logout);
   document.getElementById('btn-more').addEventListener('click', showAllSections);
   document.getElementById('btn-theme').addEventListener('click', ui.toggleTheme);

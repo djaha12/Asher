@@ -98,7 +98,7 @@ window.Photos = (() => {
           <div class="gallery-main">
             ${items.length
               ? `<img src="${ui.esc(urls[active] || urls[0])}" alt="Фотография изделия">`
-              : '<div class="no-photo">💍</div>'}
+              : `<div class="no-photo">${ui.icon('diamond')}</div>`}
           </div>
           ${items.length ? `<div class="gallery-thumbs">${items.map((im, idx) => `
             <div class="gthumb ${idx === active ? 'active' : ''}" data-i="${idx}">
@@ -108,12 +108,12 @@ window.Photos = (() => {
             </div>`).join('')}</div>` : ''}
           ${editable ? `
             <div class="row">
-              <button class="btn btn-sm" data-act="add">📁 Добавить фото</button>
-              <button class="btn btn-sm" data-act="camera">📷 Снять камерой</button>
-              ${items.length > 1 ? '<button class="btn btn-sm" data-act="main">★ Сделать главным</button>' : ''}
+              <button class="btn btn-sm" data-act="add">${ui.icon('folder')} Добавить фото</button>
+              <button class="btn btn-sm" data-act="camera">${ui.icon('camera')} Снять камерой</button>
+              ${items.length > 1 ? `<button class="btn btn-sm" data-act="main">${ui.icon('check')} Сделать главным</button>` : ''}
             </div>
             <div class="dropzone" data-act="drop">
-              <div class="dz-ico">🖼</div>
+              <div class="dz-ico">${ui.icon('image')}</div>
               <div class="dz-main">Перетащите сюда фотографии</div>
               <div class="dz-sub">JPG, PNG или WEBP — можно сразу несколько</div>
             </div>` : ''}

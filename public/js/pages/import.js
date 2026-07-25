@@ -59,7 +59,7 @@ window.Pages.import = (() => {
           <code>_2</code>, <code>-3</code> или <code>(2)</code>.
         </div>
         <div class="dropzone" id="ph-drop">
-          <div class="dz-ico">📁</div>
+          <div class="dz-ico">${ui.icon('folder')}</div>
           <div class="dz-main">Выбрать папку с фотографиями</div>
           <div class="dz-sub">Или перетащите сюда файлы — имя файла должно совпадать с артикулом</div>
         </div>
@@ -70,9 +70,9 @@ window.Pages.import = (() => {
       <div class="card">
         <p class="muted" style="margin-top:0">Резервная копия или перенос в Excel — данные выгружаются в CSV (открывается в Excel).</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
-          <a class="btn" href="/api/export/products" download>💍 Изделия</a>
-          <a class="btn" href="/api/export/customers" download>👤 Клиенты</a>
-          <a class="btn" href="/api/export/sales" download>¤ Продажи</a>
+          <a class="btn" href="/api/export/products" download>${ui.icon('gem')} Изделия</a>
+          <a class="btn" href="/api/export/customers" download>${ui.icon('users')} Клиенты</a>
+          <a class="btn" href="/api/export/sales" download>${ui.icon('csv')} Продажи</a>
         </div>
       </div>`;
 

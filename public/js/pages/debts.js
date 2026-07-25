@@ -45,7 +45,7 @@ window.Pages.debts = (() => {
         <input type="text" class="input search" id="d-search" placeholder="Поиск по имени или телефону…" autocomplete="off">
         <button class="chip" id="d-overdue">Только просроченные</button>
         <div class="spacer"></div>
-        <button class="btn btn-primary" id="d-pay">¤ Принять оплату</button>
+        <button class="btn btn-primary" id="d-pay">${ui.icon('money')} Принять оплату</button>
       </div>
 
       <div class="card"><div id="d-list"></div></div>`;
@@ -155,9 +155,9 @@ window.Pages.debts = (() => {
             <thead><tr><th>Когда</th><th>Документ</th><th class="num">Сумма</th><th>Как</th><th>Комментарий</th></tr></thead>
             <tbody>${payments}</tbody></table></div>` : ''}`,
       footer: `
-        ${wa ? `<a class="btn left" href="${ui.esc(wa)}" target="_blank" rel="noopener">💬 Написать в WhatsApp</a>` : ''}
+        ${wa ? `<a class="btn left" href="${ui.esc(wa)}" target="_blank" rel="noopener">${ui.icon('whatsapp')} Написать в WhatsApp</a>` : ''}
         <button class="btn" data-act="close">Закрыть</button>
-        <button class="btn btn-primary" data-act="pay">¤ Принять оплату</button>`,
+        <button class="btn btn-primary" data-act="pay">${ui.icon('money')} Принять оплату</button>`,
     });
 
     m.foot.querySelector('[data-act=close]').onclick = m.close;
@@ -333,7 +333,7 @@ window.Pages.debts = (() => {
         </div>
         <div class="row" style="margin-bottom:12px">
           <button class="btn" data-act="invoice">+ Поставка</button>
-          <button class="btn btn-primary" data-act="payment">¤ Оплатить</button>
+          <button class="btn btn-primary" data-act="payment">${ui.icon('money')} Оплатить</button>
           <button class="btn btn-ghost" data-act="adjust">Корректировка</button>
         </div>
         ${data.ops.length ? `<div class="table-wrap"><table class="tbl">

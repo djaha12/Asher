@@ -85,11 +85,11 @@ window.Pages.dashboard = {
           <div class="card">
             <h3 class="card-title">Быстрые действия</h3>
             <div style="display:flex;flex-direction:column;gap:9px">
-              <button class="btn btn-primary" id="qa-sale">¤ &nbsp;Оформить продажу</button>
-              <button class="btn" id="qa-pay">💰 &nbsp;Принять оплату долга</button>
-              <button class="btn" id="qa-product">💍 &nbsp;Добавить изделие</button>
-              <button class="btn" id="qa-customer">👤 &nbsp;Новый клиент</button>
-              <button class="btn" id="qa-order">🛠 &nbsp;Принять заказ / ремонт</button>
+              <button class="btn btn-primary" id="qa-sale">${ui.icon('plus')} Оформить продажу</button>
+              <button class="btn" id="qa-pay">${ui.icon('money')} Принять оплату долга</button>
+              <button class="btn" id="qa-product">${ui.icon('gem')} Добавить изделие</button>
+              <button class="btn" id="qa-customer">${ui.icon('users')} Новый клиент</button>
+              <button class="btn" id="qa-order">${ui.icon('wrench')} Принять заказ / ремонт</button>
             </div>
           </div>
 
@@ -120,7 +120,7 @@ window.Pages.dashboard = {
           </div>
 
           <div class="card">
-            <h3 class="card-title">Поводы связаться 🎁</h3>
+            <h3 class="card-title">Поводы связаться</h3>
             <div id="dash-bd"></div>
           </div>
         </div>

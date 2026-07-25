@@ -59,7 +59,7 @@ window.Pages.labels = (() => {
         <div class="form-hint">Печатается на обычном принтере. Штрихкод потом читается сканером
         при продаже и инвентаризации.</div>`,
       footer: `<button class="btn" data-act="cancel">Закрыть</button>
-        <button class="btn btn-primary" data-act="print">🖨 Печатать</button>`,
+        <button class="btn btn-primary" data-act="print">${ui.icon('print')} Печатать</button>`,
     });
     m.foot.querySelector('[data-act=cancel]').onclick = m.close;
     m.foot.querySelector('[data-act=print]').onclick = () => { printLabels([product]); m.close(); };
@@ -186,7 +186,7 @@ window.Pages.labels = (() => {
           <div class="card">
             <div style="font-size:16px;font-weight:600;margin-bottom:12px" id="lb-count">Ничего не выбрано</div>
             <div class="row">
-              <button class="btn btn-primary grow" id="lb-print">🖨 Печатать бирки</button>
+              <button class="btn btn-primary grow" id="lb-print">${ui.icon('print')} Печатать бирки</button>
               <button class="btn" id="lb-clear">Сбросить</button>
             </div>
           </div>

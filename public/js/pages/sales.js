@@ -61,7 +61,7 @@ window.Pages.sales = (() => {
       ${s.customer_name ? `<div class="r-row"><span>Клиент</span><span>${ui.esc(s.customer_name)}</span></div>` : ''}
       <div class="r-line"></div>
       <div class="r-center">Продавец: ${ui.esc(s.seller_name || '—')}</div>
-      <div class="r-center">Спасибо за покупку! ✦</div>
+      <div class="r-center">Спасибо за покупку!</div>
     </div>`;
     window.print();
   }
@@ -339,9 +339,9 @@ window.Pages.sales = (() => {
           ${s.note ? `<p class="muted">Комментарий: ${ui.esc(s.note)}</p>` : ''}`,
         footer: `
           ${canReturn ? '<button class="btn btn-danger left" data-act="return" disabled>Оформить возврат</button>' : ''}
-          ${canReturn ? '<button class="btn left" data-act="exchange" disabled>⇄ Обмен</button>' : ''}
-          ${s.debt > 0 ? '<button class="btn btn-primary" data-act="pay">¤ Принять оплату</button>' : ''}
-          <button class="btn" data-act="print">🖨 Печать чека</button>
+          ${canReturn ? `<button class="btn left" data-act="exchange" disabled>${ui.icon('exchange')} Обмен</button>` : ''}
+          ${s.debt > 0 ? `<button class="btn btn-primary" data-act="pay">${ui.icon('money')} Принять оплату</button>` : ''}
+          <button class="btn" data-act="print">${ui.icon('print')} Печать чека</button>
           <button class="btn" data-act="close">Закрыть</button>`,
       });
       const payBtn = m.foot.querySelector('[data-act=pay]');
@@ -630,7 +630,7 @@ window.Pages.sales = (() => {
         m.close();
         ui.toast(sale.debt > 0
           ? `Продажа ${sale.number} оформлена. Долг клиента: ${ui.money(sale.debt)}`
-          : `Продажа ${sale.number} на ${ui.money(sale.total)} оформлена ✦`);
+          : `Продажа ${sale.number} на ${ui.money(sale.total)} оформлена`);
         if (Pages._salesRefresh) Pages._salesRefresh();
         if (location.hash.includes('dashboard') || location.hash === '' || location.hash === '#/') {
           window.dispatchEvent(new HashChangeEvent('hashchange'));

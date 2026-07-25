@@ -48,7 +48,7 @@ addUser('mikhail', 'Михаил Орлов', 'seller', 'seller123');
 const userIds = db.prepare('SELECT id FROM users').all().map(r => r.id);
 
 // ---------- Настройки ----------
-setSetting('store_name', 'Asher Jewelry');
+setSetting('store_name', 'Asher Diamonds');
 setSetting('store_address', 'Бишкек, ул. Киевская, 95');
 setSetting('store_phone', '+996 312 66-12-34');
 

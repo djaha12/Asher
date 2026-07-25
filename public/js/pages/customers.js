@@ -24,7 +24,7 @@ window.Pages.customers = (() => {
 
   function openDetail(id, onChange) {
     api.get('/api/customers/' + id).then(c => {
-      const nextDates = [c.birthday && `🎂 ${ui.dateOnly(c.birthday)}`, c.anniversary && `💍 ${ui.dateOnly(c.anniversary)}`]
+      const nextDates = [c.birthday && `ДР: ${ui.dateOnly(c.birthday)}`, c.anniversary && `Годовщина: ${ui.dateOnly(c.anniversary)}`]
         .filter(Boolean).join(' · ');
       const m = ui.modal({
         title: c.name,
@@ -120,7 +120,7 @@ window.Pages.customers = (() => {
           <input type="text" class="input search" id="cf-search" placeholder="Поиск: имя, телефон, e-mail…" autocomplete="off">
           <div class="spacer"></div>
           ${App.isAdmin() ? '<a class="btn" href="/api/export/customers" download>Экспорт CSV</a>' : ''}
-          <button class="btn btn-primary" id="cf-add">+ Новый клиент</button>
+          <button class="btn btn-primary" id="cf-add">${ui.icon('plus')} Новый клиент</button>
         </div>
         <div id="cust-list"></div>`;
 
