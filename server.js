@@ -252,6 +252,9 @@ const server = http.createServer(async (req, res) => {
 auth.cleanupSessions();
 setInterval(() => auth.cleanupSessions(), 6 * 3600 * 1000).unref();
 
+// Автообмен с 1С (папка «1С-ОБМЕН») и ежедневные резервные копии.
+require('./src/sync').start();
+
 // Адреса в локальной сети — чтобы открыть систему с телефона по Wi-Fi магазина.
 function lanAddresses() {
   const out = [];

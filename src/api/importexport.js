@@ -166,6 +166,149 @@ function csvResponse(res, filename, content) {
   res.end(content);
 }
 
+/*
+ * Импорт CSV — общая функция для ручного импорта со страницы
+ * и для автообмена с 1С (папка «1С-ОБМЕН»).
+ */
+function importCsv(body, userId) {
+  const csv = String(body.csv || '');
+  const entity = body.entity === 'customers' ? 'customers' : 'products';
+  const mapping = body.mapping || {};
+  const delimiter = body.delimiter || detectDelimiter(csv);
+  const rows = parseCsv(csv, delimiter).slice(1);
+  if (!rows.length) throw new ApiError(400, 'Нет строк для импорта');
+  if (mapping.name === undefined) throw new ApiError(400, 'Не указана колонка с наименованием');
+
+  // Режим повторной выгрузки: совпавшие по артикулу позиции не пропускаем,
+  // а обновляем — цены и наименования в 1С меняются, и подгружать их
+  // должно быть так же просто, как загрузить в первый раз.
+  const updateExisting = Boolean(body.update_existing);
+  // Какие поля разрешено перезаписывать. По умолчанию — только цены:
+  // название и категорию в системе часто правят руками под витрину.
+  const updateFields = Array.isArray(body.update_fields) && body.update_fields.length
+    ? body.update_fields
+    : ['purchase_price', 'retail_price'];
+
+  const errors = [];
+  let created = 0, skipped = 0, updated = 0, unchanged = 0;
+
+  transaction(() => {
+    if (entity === 'products') {
+      const catCache = new Map(
+        db.prepare('SELECT id, name FROM categories').all().map(c => [c.name.toLowerCase(), c.id])
+      );
+      const insCat = db.prepare('INSERT INTO categories (name, sort) VALUES (?, 999)');
+      const skuExists = db.prepare('SELECT 1 FROM products WHERE sku = ?');
+      const findBySku = db.prepare('SELECT * FROM products WHERE sku = ?');
+      // Импортированный товар кладём на выбранную точку (по умолчанию — основную),
+      // иначе он не попадёт ни в остатки точки, ни в инвентаризацию.
+      const targetStore = body.store_id
+        ? Number(body.store_id)
+        : (db.prepare('SELECT id FROM stores ORDER BY is_default DESC, sort, id LIMIT 1').get() || {}).id || null;
+      const ins = db.prepare(
+        `INSERT INTO products (sku, barcode, name, category_id, metal, weight, size, gem_summary,
+           purchase_price, retail_price, description, store_id, status, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'in_stock', ?)`
+      );
+      let autoSku = Number(db.prepare('SELECT COUNT(*) AS c FROM products').get().c) + 1;
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const name = pick(row, mapping, 'name');
+        if (!name) { errors.push(`Строка ${i + 2}: пустое наименование — пропущена`); skipped++; continue; }
+        let sku = pick(row, mapping, 'sku') || '';
+        if (!sku) {
+          do { sku = `IMP-${String(autoSku++).padStart(5, '0')}`; } while (skuExists.get(sku));
+        }
+        const existing = findBySku.get(sku);
+        if (existing && !updateExisting) {
+          errors.push(`Строка ${i + 2}: артикул «${sku}» уже есть — пропущена`);
+          skipped++;
+          continue;
+        }
+
+        let categoryId = null;
+        const catName = pick(row, mapping, 'category');
+        if (catName) {
+          const key = catName.toLowerCase();
+          if (!catCache.has(key)) {
+            const info = insCat.run(catName);
+            catCache.set(key, Number(info.lastInsertRowid));
+          }
+          categoryId = catCache.get(key);
+        }
+
+        if (existing) {
+          // Проданное и списанное не трогаем: у него своя история и цена продажи.
+          if (existing.status === 'sold' || existing.status === 'written_off') {
+            skipped++;
+            continue;
+          }
+          const next = {};
+          const candidate = {
+            name,
+            barcode: pick(row, mapping, 'barcode'),
+            category_id: catName ? categoryId : undefined,
+            metal: pick(row, mapping, 'metal'),
+            weight: mapping.weight !== undefined ? parseNumber(pick(row, mapping, 'weight')) : undefined,
+            size: pick(row, mapping, 'size'),
+            gem_summary: pick(row, mapping, 'gem_summary'),
+            purchase_price: mapping.purchase_price !== undefined
+              ? round2(parseNumber(pick(row, mapping, 'purchase_price'))) : undefined,
+            retail_price: mapping.retail_price !== undefined
+              ? round2(parseNumber(pick(row, mapping, 'retail_price'))) : undefined,
+            description: pick(row, mapping, 'description'),
+          };
+          for (const field of updateFields) {
+            const value = candidate[field];
+            if (value === undefined || value === '') continue;
+            if (existing[field] === value) continue;
+            next[field] = value;
+          }
+          const fields = Object.keys(next);
+          if (!fields.length) { unchanged++; continue; }
+          db.prepare(`UPDATE products SET ${fields.map(f => `${f} = ?`).join(', ')} WHERE id = ?`)
+            .run(...fields.map(f => next[f]), existing.id);
+          updated++;
+          continue;
+        }
+
+        ins.run(sku, pick(row, mapping, 'barcode') || '', name, categoryId,
+          pick(row, mapping, 'metal') || '', parseNumber(pick(row, mapping, 'weight')),
+          pick(row, mapping, 'size') || '', pick(row, mapping, 'gem_summary') || '',
+          round2(parseNumber(pick(row, mapping, 'purchase_price'))),
+          round2(parseNumber(pick(row, mapping, 'retail_price'))),
+          pick(row, mapping, 'description') || '', targetStore, nowIso());
+        created++;
+      }
+    } else {
+      const phoneExists = db.prepare(`SELECT 1 FROM customers WHERE phone = ? AND phone != ''`);
+      const ins = db.prepare(
+        `INSERT INTO customers (name, phone, email, birthday, discount, notes, created_at)
+         VALUES (?,?,?,?,?,?,?)`
+      );
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const name = pick(row, mapping, 'name');
+        if (!name) { errors.push(`Строка ${i + 2}: пустое имя — пропущена`); skipped++; continue; }
+        const phone = pick(row, mapping, 'phone') || '';
+        if (phone && phoneExists.get(phone)) {
+          errors.push(`Строка ${i + 2}: клиент с телефоном ${phone} уже есть — пропущена`);
+          skipped++; continue;
+        }
+        const discount = Math.min(Math.max(parseNumber(pick(row, mapping, 'discount')), 0), 100);
+        ins.run(name, phone, pick(row, mapping, 'email') || '',
+          parseDate(pick(row, mapping, 'birthday')), discount,
+          pick(row, mapping, 'notes') || '', nowIso());
+        created++;
+      }
+    }
+  });
+
+  audit(userId, 'import', String(body.entity === 'customers' ? 'customers' : 'products'), null,
+    `Импорт: ${created} создано, ${updated} обновлено, ${skipped} пропущено`);
+  return { created, updated, unchanged, skipped, errors: errors.slice(0, 50) };
+}
+
 // ---------- Маршруты ----------
 
 const routes = [
@@ -192,144 +335,7 @@ const routes = [
   },
   {
     method: 'POST', path: '/api/import/commit', admin: true,
-    handler: ({ body, session }) => {
-      const csv = String(body.csv || '');
-      const entity = body.entity === 'customers' ? 'customers' : 'products';
-      const mapping = body.mapping || {};
-      const delimiter = body.delimiter || detectDelimiter(csv);
-      const rows = parseCsv(csv, delimiter).slice(1);
-      if (!rows.length) throw new ApiError(400, 'Нет строк для импорта');
-      if (mapping.name === undefined) throw new ApiError(400, 'Не указана колонка с наименованием');
-
-      // Режим повторной выгрузки: совпавшие по артикулу позиции не пропускаем,
-      // а обновляем — цены и наименования в 1С меняются, и подгружать их
-      // должно быть так же просто, как загрузить в первый раз.
-      const updateExisting = Boolean(body.update_existing);
-      // Какие поля разрешено перезаписывать. По умолчанию — только цены:
-      // название и категорию в системе часто правят руками под витрину.
-      const updateFields = Array.isArray(body.update_fields) && body.update_fields.length
-        ? body.update_fields
-        : ['purchase_price', 'retail_price'];
-
-      const errors = [];
-      let created = 0, skipped = 0, updated = 0, unchanged = 0;
-
-      transaction(() => {
-        if (entity === 'products') {
-          const catCache = new Map(
-            db.prepare('SELECT id, name FROM categories').all().map(c => [c.name.toLowerCase(), c.id])
-          );
-          const insCat = db.prepare('INSERT INTO categories (name, sort) VALUES (?, 999)');
-          const skuExists = db.prepare('SELECT 1 FROM products WHERE sku = ?');
-          const findBySku = db.prepare('SELECT * FROM products WHERE sku = ?');
-          // Импортированный товар кладём на выбранную точку (по умолчанию — основную),
-          // иначе он не попадёт ни в остатки точки, ни в инвентаризацию.
-          const targetStore = body.store_id
-            ? Number(body.store_id)
-            : (db.prepare('SELECT id FROM stores ORDER BY is_default DESC, sort, id LIMIT 1').get() || {}).id || null;
-          const ins = db.prepare(
-            `INSERT INTO products (sku, barcode, name, category_id, metal, weight, size, gem_summary,
-               purchase_price, retail_price, description, store_id, status, created_at)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'in_stock', ?)`
-          );
-          let autoSku = Number(db.prepare('SELECT COUNT(*) AS c FROM products').get().c) + 1;
-          for (let i = 0; i < rows.length; i++) {
-            const row = rows[i];
-            const name = pick(row, mapping, 'name');
-            if (!name) { errors.push(`Строка ${i + 2}: пустое наименование — пропущена`); skipped++; continue; }
-            let sku = pick(row, mapping, 'sku') || '';
-            if (!sku) {
-              do { sku = `IMP-${String(autoSku++).padStart(5, '0')}`; } while (skuExists.get(sku));
-            }
-            const existing = findBySku.get(sku);
-            if (existing && !updateExisting) {
-              errors.push(`Строка ${i + 2}: артикул «${sku}» уже есть — пропущена`);
-              skipped++;
-              continue;
-            }
-
-            let categoryId = null;
-            const catName = pick(row, mapping, 'category');
-            if (catName) {
-              const key = catName.toLowerCase();
-              if (!catCache.has(key)) {
-                const info = insCat.run(catName);
-                catCache.set(key, Number(info.lastInsertRowid));
-              }
-              categoryId = catCache.get(key);
-            }
-
-            if (existing) {
-              // Проданное и списанное не трогаем: у него своя история и цена продажи.
-              if (existing.status === 'sold' || existing.status === 'written_off') {
-                skipped++;
-                continue;
-              }
-              const next = {};
-              const candidate = {
-                name,
-                barcode: pick(row, mapping, 'barcode'),
-                category_id: catName ? categoryId : undefined,
-                metal: pick(row, mapping, 'metal'),
-                weight: mapping.weight !== undefined ? parseNumber(pick(row, mapping, 'weight')) : undefined,
-                size: pick(row, mapping, 'size'),
-                gem_summary: pick(row, mapping, 'gem_summary'),
-                purchase_price: mapping.purchase_price !== undefined
-                  ? round2(parseNumber(pick(row, mapping, 'purchase_price'))) : undefined,
-                retail_price: mapping.retail_price !== undefined
-                  ? round2(parseNumber(pick(row, mapping, 'retail_price'))) : undefined,
-                description: pick(row, mapping, 'description'),
-              };
-              for (const field of updateFields) {
-                const value = candidate[field];
-                if (value === undefined || value === '') continue;
-                if (existing[field] === value) continue;
-                next[field] = value;
-              }
-              const fields = Object.keys(next);
-              if (!fields.length) { unchanged++; continue; }
-              db.prepare(`UPDATE products SET ${fields.map(f => `${f} = ?`).join(', ')} WHERE id = ?`)
-                .run(...fields.map(f => next[f]), existing.id);
-              updated++;
-              continue;
-            }
-
-            ins.run(sku, pick(row, mapping, 'barcode') || '', name, categoryId,
-              pick(row, mapping, 'metal') || '', parseNumber(pick(row, mapping, 'weight')),
-              pick(row, mapping, 'size') || '', pick(row, mapping, 'gem_summary') || '',
-              round2(parseNumber(pick(row, mapping, 'purchase_price'))),
-              round2(parseNumber(pick(row, mapping, 'retail_price'))),
-              pick(row, mapping, 'description') || '', targetStore, nowIso());
-            created++;
-          }
-        } else {
-          const phoneExists = db.prepare(`SELECT 1 FROM customers WHERE phone = ? AND phone != ''`);
-          const ins = db.prepare(
-            `INSERT INTO customers (name, phone, email, birthday, discount, notes, created_at)
-             VALUES (?,?,?,?,?,?,?)`
-          );
-          for (let i = 0; i < rows.length; i++) {
-            const row = rows[i];
-            const name = pick(row, mapping, 'name');
-            if (!name) { errors.push(`Строка ${i + 2}: пустое имя — пропущена`); skipped++; continue; }
-            const phone = pick(row, mapping, 'phone') || '';
-            if (phone && phoneExists.get(phone)) {
-              errors.push(`Строка ${i + 2}: клиент с телефоном ${phone} уже есть — пропущена`);
-              skipped++; continue;
-            }
-            const discount = Math.min(Math.max(parseNumber(pick(row, mapping, 'discount')), 0), 100);
-            ins.run(name, phone, pick(row, mapping, 'email') || '',
-              parseDate(pick(row, mapping, 'birthday')), discount,
-              pick(row, mapping, 'notes') || '', nowIso());
-            created++;
-          }
-        }
-      });
-
-      audit(session.userId, 'import', entity, null,
-        `Импорт: ${created} создано, ${updated} обновлено, ${skipped} пропущено`);
-      return { created, updated, unchanged, skipped, errors: errors.slice(0, 50) };
-    },
+    handler: ({ body, session }) => importCsv(body, session.userId),
   },
 
   {
@@ -382,4 +388,4 @@ const routes = [
   },
 ];
 
-module.exports = { routes };
+module.exports = { routes, importCsv, parseCsv, detectDelimiter, suggestMapping, PRODUCT_MAP_HINTS };

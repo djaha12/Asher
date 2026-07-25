@@ -61,6 +61,11 @@ const routes = [
       return { addresses, port, hostname: os.hostname() };
     },
   },
+  {
+    // Состояние автообмена с 1С и резервных копий — показывается на странице импорта.
+    method: 'GET', path: '/api/sync/status', admin: true,
+    handler: () => require('../sync').status(),
+  },
 
   // --- Категории ---
   {

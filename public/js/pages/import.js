@@ -66,6 +66,11 @@ window.Pages.import = (() => {
         <div id="ph-result" style="margin-top:14px"></div>
       </div>
 
+      <h2 class="section-title">Автообмен с 1С и резервные копии</h2>
+      <div class="card" id="sync-card">
+        <div class="muted">Загрузка…</div>
+      </div>
+
       <h2 class="section-title">Экспорт данных из Asher</h2>
       <div class="card">
         <p class="muted" style="margin-top:0">Резервная копия или перенос в Excel — данные выгружаются в CSV (открывается в Excel).</p>
@@ -77,6 +82,7 @@ window.Pages.import = (() => {
       </div>`;
 
     bindPhotoImport(el);
+    renderSyncCard(el).catch(() => {});
 
     const fileInput = el.querySelector('#imp-file');
     const nextBtn = el.querySelector('#imp-next');
@@ -94,6 +100,49 @@ window.Pages.import = (() => {
         nextBtn.disabled = false;
       }
     });
+  }
+
+  // ---------- Автообмен с 1С и резервные копии ----------
+
+  async function renderSyncCard(el) {
+    const card = el.querySelector('#sync-card');
+    let s;
+    try { s = await api.get('/api/sync/status'); }
+    catch { if (card) card.innerHTML = '<div class="muted">Состояние автообмена недоступно.</div>'; return; }
+    if (!card || !card.isConnected) return;
+
+    const logRows = (s.log || []).slice(0, 8);
+    card.innerHTML = `
+      <div class="hint-box" style="margin-bottom:14px">
+        <strong>Ничего нажимать не нужно.</strong> Рядом с программой есть папка
+        <code>1С-ОБМЕН</code> — положите в неё CSV-выгрузку из 1С, и система сама обновит цены,
+        добавит новые изделия и перенесёт файл в подпапку «обработано» вместе с отчётом.
+        Файлы с нераспознанными колонками попадают в «ошибки». Названия и категории не трогаются.
+      </div>
+      <div class="grid grid-2">
+        <div>
+          <div class="card-title">Последние обмены</div>
+          ${logRows.length ? ui.table([
+            { title: 'Когда', render: r => ui.esc(ui.dt(r.created_at)) },
+            { title: 'Файл', render: r => `<span class="mono">${ui.esc(r.file)}</span>` },
+            { title: 'Результат', render: r => r.status === 'ok'
+              ? `<span class="good">+${r.created} новых, ${r.updated} обновлено</span>`
+              : `<span class="warn">${ui.esc(r.message || 'ошибка')}</span>` },
+          ], logRows, { empty: '' })
+          : '<div class="muted">Обменов ещё не было. Папка ждёт первый файл.</div>'}
+        </div>
+        <div>
+          <div class="card-title">Резервные копии</div>
+          <p class="muted" style="margin-top:0">
+            Раз в сутки снимок базы сохраняется в папку <code>РЕЗЕРВНЫЕ-КОПИИ</code>
+            (хранятся последние 14). Это защита от поломки компьютера — время от времени
+            копируйте эту папку на флешку или в облако.
+          </p>
+          <div>${s.backups_count
+            ? `Копий: <b>${s.backups_count}</b> · последняя: <span class="mono">${ui.esc(s.latest_backup)}</span>`
+            : 'Первая копия появится после запуска системы.'}</div>
+        </div>
+      </div>`;
   }
 
   // ---------- Массовый перенос фотографий ----------
