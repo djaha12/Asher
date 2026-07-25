@@ -15,12 +15,22 @@ window.Pages.labels = (() => {
 
   // Что печатать на бирке — набор полей запоминается между сеансами.
   const OPTS_KEY = 'asher_label_opts';
-  const defaultOpts = { name: true, sku: true, metal: true, weight: true, price: true, barcode: true, store: false };
+  const defaultOpts = { name: true, sku: true, metal: true, weight: true, price: true, barcode: true, qr: false, store: false };
   function loadOpts() {
     try { return { ...defaultOpts, ...JSON.parse(localStorage.getItem(OPTS_KEY) || '{}') }; }
     catch { return { ...defaultOpts }; }
   }
   let opts = loadOpts();
+
+  // QR с артикулом: читается камерой любого телефона и «Распознать по фото».
+  function qrSvg(code) {
+    try {
+      const qr = qrcode(0, 'M');
+      qr.addData(String(code));
+      qr.make();
+      return qr.createSvgTag({ cellSize: 2, margin: 0, scalable: true });
+    } catch { return ''; }
+  }
 
   function labelHtml(p, o = opts) {
     const code = p.barcode || p.sku;
@@ -33,6 +43,7 @@ window.Pages.labels = (() => {
         ${meta ? `<div>${ui.esc(meta)}</div>` : ''}
         ${o.store && p.store_name ? `<div>${ui.esc(p.store_name)}</div>` : ''}
         ${o.price ? `<div class="jl-price">${ui.money(p.retail_price)}</div>` : ''}
+        ${o.qr && code ? `<div class="jl-qr">${qrSvg(code)}</div>` : ''}
         ${o.barcode && code ? ui.barcodeSvg(code) +
           `<div class="jl-sku" style="text-align:center;letter-spacing:.08em">${ui.esc(code)}</div>` : ''}
       </div>`;
@@ -178,6 +189,7 @@ window.Pages.labels = (() => {
               ${optRow('weight', 'Вес')}
               ${optRow('price', 'Цена')}
               ${optRow('barcode', 'Штрихкод')}
+              ${optRow('qr', 'QR-код')}
               ${stores.length > 1 ? optRow('store', 'Точка') : ''}
             </div>
             <div class="card-title">Образец</div>

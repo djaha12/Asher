@@ -112,6 +112,7 @@ window.Pages.inventory = (() => {
             autocapitalize="none" autocorrect="off" spellcheck="false">
           <div class="row" style="justify-content:center;margin-top:10px">
             <button class="btn" id="scan-camera">${ui.icon('camera')} Сканировать камерой</button>
+            <button class="btn" id="scan-photo">${ui.icon('image')} Распознать по фото</button>
           </div>
           <div id="camera-wrap" class="hidden" style="margin-top:12px">
             <video class="scan-video" id="scan-video" playsinline muted></video>
@@ -268,6 +269,32 @@ window.Pages.inventory = (() => {
     });
 
     pageEl.querySelector('#scan-camera').addEventListener('click', () => startCamera(submit));
+
+    // Фото бирки: в QR бывает и артикул, и ссылка с артикулом внутри —
+    // пробуем варианты по очереди, пока изделие не найдётся.
+    pageEl.querySelector('#scan-photo').addEventListener('click', async () => {
+      show('ok', 'Выберите или сделайте фото бирки…');
+      const text = await Scan.pickAndDecode();
+      if (!text) { show('err', 'QR-код на фото не распознан. Снимите ближе и без бликов.'); return; }
+      const list = Scan.candidates(text);
+      for (const code of list) {
+        try {
+          await submitCode(code);
+          return;
+        } catch { /* этот вариант не подошёл — пробуем следующий */ }
+      }
+      show('err', `Код «${list[0]}» не найден в базе`);
+    });
+
+    // То же сканирование, но с ошибкой наружу — для перебора кандидатов.
+    async function submitCode(code) {
+      const res = await api.post(`/api/inventory/${currentId}/scan`, { code });
+      const p = res.product;
+      if (res.warning) show('warn', `${p.sku} — ${p.name}. ${res.warning}`);
+      else if (res.duplicate) show('ok', `${p.sku} — уже отсканировано`);
+      else show('ok', `✓ ${p.sku} — ${p.name}`);
+      refreshCounters();
+    }
   }
 
   // Обновление цифр без перерисовки страницы — чтобы не сбить сканирование.
@@ -295,9 +322,9 @@ window.Pages.inventory = (() => {
     const video = pageEl.querySelector('#scan-video');
     if (cameraStop) { stopCamera(); wrap.classList.add('hidden'); return; }
 
-    if (!('BarcodeDetector' in window)) {
-      ui.toast('Этот браузер не умеет читать штрихкоды камерой. Введите артикул вручную ' +
-        'или используйте обычный сканер.', true);
+    if (!Scan.cameraSupported()) {
+      ui.toast('Камера в этом браузере недоступна. Используйте «Распознать по фото» ' +
+        'или обычный сканер штрихкодов.', true);
       return;
     }
     let stream;
@@ -314,33 +341,19 @@ window.Pages.inventory = (() => {
     video.srcObject = stream;
     await video.play().catch(() => {});
 
-    const detector = new BarcodeDetector({
-      formats: ['code_128', 'ean_13', 'ean_8', 'code_39', 'qr_code', 'upc_a', 'upc_e'],
-    });
     let last = '';
     let lastAt = 0;
-    let running = true;
-
-    const tick = async () => {
-      if (!running || !video.isConnected) return;
-      try {
-        const codes = await detector.detect(video);
-        if (codes.length) {
-          const value = codes[0].rawValue;
-          // Один и тот же код в кадре держится секундами — не шлём его на сервер потоком.
-          if (value !== last || Date.now() - lastAt > 2500) {
-            last = value;
-            lastAt = Date.now();
-            submit(value);
-          }
-        }
-      } catch { /* кадр не распознан — пробуем следующий */ }
-      if (running) setTimeout(tick, 350);
-    };
-    tick();
+    // Один и тот же код в кадре держится секундами — не шлём его на сервер потоком.
+    const stopWatch = Scan.watchVideo(video, value => {
+      if (value !== last || Date.now() - lastAt > 2500) {
+        last = value;
+        lastAt = Date.now();
+        submit(value);
+      }
+    });
 
     cameraStop = () => {
-      running = false;
+      stopWatch();
       stream.getTracks().forEach(t => t.stop());
       video.srcObject = null;
     };

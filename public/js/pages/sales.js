@@ -69,6 +69,22 @@ window.Pages.sales = (() => {
   const r2 = x => Math.round((Number(x) || 0) * 100) / 100;
 
   /*
+   * Фото бирки → изделие. Распознаём QR, из текста готовим кандидатов
+   * (артикул, штрихкод, кусок ссылки) и ищем точное совпадение в каталоге.
+   */
+  async function productFromPhoto() {
+    const text = await Scan.pickAndDecode();
+    if (!text) { ui.toast('QR-код на фото не распознан. Снимите ближе и без бликов.', true); return null; }
+    for (const code of Scan.candidates(text)) {
+      const { items } = await api.get('/api/products?search=' + encodeURIComponent(code));
+      const exact = items.find(pr => pr.barcode === code || pr.sku.toLowerCase() === code.toLowerCase());
+      if (exact) return exact;
+    }
+    ui.toast(`Изделие с кодом «${Scan.candidates(text)[0]}» не найдено`, true);
+    return null;
+  }
+
+  /*
    * Обмен: клиент возвращает выбранные позиции чека и берёт другие изделия.
    * Деньги за возвращённое идут в зачёт нового чека — на руки выдаётся или
    * доплачивается только разница. Всё оформляется одним действием.
@@ -94,9 +110,12 @@ window.Pages.sales = (() => {
           ${debtCut > 0.009 ? `Сначала спишется долг по чеку ${ui.money(debtCut)}. ` : ''}
           В зачёт нового идёт <strong>${ui.money(credit)}</strong>.
         </div>
-        <div class="rel" style="margin-bottom:14px">
-          <input type="text" class="input" id="ex-search"
-            placeholder="Что берёт взамен: название, артикул или сканируйте штрихкод…" autocomplete="off">
+        <div class="row" style="margin-bottom:14px;flex-wrap:nowrap">
+          <div class="rel grow">
+            <input type="text" class="input" id="ex-search"
+              placeholder="Что берёт взамен: название, артикул или сканируйте штрихкод…" autocomplete="off">
+          </div>
+          <button type="button" class="btn" id="ex-scan" title="Распознать QR на фото бирки">${ui.icon('camera')}</button>
         </div>
         <div class="pos-items" id="ex-items"></div>
         <div class="form-grid">
@@ -255,6 +274,10 @@ window.Pages.sales = (() => {
       if (pick) { addItem(pick); searchInput.value = ''; clearResults(); }
     });
     searchInput.addEventListener('blur', () => setTimeout(clearResults, 150));
+    m.body.querySelector('#ex-scan').addEventListener('click', async () => {
+      const found = await productFromPhoto();
+      if (found) addItem(found);
+    });
 
     m.foot.querySelector('[data-act=cancel]').onclick = m.close;
     okBtn.onclick = async () => {
@@ -399,8 +422,11 @@ window.Pages.sales = (() => {
       title: 'Новая продажа',
       size: 'lg',
       body: `
-        <div class="rel" style="margin-bottom:14px">
-          <input type="text" class="input" id="pos-search" placeholder="Изделие: название, артикул или сканируйте штрихкод…" autocomplete="off">
+        <div class="row" style="margin-bottom:14px;flex-wrap:nowrap">
+          <div class="rel grow">
+            <input type="text" class="input" id="pos-search" placeholder="Изделие: название, артикул или сканируйте штрихкод…" autocomplete="off">
+          </div>
+          <button type="button" class="btn" id="pos-scan" title="Распознать QR на фото бирки">${ui.icon('camera')}</button>
         </div>
         <div class="pos-items" id="pos-items"></div>
         <div class="form-grid">
@@ -591,6 +617,10 @@ window.Pages.sales = (() => {
       }
     });
     searchInput.addEventListener('blur', () => setTimeout(clearResults, 150));
+    m.body.querySelector('#pos-scan').addEventListener('click', async () => {
+      const found = await productFromPhoto();
+      if (found) addProduct(found);
+    });
 
     // Выбор клиента
     const custInput = m.body.querySelector('#pos-customer');

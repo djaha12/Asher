@@ -793,3 +793,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
   padding: 13px 16px; font-size: 13.5px; color: var(--ink-2); margin-bottom: 16px; line-height: 1.55;
 }
 .hint-box strong { color: var(--ink); }
+
+/* QR на бирке: компактный квадрат по центру */
+.jlabel .jl-qr { display: flex; justify-content: center; margin-top: 4px; }
+.jlabel .jl-qr svg { width: 76px; height: 76px; margin: 0; }
+@media print { .print-root .jlabel .jl-qr svg { width: 68px; height: 68px; } }
