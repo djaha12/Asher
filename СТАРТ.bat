@@ -1,0 +1,41 @@
+@echo off
+chcp 65001 >nul
+title Asher CRM
+cd /d "%~dp0"
+
+rem — Проверяем, установлен ли Node.js (программа, которая запускает систему)
+where node >nul 2>nul
+if errorlevel 1 (
+  echo.
+  echo  Не найден Node.js — бесплатная программа, которая запускает систему.
+  echo  Сейчас откроется сайт nodejs.org: нажмите зелёную кнопку скачивания,
+  echo  установите как обычную программу и запустите этот файл ещё раз.
+  echo.
+  start https://nodejs.org/
+  pause
+  exit /b 1
+)
+
+rem — Проверяем версию: нужна свежая (22.5 или новее)
+node -e "require('node:sqlite')" >nul 2>nul
+if errorlevel 1 (
+  echo.
+  echo  Ваша версия Node.js устарела. Скачайте свежую с nodejs.org
+  echo  ^(кнопка LTS^), установите поверх старой и запустите этот файл снова.
+  echo.
+  start https://nodejs.org/
+  pause
+  exit /b 1
+)
+
+echo.
+echo  Запускаю Asher CRM...
+echo  НЕ ЗАКРЫВАЙТЕ это чёрное окно, пока работаете с системой.
+echo  Чтобы выключить систему — просто закройте окно.
+echo.
+
+rem — Через пару секунд открываем браузер на странице входа
+start "" cmd /c "timeout /t 2 >nul & start http://localhost:3000"
+
+node server.js
+pause
