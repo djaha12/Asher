@@ -256,23 +256,59 @@ setInterval(() => auth.cleanupSessions(), 6 * 3600 * 1000).unref();
 require('./src/sync').start();
 
 // Адреса в локальной сети — чтобы открыть систему с телефона по Wi-Fi магазина.
-function lanAddresses() {
+function lanAddresses(port) {
   const out = [];
   for (const list of Object.values(require('node:os').networkInterfaces())) {
     for (const iface of list || []) {
-      if (iface.family === 'IPv4' && !iface.internal) out.push(`http://${iface.address}:${PORT}`);
+      if (iface.family === 'IPv4' && !iface.internal) out.push(`http://${iface.address}:${port}`);
     }
   }
   return out;
 }
 
-server.listen(PORT, () => {
+// Открыть браузер на странице входа. Только для запуска ярлыком (СТАРТ.bat):
+// сам порт известен здесь, а не в ярлыке, поэтому и адрес открываем отсюда.
+function openBrowser(url) {
+  if (process.env.ASHER_OPEN !== '1') return;
+  const { spawn } = require('node:child_process');
+  const [cmd, args] = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
+    : process.platform === 'darwin' ? ['open', [url]]
+      : ['xdg-open', [url]];
+  try { spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref(); }
+  catch { /* нет браузера — не беда, адрес напечатан ниже */ }
+}
+
+/*
+ * На рабочем компьютере порт 3000 нередко занят другой программой. Вместо
+ * падения с непонятной ошибкой берём следующий свободный и печатаем его.
+ */
+let portTries = 0;
+server.on('error', e => {
+  if (e.code === 'EADDRINUSE' && portTries < 10) {
+    portTries++;
+    if (portTries === 1) console.log(`  Порт ${PORT} занят другой программой, беру следующий свободный…`);
+    server.listen(PORT + portTries);
+    return;
+  }
+  console.error('\n  Не удалось запустить систему:', e.message, '\n');
+  process.exit(1);
+});
+
+server.on('listening', () => {
+  const port = server.address().port;
+  // Настройки → «Открыть на телефоне» должны показывать реальный порт,
+  // а не запрошенный: он мог смениться из-за занятости.
+  process.env.ASHER_ACTUAL_PORT = String(port);
+  const local = `http://localhost:${port}`;
   console.log(`\n  Asher CRM запущена`);
-  console.log(`  На этом компьютере:  http://localhost:${PORT}`);
-  const lan = lanAddresses();
+  console.log(`  На этом компьютере:  ${local}`);
+  const lan = lanAddresses(port);
   if (lan.length) {
     console.log(`\n  С телефона или планшета (в той же сети Wi-Fi):`);
     for (const addr of lan) console.log(`     ${addr}`);
   }
   console.log('\n  Вход по умолчанию: admin / admin123 (смените пароль в Настройках!)\n');
+  openBrowser(local);
 });
+
+server.listen(PORT);

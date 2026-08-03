@@ -28,5 +28,6 @@ echo "  Запускаю Asher CRM..."
 echo "  НЕ ЗАКРЫВАЙТЕ это окно, пока работаете с системой."
 echo
 
-( sleep 2; open "http://localhost:3000" 2>/dev/null ) &
+# Браузер откроет сама система: только она знает, какой порт оказался свободен
+export ASHER_OPEN=1
 node server.js

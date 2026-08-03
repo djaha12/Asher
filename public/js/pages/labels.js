@@ -25,6 +25,10 @@ window.Pages.labels = (() => {
   // QR с артикулом: читается камерой любого телефона и «Распознать по фото».
   function qrSvg(code) {
     try {
+      // Артикул может быть с кириллицей («К-001»). По умолчанию библиотека
+      // кладёт в QR младший байт символа и превращает «Ж» в мусор — переключаем
+      // на UTF-8, как и ждут все читающие программы.
+      qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
       const qr = qrcode(0, 'M');
       qr.addData(String(code));
       qr.make();

@@ -50,7 +50,7 @@ const routes = [
     // подсказки пришлось бы искать IP-адрес в настройках операционной системы.
     method: 'GET', path: '/api/settings/network', admin: true,
     handler: ({ req }) => {
-      const port = Number(process.env.ASHER_PORT || process.env.PORT || 3000);
+      const port = Number(process.env.ASHER_ACTUAL_PORT || process.env.ASHER_PORT || process.env.PORT || 3000);
       const addresses = [];
       for (const list of Object.values(os.networkInterfaces())) {
         for (const iface of list || []) {
