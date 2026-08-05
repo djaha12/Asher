@@ -336,6 +336,16 @@ const routes = [
       // поэтому не должен совпадать с артикулом комплекта.
       const dupSet = db.prepare('SELECT name FROM product_sets WHERE sku = ? COLLATE NOCASE').get(data.sku);
       if (dupSet) throw new ApiError(400, `Артикул «${data.sku}» занят комплектом «${dupSet.name}»`);
+      /*
+       * Изделие без точки продаж — вещь-невидимка: в общем складе оно есть,
+       * а в остатках точки нет, и инвентаризация его никогда не найдёт, потому
+       * что пересчёт всегда идёт по конкретной точке. Поэтому не указанную
+       * точку подставляем сами — основную, как это давно делает импорт из 1С.
+       */
+      if (!data.store_id) {
+        const def = db.prepare('SELECT id FROM stores ORDER BY is_default DESC, sort, id LIMIT 1').get();
+        if (def) data.store_id = def.id;
+      }
       const fields = PRODUCT_FIELDS.filter(f => data[f] !== undefined);
       const sql = `INSERT INTO products (${fields.join(',')}, created_at) VALUES (${fields.map(() => '?').join(',')}, ?)`;
       const info = db.prepare(sql).run(...fields.map(f => data[f]), nowIso());

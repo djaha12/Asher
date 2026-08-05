@@ -366,6 +366,20 @@ function migrate() {
   // Возврат товара пишется как adjust с отрицательной суммой и kind='return'.
   addColumn('supplier_ops', 'kind', `TEXT DEFAULT ''`);
 
+  /*
+   * Изделия без точки продаж: они числятся в общем складе, но не попадают
+   * ни в остатки точки, ни в инвентаризацию — пересчёт всегда идёт по точке.
+   * Раскладываем такие по основной точке. Флаг ставим только если точка
+   * действительно нашлась, иначе на пустой базе задача потерялась бы.
+   */
+  if (!getSetting('migrated_store_id')) {
+    const def = db.prepare('SELECT id FROM stores ORDER BY is_default DESC, sort, id LIMIT 1').get();
+    if (def) {
+      db.prepare('UPDATE products SET store_id = ? WHERE store_id IS NULL').run(def.id);
+      setSetting('migrated_store_id', '1');
+    }
+  }
+
   // Продажи, оформленные до появления долгов, считаем полностью оплаченными:
   // иначе вся прошлая выручка внезапно превратится в долг клиентов.
   if (!getSetting('migrated_paid')) {
