@@ -272,7 +272,10 @@ function importCsv(body, userId) {
 
         if (existing) {
           // Проданное и списанное не трогаем: у него своя история и цена продажи.
+          // Но молча пропускать нельзя — иначе в отчёте «пропущено 5» без причины.
           if (existing.status === 'sold' || existing.status === 'written_off') {
+            errors.push(`Строка ${i + 2}: «${sku}» ${existing.status === 'sold' ? 'продано' : 'списано'}` +
+              ' — цену не меняем, у него своя история');
             skipped++;
             continue;
           }
