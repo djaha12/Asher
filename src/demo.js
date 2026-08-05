@@ -24,6 +24,19 @@ async function holdWindow() {
   await ask('\n  Нажмите Enter, чтобы закрыть окно... ');
 }
 
+// Запуск системы в этом же окне: оно и становится «чёрным окном СТАРТ».
+function startServer() {
+  return new Promise(resolve => {
+    const srv = spawn(process.execPath, ['server.js'], {
+      cwd: ROOT,
+      stdio: 'inherit',
+      env: { ...process.env, ASHER_OPEN: '1' },
+    });
+    srv.on('close', resolve);
+    srv.on('error', () => resolve(1));
+  });
+}
+
 async function main() {
   console.log('');
   console.log('  Если у вас открыто чёрное окно СТАРТ — сначала закройте его!');
@@ -35,9 +48,10 @@ async function main() {
   console.log('  Не запускайте после того, как начали вести настоящий учёт!');
   console.log('');
   console.log('  ---------------------------------------------------------');
-  console.log('   Наполнить  — введите цифру 1 и нажмите Enter');
-  console.log('   Отменить   — просто нажмите Enter');
+  console.log('   Наполнить примерами  — введите цифру 1 и нажмите Enter');
+  console.log('   Не наполнять         — просто нажмите Enter');
   console.log('  ---------------------------------------------------------');
+  console.log('  В обоих случаях система после этого запустится сама.');
   console.log('');
 
   /*
@@ -55,9 +69,11 @@ async function main() {
     'lf', 'lf,',       // «да», набранное в английской раскладке
   ];
   if (!YES.includes(answer)) {
-    console.log('\n  Отменено — ничего не изменилось.');
-    console.log('  Чтобы наполнить примерами, запустите файл снова');
-    console.log('  и введите цифру 1.');
+    // Отказ — не тупик: запускаем систему с теми данными, что есть.
+    console.log('\n  Хорошо, примеры не загружаю.');
+    console.log('  Запускаю систему как есть — сейчас откроется браузер...');
+    console.log('');
+    await startServer();
     await holdWindow();
     return;
   }
@@ -73,9 +89,19 @@ async function main() {
   if (code !== 0) {
     console.log('\n  Не получилось наполнить базу.');
     console.log('  Проверьте, что чёрное окно СТАРТ закрыто, и запустите этот файл снова.');
-  } else {
-    console.log('\n  Готово. Теперь запустите СТАРТ.');
+    await holdWindow();
+    return;
   }
+
+  /*
+   * Сразу запускаем систему, не заставляя человека искать второй файл.
+   * Раньше здесь было «Теперь запустите СТАРТ» — и на этом месте люди
+   * терялись: окно закрылось, ничего не открылось, выглядит как поломка.
+   */
+  console.log('\n  Готово! Запускаю систему — сейчас откроется браузер...');
+  console.log('');
+  await startServer();
+  // Сюда попадаем, только когда сервер остановился.
   await holdWindow();
 }
 

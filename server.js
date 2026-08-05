@@ -300,8 +300,13 @@ function openBrowser(url) {
   const [cmd, args] = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
     : process.platform === 'darwin' ? ['open', [url]]
       : ['xdg-open', [url]];
-  try { spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref(); }
-  catch { /* нет браузера — не беда, адрес напечатан ниже */ }
+  try {
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
+    // Ошибка запуска приходит СОБЫТИЕМ, а не исключением: без этого обработчика
+    // отсутствие «открывалки» роняло бы весь сервер. Адрес и так напечатан ниже.
+    child.on('error', () => {});
+    child.unref();
+  } catch { /* нет браузера — не беда */ }
 }
 
 /*
