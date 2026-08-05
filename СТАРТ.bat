@@ -1,49 +1,25 @@
 @echo off
+rem Only ASCII here on purpose: Windows cmd may silently abort a batch file
+rem that contains Cyrillic text. All Russian output is printed by server.js.
 chcp 65001 >nul
 title Asher CRM
 cd /d "%~dp0"
 
-rem — Проверяем, установлен ли Node.js (программа, которая запускает систему)
 where node >nul 2>nul
 if errorlevel 1 (
   echo.
-  echo  Не найден Node.js — бесплатная программа, которая запускает систему.
-  echo  Сейчас откроется сайт nodejs.org: нажмите зелёную кнопку скачивания,
-  echo  установите как обычную программу и запустите этот файл ещё раз.
+  echo  Node.js ne ustanovlen - eto besplatnaya programma, vnutri kotoroy
+  echo  rabotaet sistema. Seychas otkroetsya sait nodejs.org: nazhmite
+  echo  zelenuyu knopku LTS, ustanovite i zapustite etot fail snova.
   echo.
   start https://nodejs.org/
   pause
   exit /b 1
 )
 
-rem — Проверяем версию: нужна свежая (22.5 или новее)
-node -e "require('node:sqlite')" >nul 2>nul
-if errorlevel 1 (
-  echo.
-  echo  Ваша версия Node.js устарела. Скачайте свежую с nodejs.org
-  echo  ^(кнопка LTS^), установите поверх старой и запустите этот файл снова.
-  echo.
-  start https://nodejs.org/
-  pause
-  exit /b 1
-)
-
-echo.
-echo  Запускаю Asher CRM...
-echo  НЕ ЗАКРЫВАЙТЕ это чёрное окно, пока работаете с системой.
-echo  Чтобы выключить систему — просто закройте окно.
-echo.
-
-rem — Браузер откроет сама система: только она знает, какой порт оказался свободен
+rem Browser is opened by the system itself: only it knows which port is free.
 set ASHER_OPEN=1
 
 node server.js
-rem — Сюда попадаем, когда система остановилась. Если это была ошибка, а не
-rem   закрытие окна человеком, объясняем, что делать, и не даём окну исчезнуть.
-if errorlevel 1 (
-  echo.
-  echo  Система остановилась с ошибкой.
-  echo  Чаще всего помогает: закрыть все чёрные окна Asher и запустить СТАРТ заново.
-)
 echo.
 pause

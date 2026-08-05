@@ -1,66 +1,20 @@
 @echo off
+rem Only ASCII here on purpose: Windows cmd may silently abort a batch file
+rem that contains Cyrillic text. All Russian output lives in src/demo.js.
 chcp 65001 >nul
-title Asher CRM — демо-данные
+title Asher CRM
 cd /d "%~dp0"
-
-rem — Подтверждение спрашиваем ЛАТИНСКОЙ буквой намеренно.
-rem   Ввод кириллицы в командном окне Windows при кодировке UTF-8 ненадёжен:
-rem   файл может молча оборваться прямо после ввода, и человек решит, что
-rem   программа сломалась. Латинская буква работает на любой раскладке.
 
 where node >nul 2>nul
 if errorlevel 1 (
   echo.
-  echo  Сначала установите Node.js — сейчас откроется сайт nodejs.org.
-  echo  Нажмите зелёную кнопку, установите и запустите этот файл ещё раз.
+  echo  Node.js ne ustanovlen - eto besplatnaya programma, vnutri kotoroy
+  echo  rabotaet sistema. Seychas otkroetsya sait nodejs.org: nazhmite
+  echo  zelenuyu knopku LTS, ustanovite i zapustite etot fail snova.
   echo.
   start https://nodejs.org/
   pause
   exit /b 1
 )
 
-echo.
-echo  Если у вас открыто чёрное окно СТАРТ — сначала закройте его!
-
-echo.
-echo  Этот файл наполняет систему ПРИМЕРАМИ для знакомства:
-echo  152 изделия, клиенты, продажи, долги, две точки продаж.
-echo.
-echo  ВНИМАНИЕ: всё, что уже есть в системе, будет СТЁРТО.
-echo  Не запускайте после того, как начали вести настоящий учёт!
-echo.
-echo  Наполнить примерами?
-echo    Y  — да, наполнить
-echo    Enter без ввода — отменить
-echo.
-set "CONFIRM="
-set /p "CONFIRM=  Нажмите Y и Enter: "
-
-rem — Никаких goto: переходы по файлу в кодировке UTF-8 командное окно
-rem   Windows иногда обрабатывает неверно. Обходимся простым признаком.
-set "GO="
-if /i "%CONFIRM%"=="Y" set "GO=1"
-if "%CONFIRM%"=="1" set "GO=1"
-if not defined GO (
-  echo.
-  echo  Отменено — ничего не изменилось.
-  echo.
-  pause
-  exit /b 0
-)
-
-echo.
-echo  Наполняю базу примерами, подождите...
-node src/seed.js --reset
-if errorlevel 1 (
-  echo.
-  echo  Не получилось наполнить базу.
-  echo  Проверьте, что чёрное окно СТАРТ закрыто, и запустите этот файл снова.
-  echo.
-  pause
-  exit /b 1
-)
-echo.
-echo  Готово. Теперь запустите СТАРТ.
-echo.
-pause
+node src/demo.js

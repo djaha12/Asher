@@ -3,6 +3,20 @@
  * Asher — CRM для ювелирного магазина.
  * Запуск: node server.js  (Node.js >= 22.5, внешние зависимости не нужны)
  */
+/*
+ * Проверку версии делаем здесь, а не в ярлыке запуска: пакетный файл Windows
+ * не может показать русский текст надёжно, а Node.js — может. Без этой
+ * проверки человек увидел бы стек ошибки вместо понятного объяснения.
+ */
+try {
+  require('node:sqlite');
+} catch {
+  console.error('\n  Ваша версия Node.js устарела — системе нужна 22.5 или новее.');
+  console.error('  Скачайте свежую с nodejs.org (зелёная кнопка LTS), установите');
+  console.error('  поверх старой и запустите СТАРТ снова.\n');
+  process.exit(1);
+}
+
 const http = require('node:http');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -313,7 +327,8 @@ server.on('listening', () => {
   process.env.ASHER_ACTUAL_PORT = String(port);
   const local = `http://localhost:${port}`;
   console.log(`\n  Asher CRM запущена`);
-  console.log(`  На этом компьютере:  ${local}`);
+  console.log(`  НЕ ЗАКРЫВАЙТЕ это окно, пока работаете с системой — сворачивайте.`);
+  console.log(`\n  На этом компьютере:  ${local}`);
   const lan = lanAddresses(port);
   if (lan.length) {
     console.log(`\n  С телефона или планшета (в той же сети Wi-Fi):`);
