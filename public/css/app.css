@@ -830,3 +830,9 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 }
 .cert-ico svg { width: 20px; height: 20px; stroke-width: 1.5; }
 .cert-num { font-weight: 600; letter-spacing: .01em; }
+
+/* Подсказка первого входа: видна, пока пароль администратора стандартный */
+.login-hint {
+  margin: 14px 0 0; text-align: center; font-size: 13px; color: var(--muted);
+}
+.login-hint b { color: var(--ink-2); font-weight: 600; }

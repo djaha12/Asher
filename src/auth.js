@@ -54,4 +54,18 @@ function cleanupSessions() {
   db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(nowIso());
 }
 
-module.exports = { createSession, getSession, destroySession, login, changePassword, cleanupSessions };
+/*
+ * Стоит ли у администратора стандартный пароль. Нужна странице входа:
+ * пока пароль не сменили, она подсказывает admin/admin123 — люди путают
+ * поля и вводят пароль в логин. Как только пароль сменён, подсказка
+ * исчезает, чтобы не сообщать чужим, что вводить.
+ */
+function defaultAdminActive() {
+  const user = db.prepare(`SELECT * FROM users WHERE username = 'admin' AND active = 1`).get();
+  if (!user) return false;
+  const hash = hashPassword('admin123', user.salt);
+  return crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(user.password_hash));
+}
+
+module.exports = { createSession, getSession, destroySession, login, changePassword,
+  cleanupSessions, defaultAdminActive };

@@ -213,6 +213,11 @@ const server = http.createServer(async (req, res) => {
       }));
       return;
     }
+    // Странице входа: показывать ли подсказку про стандартные логин и пароль.
+    if (pathname === '/api/login-hint' && req.method === 'GET') {
+      sendJson(res, 200, { default_admin: auth.defaultAdminActive() });
+      return;
+    }
     if (pathname === '/api/logout' && req.method === 'POST') {
       auth.destroySession(cookies.asher_session);
       res.writeHead(200, {

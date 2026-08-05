@@ -48,6 +48,14 @@ window.App = (() => {
       document.getElementById('app').classList.add('hidden');
       document.getElementById('login-screen').classList.remove('hidden');
       setTimeout(() => document.getElementById('login-username').focus(), 50);
+      // Подсказка про admin/admin123 видна только пока пароль стандартный.
+      const hint = document.getElementById('login-hint');
+      if (hint) {
+        fetch('/api/login-hint')
+          .then(r => r.json())
+          .then(d => hint.classList.toggle('hidden', !d.default_admin))
+          .catch(() => hint.classList.add('hidden'));
+      }
     },
 
     showApp() {
