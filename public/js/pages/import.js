@@ -47,6 +47,9 @@ window.Pages.import = (() => {
             <li>Загрузите файл здесь — Asher сам предложит соответствие колонок.</li>
           </ol>
           <p class="muted" style="font-size:12.5px">Также подойдёт любая таблица из Excel/Google Sheets, сохранённая как CSV: первая строка — названия колонок.</p>
+          <p class="form-hint" style="margin-bottom:0"><b>Только переоценка?</b> Достаточно файла из двух
+            колонок — <b>артикул и цена</b>, без наименований. Система найдёт изделия по артикулу
+            и проставит новые цены, ничего лишнего не создавая.</p>
         </div>
       </div>
 
@@ -254,8 +257,13 @@ window.Pages.import = (() => {
             <label class="field"><span>${FIELD_LABELS[f] || f}</span>
               <select data-field="${f}">${colOptions(preview.suggested_mapping[f])}</select></label>`).join('')}
         </div>
+        <div id="imp-priceonly" class="hint-box hidden">
+          <strong>Это прайс-лист.</strong> В файле нет наименований — значит, новые изделия
+          из него не создаются. Система найдёт изделия по артикулу и проставит им цены.
+          Артикулы, которых нет в каталоге, попадут в отчёт списком.
+        </div>
         ${entity === 'products' ? `
-          <div class="hint-box">
+          <div class="hint-box" id="imp-update-box">
             <label class="row-tight" style="cursor:pointer">
               <input type="checkbox" id="imp-update" style="width:20px;height:20px;cursor:pointer">
               <strong>Это повторная выгрузка — обновить то, что уже есть</strong>
@@ -294,20 +302,62 @@ window.Pages.import = (() => {
     if (updateCb) {
       updateCb.addEventListener('change', () => {
         el.querySelector('#imp-update-opts').classList.toggle('hidden', !updateCb.checked);
-        el.querySelector('#imp-commit').textContent = updateCb.checked
-          ? `Обновить и добавить (${preview.total_rows} строк)`
-          : `Импортировать ${preview.total_rows} строк`;
+        syncMode();
       });
     }
+
+    /*
+     * Как только видно, что колонка наименования не выбрана, переключаем
+     * страницу в вид прайс-листа: настройки перезаписи полей там не нужны,
+     * а кнопка должна честно говорить, что произойдёт.
+     */
+    function syncMode() {
+      const nameSel = el.querySelector('#imp-mapping select[data-field=name]');
+      const priceOnly = entity === 'products' && nameSel && nameSel.value === '';
+      const box = el.querySelector('#imp-priceonly');
+      const updBox = el.querySelector('#imp-update-box');
+      if (box) box.classList.toggle('hidden', !priceOnly);
+      if (updBox) updBox.classList.toggle('hidden', priceOnly);
+      // В прайс-листе наименование не обязательно — звёздочка ввела бы в заблуждение.
+      if (nameSel) {
+        const label = nameSel.closest('.field').querySelector('span');
+        if (label) label.textContent = priceOnly ? 'Наименование' : FIELD_LABELS.name;
+      }
+      const btn = el.querySelector('#imp-commit');
+      btn.textContent = priceOnly
+        ? `Проставить цены по артикулам (${preview.total_rows} строк)`
+        : (updateCb && updateCb.checked
+          ? `Обновить и добавить (${preview.total_rows} строк)`
+          : `Импортировать ${preview.total_rows} строк`);
+    }
+    el.querySelectorAll('#imp-mapping select').forEach(s => s.addEventListener('change', syncMode));
+    syncMode();
 
     el.querySelector('#imp-commit').addEventListener('click', async e => {
       const mapping = {};
       el.querySelectorAll('#imp-mapping select').forEach(s => {
         if (s.value !== '') mapping[s.dataset.field] = Number(s.value);
       });
-      if (mapping.name === undefined) { ui.toast('Укажите колонку «Наименование»', true); return; }
-      const updateExisting = Boolean(updateCb && updateCb.checked);
-      const updateFields = [...el.querySelectorAll('[data-uf]:checked')].map(c => c.dataset.uf);
+      /*
+       * Файл без наименований — это прайс-лист: артикулы и цены. Такой импорт
+       * ничего не создаёт, а проставляет цены уже заведённым изделиям.
+       */
+      const priceOnly = entity === 'products' && mapping.name === undefined;
+      if (!priceOnly && mapping.name === undefined) {
+        ui.toast('Укажите колонку «Наименование»', true); return;
+      }
+      if (priceOnly && mapping.sku === undefined) {
+        ui.toast('В файле нет наименований — тогда нужна колонка «Артикул», по ней ищутся изделия', true);
+        return;
+      }
+      if (priceOnly && mapping.retail_price === undefined && mapping.purchase_price === undefined) {
+        ui.toast('В файле нет ни наименований, ни цен — обновлять нечего', true);
+        return;
+      }
+      const updateExisting = priceOnly || Boolean(updateCb && updateCb.checked);
+      const updateFields = priceOnly
+        ? ['retail_price', 'purchase_price']
+        : [...el.querySelectorAll('[data-uf]:checked')].map(c => c.dataset.uf);
       if (updateExisting && !updateFields.length) {
         ui.toast('Отметьте хотя бы одно поле для обновления', true);
         return;

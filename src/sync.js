@@ -97,19 +97,29 @@ function processFile(fullPath) {
   const headers = (rows[0] || []).map(h => String(h).trim());
   const mapping = suggestMapping(headers, PRODUCT_MAP_HINTS);
 
-  if (rows.length < 2 || mapping.name === undefined || mapping.sku === undefined) {
+  /*
+   * Годятся два вида файлов:
+   *   — полная выгрузка: артикул + наименование (заводит новые изделия);
+   *   — прайс-лист: артикул + цена, без наименований (только переоценка).
+   * Артикул обязателен всегда: без него изделие не с чем сопоставить.
+   */
+  const hasPrice = mapping.retail_price !== undefined || mapping.purchase_price !== undefined;
+  const priceOnly = mapping.name === undefined;
+  if (rows.length < 2 || mapping.sku === undefined || (priceOnly && !hasPrice)) {
     const moved = safeMove(fullPath, FAIL_DIR, name);
     writeReport(moved, [
       'Автообмен не смог обработать файл.',
       '',
       rows.length < 2 ? 'В файле нет данных.' : '',
-      mapping.name === undefined ? 'Не найдена колонка «Наименование».' : '',
       mapping.sku === undefined ? 'Не найдена колонка «Артикул» — без неё нельзя сопоставить изделия.' : '',
+      priceOnly && !hasPrice ? 'Нет ни наименований, ни цен — обновлять нечего.' : '',
       '',
       'Найденные колонки: ' + headers.join(' | '),
+      'Нужен либо артикул с наименованием (полная выгрузка),',
+      'либо артикул с ценой (прайс-лист для переоценки).',
       'Обработайте файл вручную: раздел «Импорт из 1С» в системе.',
     ].filter(Boolean));
-    logSync(name, 'error', {}, 'Не распознаны колонки (нужны артикул и наименование)');
+    logSync(name, 'error', {}, 'Не распознаны колонки (нужен артикул и наименование либо цена)');
     return;
   }
 
@@ -127,6 +137,7 @@ function processFile(fullPath) {
     writeReport(moved, [
       `Автообмен с 1С — ${new Date().toLocaleString('ru-RU')}`,
       `Файл: ${name}`,
+      priceOnly ? 'Вид файла: прайс-лист (только артикулы и цены)' : 'Вид файла: выгрузка номенклатуры',
       '',
       `Добавлено новых изделий: ${res.created}`,
       `Обновлены цены:          ${res.updated}`,

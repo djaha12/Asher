@@ -177,12 +177,33 @@ function importCsv(body, userId) {
   const delimiter = body.delimiter || detectDelimiter(csv);
   const rows = parseCsv(csv, delimiter).slice(1);
   if (!rows.length) throw new ApiError(400, 'Нет строк для импорта');
-  if (mapping.name === undefined) throw new ApiError(400, 'Не указана колонка с наименованием');
+
+  /*
+   * Режим прайс-листа: в файле только артикулы и цены, наименований нет.
+   * Так выглядит обычная переоценка — список «что почём» без описаний.
+   * В этом режиме ничего не создаётся: цены проставляются существующим
+   * изделиям по артикулу, а неизвестные артикулы попадают в отчёт.
+   * Создавать изделие без названия нельзя — в каталоге останется пустая плитка.
+   */
+  const priceOnly = entity === 'products' && mapping.name === undefined;
+  if (!priceOnly && mapping.name === undefined) {
+    throw new ApiError(400, 'Не указана колонка с наименованием');
+  }
+  if (priceOnly) {
+    if (mapping.sku === undefined) {
+      throw new ApiError(400,
+        'В файле нет ни наименований, ни артикулов. Нужна хотя бы колонка «Артикул» и колонка с ценой.');
+    }
+    if (mapping.retail_price === undefined && mapping.purchase_price === undefined) {
+      throw new ApiError(400, 'Не найдена колонка с ценой — обновлять нечего.');
+    }
+  }
 
   // Режим повторной выгрузки: совпавшие по артикулу позиции не пропускаем,
   // а обновляем — цены и наименования в 1С меняются, и подгружать их
   // должно быть так же просто, как загрузить в первый раз.
-  const updateExisting = Boolean(body.update_existing);
+  // Прайс-лист по смыслу всегда обновляет уже заведённые изделия.
+  const updateExisting = priceOnly || Boolean(body.update_existing);
   // Какие поля разрешено перезаписывать. По умолчанию — только цены:
   // название и категорию в системе часто правят руками под витрину.
   const updateFields = Array.isArray(body.update_fields) && body.update_fields.length
@@ -214,12 +235,24 @@ function importCsv(body, userId) {
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
         const name = pick(row, mapping, 'name');
-        if (!name) { errors.push(`Строка ${i + 2}: пустое наименование — пропущена`); skipped++; continue; }
+        if (!priceOnly && !name) {
+          errors.push(`Строка ${i + 2}: пустое наименование — пропущена`); skipped++; continue;
+        }
         let sku = pick(row, mapping, 'sku') || '';
         if (!sku) {
+          // В прайс-листе артикул — единственная связь со складом: без него
+          // непонятно, чему ставить цену, и придумывать новый нельзя.
+          if (priceOnly) {
+            errors.push(`Строка ${i + 2}: пустой артикул — пропущена`); skipped++; continue;
+          }
           do { sku = `IMP-${String(autoSku++).padStart(5, '0')}`; } while (skuExists.get(sku));
         }
         const existing = findBySku.get(sku);
+        if (priceOnly && !existing) {
+          errors.push(`Строка ${i + 2}: артикул «${sku}» не найден в каталоге — цена не проставлена`);
+          skipped++;
+          continue;
+        }
         if (existing && !updateExisting) {
           errors.push(`Строка ${i + 2}: артикул «${sku}» уже есть — пропущена`);
           skipped++;
