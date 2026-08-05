@@ -836,3 +836,11 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
   margin: 14px 0 0; text-align: center; font-size: 13px; color: var(--muted);
 }
 .login-hint b { color: var(--ink-2); font-weight: 600; }
+
+/* QR для подключения телефона: крупный, чтобы камера ловила с расстояния */
+.phone-qr {
+  display: flex; justify-content: center; padding: 14px;
+  background: #fff; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  margin: 0 auto 12px; max-width: 260px;
+}
+.phone-qr svg { width: 100%; height: auto; display: block; }

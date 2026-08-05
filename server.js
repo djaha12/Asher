@@ -119,6 +119,10 @@ const MIME = {
   '.png': 'image/png',
   '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
+  '.json': 'application/json; charset=utf-8',
+  // Без этого типа телефон не считает страницу приложением и не предлагает
+  // поставить значок на экран.
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
 };
 
 function serveStatic(req, res, pathname) {

@@ -2,6 +2,20 @@
 window.Pages = window.Pages || {};
 
 window.Pages.settings = (() => {
+  /*
+   * QR с адресом системы: продавец наводит камеру телефона — и всё, никакого
+   * набора «192.168...» вручную. Так же подключается второй, третий телефон.
+   */
+  function phoneQr(address) {
+    try {
+      qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
+      const qr = qrcode(0, 'M');
+      qr.addData(String(address));
+      qr.make();
+      return qr.createSvgTag({ cellSize: 4, margin: 1, scalable: true });
+    } catch { return ''; }
+  }
+
   async function renderStore(box) {
     const [s, countries, network] = await Promise.all([
       api.get('/api/settings'),
@@ -68,15 +82,23 @@ window.Pages.settings = (() => {
           <div class="card">
             <h3 class="card-title">Открыть на телефоне</h3>
             ${network.addresses.length ? `
-              <p class="muted" style="margin-top:0">Наберите этот адрес в браузере телефона.
-              Телефон должен быть подключён к тому же Wi-Fi, что и этот компьютер.</p>
+              <p class="muted" style="margin-top:0">Наведите камеру телефона на этот код —
+              система откроется сама. Телефон должен быть в том же Wi-Fi, что и компьютер.</p>
+              <div class="phone-qr">${phoneQr(network.addresses[0])}</div>
+              <p class="muted" style="font-size:13px;text-align:center;margin-top:0">
+                Так подключается любое число телефонов — просто дайте каждому сканировать.</p>
+              <div class="card-title" style="margin-top:16px">Или наберите адрес вручную</div>
               ${network.addresses.map(a => `
                 <div class="row" style="margin-bottom:8px">
                   <code style="font-size:19px;font-weight:600;flex:1;word-break:break-all">${ui.esc(a)}</code>
                   <button class="btn btn-sm" data-copy="${ui.esc(a)}">Копировать</button>
                 </div>`).join('')}
-              <p class="muted" style="font-size:13px">Добавьте страницу на главный экран телефона —
-              и система будет открываться как обычное приложение.</p>
+              <div class="hint-box" style="margin:14px 0 0">
+                <strong>Чтобы стало приложением.</strong> Открыв систему на телефоне, нажмите
+                в браузере «Поделиться» или «⋮» и выберите
+                <b>«На экран “Домой”»</b> (iPhone) или <b>«Установить приложение»</b> (Android).
+                Появится значок Asher — система будет открываться на весь экран, без адресной строки.
+              </div>
             ` : `<p class="muted">Компьютер не подключён к сети — адрес появится, когда включите Wi-Fi.</p>`}
           </div>
         </div>

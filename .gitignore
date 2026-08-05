@@ -7,3 +7,6 @@ data/*.db-shm
 .DS_Store
 1С-ОБМЕН/
 РЕЗЕРВНЫЕ-КОПИИ/
+asher-скрытый-запуск.vbs
+asher-открыть.vbs
+asher-выключить.vbs
