@@ -40,6 +40,8 @@ window.ui = (() => {
     truck: '<path d="M3.5 6h11v10h-11V6z"/><path d="M14.5 10h3.5l2.5 3v3h-6"/><circle cx="7.5" cy="17.5" r="1.8"/><circle cx="16.5" cy="17.5" r="1.8"/>',
     building: '<path d="M4.5 20V5.5h9V20M13.5 9.5h6V20"/><path d="M3 20h18M7 8.5h1.5M7 11.5h1.5M7 14.5h1.5M16 12.5h1.5M16 15.5h1.5"/>',
     csv: '<path d="M6 3.5h8l4 4V20.5H6V3.5z"/><path d="M14 3.5V8h4"/><path d="M9 13h6M9 16.5h6"/>',
+    // Сертификат на камень: документ с печатью
+    certificate: '<path d="M6 3.5h8l4 4v7H6V3.5z"/><path d="M14 3.5V8h4"/><circle cx="12" cy="18" r="3"/><path d="M10.4 20.4 9.5 23l2.5-1.3 2.5 1.3-.9-2.6"/>',
   };
 
   function icon(name, cls = '') {

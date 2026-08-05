@@ -393,9 +393,71 @@ const routes = [
       if (op.type === 'consignment_sale') {
         throw new ApiError(400, 'Долг создан продажей изделия с реализации — он снимется возвратом по чеку');
       }
+      if (op.kind === 'return') {
+        throw new ApiError(400, 'Это возврат изделия поставщику. Удалить строку нельзя — иначе долг вернётся, а изделие останется списанным. Верните изделие на витрину в его карточке.');
+      }
       db.prepare('DELETE FROM supplier_ops WHERE id = ?').run(id);
       audit(session.userId, 'delete', 'supplier_op', id, `${op.type}: ${op.amount}`);
       return { ok: true };
+    },
+  },
+
+  {
+    /*
+     * Возврат изделия поставщику (брак, пересорт, не продалось).
+     *
+     * Изделие уходит со склада, а наш долг перед поставщиком уменьшается на
+     * закупочную стоимость. Записываем корректировкой с отрицательной суммой:
+     * так возврат виден отдельной строкой в книге расчётов и участвует в балансе
+     * ровно как надо. Товар на реализации — особый случай: долг перед владельцем
+     * возникает только при продаже, поэтому денег там уменьшать нечего,
+     * но след в истории нужен.
+     */
+    method: 'POST', path: '/api/products/:id/return-to-supplier', admin: true,
+    handler: ({ params, body, session }) => {
+      const productId = Number(params.id);
+      const p = db.prepare('SELECT * FROM products WHERE id = ?').get(productId);
+      if (!p) throw new ApiError(404, 'Изделие не найдено');
+      if (p.status === 'sold') {
+        throw new ApiError(400, 'Изделие продано. Сначала оформите возврат по чеку, потом возврат поставщику.');
+      }
+      if (p.status === 'written_off') throw new ApiError(400, 'Изделие уже списано');
+      if (!p.supplier_id) throw new ApiError(400, 'У изделия не указан поставщик — некому возвращать');
+      const supplier = requireSupplier(p.supplier_id);
+
+      const REASONS = ['брак', 'пересорт', 'не продалось', 'другое'];
+      const reason = REASONS.includes(String(body.reason || '').trim())
+        ? String(body.reason).trim() : 'другое';
+      const note = String(body.note || '').trim();
+
+      return transaction(() => {
+        const ts = nowIso();
+        // Своё изделие мы у поставщика купили — возврат уменьшает наш долг.
+        // Чужое (реализация) деньгами не двигаем: мы за него ещё не должны.
+        const amount = p.ownership === 'consignment' ? 0 : -round2(p.purchase_price);
+        const opInfo = db.prepare(
+          `INSERT INTO supplier_ops (supplier_id, type, kind, amount, doc_date, note,
+                                     product_id, user_id, created_at)
+           VALUES (?, 'adjust', 'return', ?, ?, ?, ?, ?, ?)`
+        ).run(supplier.id, amount, today(),
+          `Возврат поставщику (${reason}): ${p.sku} ${p.name}${note ? ' — ' + note : ''}`,
+          p.id, session.userId, ts);
+
+        db.prepare(
+          `UPDATE products SET status = 'written_off', write_off_reason = ?,
+                               reserved_for = NULL, reserved_until = ''
+            WHERE id = ?`
+        ).run(`Возврат поставщику: ${reason}`, p.id);
+
+        audit(session.userId, 'return_to_supplier', 'product', p.id,
+          `${p.sku} → ${supplier.name} (${reason}), долг −${round2(Math.abs(amount))}`);
+        return {
+          ok: true,
+          op_id: Number(opInfo.lastInsertRowid),
+          debt_reduced: round2(Math.abs(amount)),
+          supplier: supplier.name,
+        };
+      });
     },
   },
 

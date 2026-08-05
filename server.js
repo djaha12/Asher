@@ -30,7 +30,7 @@ const BODY_LIMIT = 25 * 1024 * 1024; // 25 МБ — с запасом для CSV
 // ---------- Маршруты API ----------
 
 const modules = ['products', 'images', 'customers', 'sales', 'orders', 'finance', 'debts',
-  'stores', 'inventory', 'analytics', 'settings', 'importexport'];
+  'stores', 'inventory', 'analytics', 'settings', 'importexport', 'sets'];
 const routes = [];
 for (const m of modules) {
   for (const r of require(`./src/api/${m}`).routes) {
@@ -139,11 +139,21 @@ function serveMedia(req, res, rel) {
   if (!file) { res.writeHead(403); res.end('Forbidden'); return; }
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); res.end('Not found'); return; }
-    res.writeHead(200, {
-      'Content-Type': media.mimeForFile(file),
+    const type = media.mimeForFile(file);
+    const headers = {
+      'Content-Type': type,
       // Имя файла содержит uuid и никогда не переиспользуется — кэшируем надолго.
       'Cache-Control': 'private, max-age=31536000, immutable',
-    });
+      // Браузер не должен угадывать тип сам: файл сюда кладёт пользователь.
+      'X-Content-Type-Options': 'nosniff',
+    };
+    // Сертификат бывает PDF, а внутри PDF может лежать скрипт. Открываем его
+    // в песочнице, чтобы чужой файл не получил доступ к системе от вашего имени.
+    if (type === 'application/pdf') {
+      headers['Content-Disposition'] = 'inline';
+      headers['Content-Security-Policy'] = 'sandbox';
+    }
+    res.writeHead(200, headers);
     res.end(data);
   });
 }
@@ -254,6 +264,8 @@ setInterval(() => auth.cleanupSessions(), 6 * 3600 * 1000).unref();
 
 // Автообмен с 1С (папка «1С-ОБМЕН») и ежедневные резервные копии.
 require('./src/sync').start();
+// Снятие резервов, у которых вышел срок.
+require('./src/reserve').start();
 
 // Адреса в локальной сети — чтобы открыть систему с телефона по Wi-Fi магазина.
 function lanAddresses(port) {

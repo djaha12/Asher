@@ -411,7 +411,7 @@ window.Pages.sales = (() => {
   }
 
   // ---------- Новая продажа (POS) ----------
-  function newSale(initialProduct, initialCustomer) {
+  function newSale(initialProduct, initialCustomer, initialSet) {
     const state = {
       items: [],          // {product, discount}
       customer: null,
@@ -646,7 +646,9 @@ window.Pages.sales = (() => {
       const { total } = calc();
       const payload = {
         customer_id: state.customer ? state.customer.id : null,
-        items: state.items.map(it => ({ product_id: it.product.id, discount: it.discount })),
+        items: state.items.map(it => ({
+          product_id: it.product.id, discount: it.discount, set_id: it.setId || null,
+        })),
         payment_method: m.body.querySelector('#pos-payment').value,
         note: m.body.querySelector('#pos-note').value.trim(),
       };
@@ -675,6 +677,24 @@ window.Pages.sales = (() => {
 
     renderItems();
     if (initialProduct) addProduct(initialProduct);
+    /*
+     * Комплект приходит в кассу уже разложенным: сервер посчитал, какая часть
+     * скидки приходится на каждое изделие, чтобы сумма чека совпала с ценой
+     * комплекта до копейки. Здесь эту раскладку не пересчитываем.
+     */
+    if (initialSet) {
+      for (const it of initialSet.items) {
+        if (it.status !== 'in_stock' && it.status !== 'reserved') continue;
+        if (state.items.some(x => x.product.id === it.id)) continue;
+        state.items.push({
+          product: { ...it, retail_price: it.retail_price },
+          discount: it.sale_discount || 0,
+          setId: initialSet.id,
+        });
+      }
+      renderItems();
+      ui.toast(`Комплект «${initialSet.name}» добавлен в чек`);
+    }
     if (initialCustomer) setCustomer(initialCustomer);
     setTimeout(() => searchInput.focus(), 60);
   }

@@ -16,6 +16,8 @@ const { ApiError } = require('./util');
 
 const MAX_BYTES = 8 * 1024 * 1024;   // одно изображение — до 8 МБ
 const MAX_PER_PRODUCT = 12;
+// Отдельный лимит: сертификаты не должны съедать место, отведённое фотографиям.
+const MAX_CERTS_PER_PRODUCT = 6;
 
 // Определяем формат по сигнатуре файла, а не по заявленному типу:
 // присланный MIME подделать легко, начало файла — нет.
@@ -28,13 +30,22 @@ const SIGNATURES = [
   },
 ];
 
+// Сертификат лаборатории чаще всего приходит с её сайта файлом PDF.
+// Держим формат в ОТДЕЛЬНОМ списке: попади «%PDF-» в общий SIGNATURES —
+// PDF начали бы принимать как фотографию изделия, и каталог с плитками сломался бы.
+const PDF_SIGNATURE = {
+  ext: 'pdf', mime: 'application/pdf',
+  test: b => b.length > 4 && b.toString('ascii', 0, 5) === '%PDF-',
+};
+const CERT_SIGNATURES = [...SIGNATURES, PDF_SIGNATURE];
+
 function detectFormat(buf) {
   return SIGNATURES.find(s => buf.length > 12 && s.test(buf)) || null;
 }
 
 function mimeForFile(name) {
   const ext = path.extname(name).slice(1).toLowerCase();
-  const sig = SIGNATURES.find(s => s.ext === ext);
+  const sig = CERT_SIGNATURES.find(s => s.ext === ext);
   return sig ? sig.mime : 'application/octet-stream';
 }
 
@@ -50,6 +61,29 @@ function decodeDataUrl(value, label) {
   const fmt = detectFormat(buf);
   if (!fmt) throw new ApiError(400, 'Поддерживаются только JPG, PNG и WEBP');
   return { buf, fmt };
+}
+
+// То же самое для сертификата — но здесь дополнительно принимается PDF.
+function decodeCertificate(value) {
+  if (typeof value !== 'string' || !value) throw new ApiError(400, 'Не передан файл сертификата');
+  const comma = value.indexOf(',');
+  const base64 = comma > -1 && value.slice(0, comma).includes('base64') ? value.slice(comma + 1) : value;
+  let buf;
+  try { buf = Buffer.from(base64, 'base64'); }
+  catch { throw new ApiError(400, 'Файл повреждён и не читается'); }
+  if (!buf.length) throw new ApiError(400, 'Пустой файл');
+  if (buf.length > MAX_BYTES) throw new ApiError(413, 'Файл сертификата больше 8 МБ');
+  // Формат определяем по первым байтам, а не по заявленному типу.
+  const fmt = CERT_SIGNATURES.find(s => s.test(buf));
+  if (!fmt) throw new ApiError(400, 'Сертификат принимается в виде PDF, JPG, PNG или WEBP');
+  return { buf, fmt };
+}
+
+function listCertificates(productId) {
+  return db.prepare(
+    `SELECT id, product_id, lab, number, file, thumb, mime, sort, created_at
+       FROM product_certificates WHERE product_id = ? ORDER BY sort, id`
+  ).all(productId);
 }
 
 function productDir(productId) {
@@ -164,6 +198,71 @@ const routes = [
     },
   },
 
+  // ---------- Сертификаты на камни ----------
+
+  {
+    method: 'GET', path: '/api/products/:id/certificates',
+    handler: ({ params }) => ({ items: listCertificates(Number(params.id)) }),
+  },
+
+  {
+    method: 'POST', path: '/api/products/:id/certificates',
+    handler: ({ params, body, session }) => {
+      const productId = Number(params.id);
+      const product = requireProduct(productId);
+      const count = db.prepare(
+        'SELECT COUNT(*) AS c FROM product_certificates WHERE product_id = ?'
+      ).get(productId).c;
+      if (count >= MAX_CERTS_PER_PRODUCT) {
+        throw new ApiError(400, `У изделия уже ${MAX_CERTS_PER_PRODUCT} сертификатов`);
+      }
+
+      const file = decodeCertificate(body.data);
+      // Миниатюра бывает только у картинки: PDF браузер отрисовать не может,
+      // и в списке такой сертификат показывается значком документа.
+      const thumb = body.thumb && file.fmt.ext !== 'pdf' ? decodeDataUrl(body.thumb, 'миниатюра') : null;
+
+      const dir = productDir(productId);
+      fs.mkdirSync(dir, { recursive: true });
+      const base = crypto.randomUUID();
+      const fileRel = path.posix.join(String(productId), `cert-${base}.${file.fmt.ext}`);
+      fs.writeFileSync(path.join(MEDIA_DIR, fileRel), file.buf);
+      let thumbRel = '';
+      if (thumb) {
+        thumbRel = path.posix.join(String(productId), `cert-${base}_t.${thumb.fmt.ext}`);
+        fs.writeFileSync(path.join(MEDIA_DIR, thumbRel), thumb.buf);
+      }
+
+      const maxSort = db.prepare(
+        'SELECT COALESCE(MAX(sort), -1) AS s FROM product_certificates WHERE product_id = ?'
+      ).get(productId).s;
+      const info = db.prepare(
+        `INSERT INTO product_certificates (product_id, lab, number, file, thumb, mime, sort, created_at)
+         VALUES (?,?,?,?,?,?,?,?)`
+      ).run(productId,
+        String(body.lab || '').trim().toUpperCase().slice(0, 20),
+        String(body.number || '').trim().toUpperCase().slice(0, 40),
+        fileRel, thumbRel, file.fmt.mime, Number(maxSort) + 1, nowIso());
+
+      audit(session.userId, 'upload_certificate', 'product', productId, product.sku);
+      return { id: Number(info.lastInsertRowid), file: fileRel, thumb: thumbRel, mime: file.fmt.mime };
+    },
+  },
+
+  {
+    // Удаляет только администратор: сертификат — документ, а не картинка.
+    method: 'DELETE', path: '/api/certificates/:id', admin: true,
+    handler: ({ params, session }) => {
+      const id = Number(params.id);
+      const cert = db.prepare('SELECT * FROM product_certificates WHERE id = ?').get(id);
+      if (!cert) throw new ApiError(404, 'Сертификат не найден');
+      db.prepare('DELETE FROM product_certificates WHERE id = ?').run(id);
+      removeFiles([cert]);
+      audit(session.userId, 'delete_certificate', 'product', cert.product_id, cert.number || '');
+      return { ok: true };
+    },
+  },
+
   {
     // Массовая загрузка папки: браузер присылает имена файлов, сервер отвечает,
     // какому изделию какое имя соответствует. Так пользователь ещё до загрузки
@@ -209,4 +308,4 @@ const routes = [
   },
 ];
 
-module.exports = { routes, listImages, removeFiles, safeMediaPath, mimeForFile };
+module.exports = { routes, listImages, listCertificates, removeFiles, safeMediaPath, mimeForFile };

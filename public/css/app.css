@@ -798,3 +798,35 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 .jlabel .jl-qr { display: flex; justify-content: center; margin-top: 4px; }
 .jlabel .jl-qr svg { width: 76px; height: 76px; margin: 0; }
 @media print { .print-root .jlabel .jl-qr svg { width: 68px; height: 68px; } }
+
+/* ---------- Комплекты (гарнитуры) ---------- */
+.set-card { display: flex; flex-direction: column; }
+.set-items { border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
+.set-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; border-bottom: 1px solid var(--line);
+}
+.set-item:last-child { border-bottom: none; }
+.set-item img { width: 38px; height: 38px; object-fit: cover; border-radius: 7px; flex: none; }
+.set-item-noimg {
+  width: 38px; height: 38px; flex: none; border-radius: 7px; background: var(--surface-2);
+  display: flex; align-items: center; justify-content: center; color: var(--muted);
+}
+.set-item-noimg svg { width: 18px; height: 18px; stroke-width: 1.4; }
+.set-item.pick:hover { background: var(--surface-2); }
+
+/* ---------- Сертификаты на камни ---------- */
+.cert-list { display: flex; flex-wrap: wrap; gap: 10px; }
+.cert-item {
+  display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface);
+  font-size: 13px; text-decoration: none; color: inherit;
+}
+.cert-item:hover { border-color: var(--line-strong); }
+.cert-item img { width: 40px; height: 40px; object-fit: cover; border-radius: 6px; }
+.cert-ico {
+  width: 40px; height: 40px; border-radius: 6px; background: var(--gold-wash);
+  display: flex; align-items: center; justify-content: center; color: var(--gold-strong);
+}
+.cert-ico svg { width: 20px; height: 20px; stroke-width: 1.5; }
+.cert-num { font-weight: 600; letter-spacing: .01em; }

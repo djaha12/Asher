@@ -178,8 +178,13 @@ const routes = [
       return transaction(() => {
         const before = sessionResult(inv, 'admin');
         if (writeOff) {
-          const mark = db.prepare(`UPDATE products SET status = 'written_off', reserved_for = NULL WHERE id = ?`);
-          for (const p of before.missing) mark.run(p.id);
+          // Причину пишем сразу: иначе недостача, ручное списание и возврат
+          // поставщику выглядят в карточке одинаково и разобрать их потом нельзя.
+          const mark = db.prepare(
+            `UPDATE products SET status = 'written_off', reserved_for = NULL, reserved_until = '',
+                                 write_off_reason = ? WHERE id = ?`
+          );
+          for (const p of before.missing) mark.run(`Недостача при инвентаризации №${inv.id}`, p.id);
           if (before.missing.length) {
             db.prepare(
               `INSERT INTO finance_ops (type, category, amount, note, user_id, created_at)

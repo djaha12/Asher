@@ -21,6 +21,11 @@ window.Pages.settings = (() => {
                 <label class="field"><span>Адрес</span><input name="store_address" value="${ui.esc(s.store_address)}"></label>
                 <label class="field"><span>Телефон</span><input name="store_phone" value="${ui.esc(s.store_phone)}"></label>
               </div>
+              <label class="field"><span>Курс доллара для закупок</span>
+                <input name="usd_rate" type="number" step="0.01" min="0" value="${ui.esc(s.usd_rate || '')}"></label>
+              <p class="form-hint">Подставляется, когда изделие закупается в долларах.
+                У каждого изделия курс запоминается на момент закупки, поэтому смена курса
+                не меняет себестоимость и прибыль прошлых месяцев.</p>
               <button type="button" class="btn btn-primary" id="st-save">Сохранить</button>
             </form>
           </div>

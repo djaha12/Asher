@@ -13,6 +13,7 @@ window.App = (() => {
     { key: 'debts', title: 'Долги', ico: 'clock' },
     { key: 'orders', title: 'Заказы и ремонт', ico: 'wrench' },
     { section: 'Склад' },
+    { key: 'sets', title: 'Комплекты', ico: 'gift' },
     { key: 'inventory', title: 'Инвентаризация', ico: 'clipboard' },
     { key: 'labels', title: 'Ценники и бирки', ico: 'tag' },
     { section: 'Управление', admin: true },

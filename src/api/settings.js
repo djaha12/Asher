@@ -5,7 +5,9 @@ const { ApiError } = require('./util');
 const { changePassword } = require('../auth');
 const { PRESETS, LOCALE_KEYS, presetFor } = require('../locale');
 
-const SETTING_KEYS = ['store_name', 'store_address', 'store_phone', ...LOCALE_KEYS];
+// usd_rate — курс доллара для закупки: поставщики часто считают в валюте,
+// а учёт и продажа идут в валюте магазина.
+const SETTING_KEYS = ['store_name', 'store_address', 'store_phone', 'usd_rate', ...LOCALE_KEYS];
 
 const routes = [
   // --- Общие настройки ---
@@ -30,10 +32,17 @@ const routes = [
           if (body[k] === undefined) setSetting(k, String(preset[k]));
         }
       }
+      // Курс влияет на себестоимость всего, что закупят дальше, — его смена
+      // должна оставлять в журнале конкретные цифры, а не общую фразу.
+      const rateBefore = getSetting('usd_rate');
       for (const k of SETTING_KEYS) {
         if (body[k] !== undefined) setSetting(k, String(body[k]));
       }
-      audit(session.userId, 'update', 'settings', null, 'Изменены настройки магазина');
+      const rateAfter = getSetting('usd_rate');
+      audit(session.userId, 'update', 'settings', null,
+        rateAfter !== rateBefore
+          ? `Курс доллара: ${rateBefore || '—'} → ${rateAfter}`
+          : 'Изменены настройки магазина');
       return { ok: true };
     },
   },
@@ -143,6 +152,19 @@ const routes = [
       const id = Number(params.id);
       const s = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(id);
       if (!s) throw new ApiError(404, 'Поставщик не найден');
+      /*
+       * Вместе с поставщиком каскадом стирается вся книга расчётов с ним.
+       * Если там ненулевой баланс, долг исчез бы молча — а он настоящий.
+       */
+      const bal = db.prepare(
+        `SELECT COALESCE(SUM(CASE WHEN type = 'payment' THEN -amount ELSE amount END), 0) AS b
+           FROM supplier_ops WHERE supplier_id = ?`
+      ).get(id).b;
+      if (Math.abs(bal) > 0.009) {
+        throw new ApiError(400,
+          `С поставщиком «${s.name}» ещё не закрыты расчёты (${Math.round(bal)}). ` +
+          'Сначала погасите или скорректируйте баланс в разделе «Долги».');
+      }
       db.prepare('UPDATE products SET supplier_id = NULL WHERE supplier_id = ?').run(id);
       db.prepare('DELETE FROM suppliers WHERE id = ?').run(id);
       audit(session.userId, 'delete', 'supplier', id, s.name);

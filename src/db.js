@@ -108,6 +108,24 @@ CREATE TABLE IF NOT EXISTS product_images (
 );
 CREATE INDEX IF NOT EXISTS idx_images_product ON product_images(product_id);
 
+-- Сертификаты на камни (GIA, IGI, HRD): отдельно от фотографий изделия.
+-- Отдельная таблица, а не признак в product_images, потому что иначе скан
+-- сертификата становился бы обложкой изделия в каталоге и в инвентаризации,
+-- попадал в счётчик фотографий и ломал фильтр «Без фото».
+-- thumb пустой у PDF: миниатюру из него не сделать.
+CREATE TABLE IF NOT EXISTS product_certificates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  lab TEXT DEFAULT '',
+  number TEXT DEFAULT '',
+  file TEXT NOT NULL,
+  thumb TEXT NOT NULL DEFAULT '',
+  mime TEXT NOT NULL DEFAULT '',
+  sort INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_certs_product ON product_certificates(product_id);
+
 CREATE TABLE IF NOT EXISTS customers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
@@ -277,6 +295,19 @@ CREATE TABLE IF NOT EXISTS stock_transfers (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_transfers_product ON stock_transfers(product_id);
+
+-- Комплекты (гарнитуры): кольцо + серьги + подвеска одной позицией.
+-- Сам комплект НЕ изделие и на складе не лежит — это только объединение
+-- существующих изделий, иначе остатки и граммы посчитались бы дважды.
+CREATE TABLE IF NOT EXISTS product_sets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  sku TEXT DEFAULT '',
+  price REAL NOT NULL DEFAULT 0,    -- цена комплекта; 0 — сумма цен изделий
+  note TEXT DEFAULT '',
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL
+);
 `;
 
 db.exec(SCHEMA);
@@ -303,6 +334,37 @@ function migrate() {
   addColumn('sales', 'paid', 'REAL NOT NULL DEFAULT 0');
   addColumn('sales', 'due_date', `TEXT DEFAULT ''`);
   addColumn('sales', 'store_id', 'INTEGER REFERENCES stores(id) ON DELETE SET NULL');
+
+  // Срок резерва: до какой даты изделие держим за клиентом.
+  addColumn('products', 'reserved_until', `TEXT DEFAULT ''`);
+
+  // Комплект, в который входит изделие.
+  addColumn('products', 'set_id', 'INTEGER REFERENCES product_sets(id) ON DELETE SET NULL');
+
+  // Почему изделие ушло со склада: брак, возврат поставщику, утеря, переплавка.
+  // Статус остаётся written_off — CHECK-ограничение в SQLite менять нельзя
+  // без перестройки таблицы, а причина нужнее нового статуса.
+  addColumn('products', 'write_off_reason', `TEXT DEFAULT ''`);
+
+  // Закупка в валюте: цена и курс на момент закупки фиксируются навсегда,
+  // а purchase_price всегда хранит пересчитанную сумму в валюте учёта —
+  // поэтому себестоимость, маржа, P&L и аналитика работают без изменений.
+  addColumn('products', 'purchase_currency', `TEXT DEFAULT ''`);
+  addColumn('products', 'purchase_price_orig', 'REAL NOT NULL DEFAULT 0');
+  addColumn('products', 'purchase_rate', 'REAL NOT NULL DEFAULT 0');
+
+  // Каким комплектом продана позиция — только для вида чека и истории.
+  // Денег в этой колонке нет: суммы остаются в price/discount/final_price,
+  // поэтому долг, возвраты и маржа считаются ровно как раньше.
+  addColumn('sale_items', 'set_id', 'INTEGER REFERENCES product_sets(id) ON DELETE SET NULL');
+
+  // Номера сертификатов одной строкой — для поиска по каталогу и в кассе.
+  // Собирается сервером из gems при каждом сохранении изделия.
+  addColumn('products', 'cert_index', `TEXT NOT NULL DEFAULT ''`);
+
+  // Уточнение вида операции с поставщиком: корректировка бывает разной.
+  // Возврат товара пишется как adjust с отрицательной суммой и kind='return'.
+  addColumn('supplier_ops', 'kind', `TEXT DEFAULT ''`);
 
   // Продажи, оформленные до появления долгов, считаем полностью оплаченными:
   // иначе вся прошлая выручка внезапно превратится в долг клиентов.
@@ -389,6 +451,9 @@ function ensureDefaults() {
     cats.forEach((c, i) => ins.run(c, i));
   }
   if (!getSetting('store_name')) setSetting('store_name', 'Asher Diamonds');
+  // Курс доллара для закупок — поле в настройках не должно быть пустым при
+  // первом запуске. Значение ориентировочное, владелец правит его руками.
+  if (!getSetting('usd_rate')) setSetting('usd_rate', '89');
   if (!getSetting('bonus_percent')) setSetting('bonus_percent', '3');
 
   // Локаль: при первом запуске подставляем набор страны по умолчанию.

@@ -160,7 +160,7 @@ const routes = [
       const hasOrders = db.prepare('SELECT 1 FROM service_orders WHERE customer_id = ? LIMIT 1').get(id);
       if (hasOrders) throw new ApiError(400, 'У клиента есть заказы или ремонт — удалить нельзя.');
       // резервы за клиентом освобождаем, чтобы изделия не зависли
-      db.prepare(`UPDATE products SET status = 'in_stock', reserved_for = NULL
+      db.prepare(`UPDATE products SET status = 'in_stock', reserved_for = NULL, reserved_until = ''
                   WHERE reserved_for = ? AND status = 'reserved'`).run(id);
       db.prepare('DELETE FROM customers WHERE id = ?').run(id);
       audit(session.userId, 'delete', 'customer', id, existing.name);

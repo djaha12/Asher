@@ -75,7 +75,10 @@ function createSaleTx(body, session, opts = {}) {
     subtotal = round2(subtotal + price);
     discountItems = round2(discountItems + discount);
     costTotal = round2(costTotal + p.purchase_price);
-    prepared.push({ product: p, price, discount, final: round2(price - discount) });
+    // Комплект в чеке — только подпись позиции: цена и скидка уже разложены
+    // по изделиям, поэтому на расчёты эта колонка не влияет.
+    const setId = it.set_id ? Number(it.set_id) : null;
+    prepared.push({ product: p, price, discount, final: round2(price - discount), setId });
   }
 
   const total = round2(prepared.reduce((s, pr) => s + pr.final, 0));
@@ -102,13 +105,14 @@ function createSaleTx(body, session, opts = {}) {
   const saleId = Number(info.lastInsertRowid);
 
   const insItem = db.prepare(
-    'INSERT INTO sale_items (sale_id, product_id, price, discount, final_price, cost) VALUES (?,?,?,?,?,?)'
+    'INSERT INTO sale_items (sale_id, product_id, price, discount, final_price, cost, set_id) VALUES (?,?,?,?,?,?,?)'
   );
   const markSold = db.prepare(
-    `UPDATE products SET status = 'sold', sold_at = ?, reserved_for = NULL WHERE id = ?`
+    `UPDATE products SET status = 'sold', sold_at = ?, reserved_for = NULL, reserved_until = ''
+      WHERE id = ?`
   );
   for (const pr of prepared) {
-    insItem.run(saleId, pr.product.id, pr.price, pr.discount, pr.final, pr.product.purchase_price);
+    insItem.run(saleId, pr.product.id, pr.price, pr.discount, pr.final, pr.product.purchase_price, pr.setId);
     markSold.run(createdAt, pr.product.id);
     // Продали чужое изделие — сразу становимся должны его владельцу.
     recordConsignmentSale(pr.product, saleId, session.userId);
@@ -150,7 +154,8 @@ function returnItemsTx(saleId, itemIds, session, { holdCash = false } = {}) {
   let returnedValue = 0;
   for (const it of toReturn) {
     db.prepare('UPDATE sale_items SET returned = 1, returned_at = ? WHERE id = ?').run(ts, it.id);
-    db.prepare(`UPDATE products SET status = 'in_stock', sold_at = NULL WHERE id = ?`).run(it.product_id);
+    db.prepare(`UPDATE products SET status = 'in_stock', sold_at = NULL, reserved_until = ''
+                 WHERE id = ?`).run(it.product_id);
     // Изделие вернулось на витрину — долг перед его владельцем снимаем.
     revokeConsignmentSale(it.product_id, saleId);
     returnedValue = round2(returnedValue + it.final_price);
