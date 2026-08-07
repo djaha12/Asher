@@ -429,23 +429,120 @@ window.Pages.settings = (() => {
     };
   }
 
+  /*
+   * Журнал действий сотрудников.
+   *
+   * Раньше это был список последних 500 строк по-английски. Владельцу нужно
+   * другое: выбрать человека, период и вид действия — и увидеть, что именно
+   * тот сделал. Поэтому здесь отбор, сводка «кто сколько» и человеческие
+   * названия для каждого действия, включая обмены, резервы и списания.
+   */
+  const AUDIT_ACTIONS = {
+    login: 'вход в систему', sale: 'продажа', return: 'возврат', exchange: 'обмен',
+    payment: 'приём оплаты', status: 'смена статуса', create: 'создание',
+    update: 'изменение', delete: 'удаление', import: 'импорт из файла',
+    transfer: 'перемещение между точками', invoice: 'поставка',
+    return_to_supplier: 'возврат поставщику', finish: 'итог инвентаризации',
+    release_reserves: 'снятие просроченных резервов', reserve_expired: 'резерв истёк',
+    upload_photo: 'загрузка фото', delete_photo: 'удаление фото',
+    upload_certificate: 'загрузка сертификата', delete_certificate: 'удаление сертификата',
+    password: 'смена пароля', sync: 'автообмен с 1С',
+  };
+  const AUDIT_ENTITIES = {
+    product: 'изделие', products: 'изделия', customer: 'клиент', customers: 'клиенты',
+    sale: 'чек', order: 'заказ', finance: 'касса', user: 'сотрудник',
+    category: 'категория', supplier: 'поставщик', supplier_op: 'расчёт с поставщиком',
+    settings: 'настройки', set: 'комплект', store: 'точка продаж',
+    inventory: 'инвентаризация', debt: 'долг',
+  };
+  // Действия, за которыми владелец следит чаще всего, — их выносим в отбор.
+  const AUDIT_PICK = ['sale', 'return', 'exchange', 'payment', 'status', 'create', 'update',
+    'delete', 'import', 'transfer', 'finish', 'login'];
+
   async function renderAudit(box) {
-    const { items } = await api.get('/api/audit');
-    const actionRu = { login: 'вход', create: 'создание', update: 'изменение', delete: 'удаление',
-      sale: 'продажа', return: 'возврат', status: 'статус', payment: 'оплата', import: 'импорт', password: 'пароль' };
-    const entityRu = { product: 'изделие', customer: 'клиент', sale: 'продажа', order: 'заказ',
-      finance: 'финансы', user: 'сотрудник', category: 'категория', supplier: 'поставщик',
-      settings: 'настройки', products: 'изделия', customers: 'клиенты' };
-    box.innerHTML = `<div class="card">
-      <h3 class="card-title">Журнал операций (последние 500)</h3>
-      ${ui.table([
-        { title: 'Когда', render: r => `<span class="dim">${ui.dt(r.created_at)}</span>` },
-        { title: 'Кто', render: r => ui.esc(r.user_name || '—') },
-        { title: 'Действие', render: r => `<span class="badge badge-gray">${actionRu[r.action] || r.action}</span>` },
-        { title: 'Объект', render: r => entityRu[r.entity] || r.entity },
-        { title: 'Детали', render: r => `<span class="dim">${ui.esc(r.details)}</span>` },
-      ], items, { empty: 'Журнал пуст' })}
-    </div>`;
+    const users = await api.get('/api/users').then(r => r.items).catch(() => []);
+    const f = { user_id: '', action: '', from: '', to: '', search: '' };
+    let offset = 0;
+    let rows = [];
+
+    box.innerHTML = `
+      <div class="hint-box">
+        <strong>Кто что сделал.</strong> Здесь видно каждое действие каждого сотрудника:
+        продажи, возвраты и обмены, приём оплаты, резервы и списания, правки изделий,
+        входы в систему. Записи не удаляются и не редактируются.
+      </div>
+      <div class="toolbar">
+        <select class="input" id="au-user"><option value="">Все сотрудники</option>
+          ${users.map(u => `<option value="${u.id}">${ui.esc(u.name)}${u.role === 'admin' ? ' (админ)' : ''}</option>`).join('')}
+        </select>
+        <select class="input" id="au-action"><option value="">Любое действие</option>
+          ${AUDIT_PICK.map(a => `<option value="${a}">${AUDIT_ACTIONS[a]}</option>`).join('')}
+        </select>
+        <label class="row-tight">с <input type="date" class="input" id="au-from" style="width:auto"></label>
+        <label class="row-tight">по <input type="date" class="input" id="au-to" style="width:auto"></label>
+        <input type="text" class="input search" id="au-search" placeholder="Поиск по деталям…" autocomplete="off">
+        <button class="btn" id="au-reset">Сбросить</button>
+      </div>
+      <div id="au-summary"></div>
+      <div class="card"><div id="au-list"><div class="empty"><p>Загрузка…</p></div></div>
+        <div style="text-align:center;margin-top:12px">
+          <button class="btn hidden" id="au-more">Показать ещё</button></div>
+      </div>`;
+
+    const listEl = box.querySelector('#au-list');
+    const moreBtn = box.querySelector('#au-more');
+    const sumEl = box.querySelector('#au-summary');
+
+    const draw = () => {
+      listEl.innerHTML = ui.table([
+        { title: 'Когда', cls: 'nowrap', render: r => `<span class="dim">${ui.dt(r.created_at)}</span>` },
+        { title: 'Кто', render: r => r.user_name
+          ? `${ui.esc(r.user_name)}${r.user_role === 'admin'
+            ? ' <span class="badge badge-gold">админ</span>'
+            : ' <span class="badge badge-gray">продавец</span>'}`
+          : '<span class="dim">система</span>' },
+        { title: 'Действие', render: r =>
+          `<span class="badge badge-gray">${ui.esc(AUDIT_ACTIONS[r.action] || r.action)}</span>` },
+        { title: 'Что', render: r => `<span class="dim">${ui.esc(AUDIT_ENTITIES[r.entity] || r.entity)}</span>` },
+        { title: 'Подробности', render: r => ui.esc(r.details || '—') },
+      ], rows, { empty: 'За выбранный отбор действий нет' });
+    };
+
+    const load = async (append) => {
+      const q = new URLSearchParams();
+      for (const [k, v] of Object.entries(f)) if (v) q.set(k, v);
+      q.set('limit', '100');
+      q.set('offset', String(append ? offset : 0));
+      const res = await api.get('/api/audit?' + q.toString());
+      rows = append ? [...rows, ...res.items] : res.items;
+      offset = rows.length;
+      draw();
+      moreBtn.classList.toggle('hidden', rows.length >= res.total);
+      moreBtn.textContent = `Показать ещё (осталось ${res.total - rows.length})`;
+      sumEl.innerHTML = res.by_user.length > 1 || f.user_id
+        ? `<div class="card"><div class="card-title">Кто сколько сделал${
+            f.from || f.to ? ' за период' : ''} — всего действий: ${res.total}</div>
+           ${res.by_user.map(u => `<div class="row" style="justify-content:space-between;padding:6px 0">
+             <span class="strong">${ui.esc(u.name)}</span>
+             <span><b>${u.count}</b> <span class="dim">· последнее ${ui.dt(u.last_at)}</span></span>
+           </div>`).join('')}</div>`
+        : '';
+    };
+
+    const reload = ui.debounce(() => load(false).catch(ui.toastErr), 250);
+    box.querySelector('#au-user').addEventListener('change', e => { f.user_id = e.target.value; reload(); });
+    box.querySelector('#au-action').addEventListener('change', e => { f.action = e.target.value; reload(); });
+    box.querySelector('#au-from').addEventListener('change', e => { f.from = e.target.value; reload(); });
+    box.querySelector('#au-to').addEventListener('change', e => { f.to = e.target.value; reload(); });
+    box.querySelector('#au-search').addEventListener('input', e => { f.search = e.target.value.trim(); reload(); });
+    box.querySelector('#au-reset').addEventListener('click', () => {
+      Object.keys(f).forEach(k => { f[k] = ''; });
+      box.querySelectorAll('#au-user, #au-action, #au-from, #au-to, #au-search')
+        .forEach(el => { el.value = ''; });
+      reload();
+    });
+    moreBtn.addEventListener('click', () => load(true).catch(ui.toastErr));
+    await load(false);
   }
 
   function renderMyPassword(box) {
@@ -473,7 +570,7 @@ window.Pages.settings = (() => {
       const admin = App.isAdmin();
       const tabs = admin
         ? [['store', 'Магазин'], ['stores', 'Точки продаж'], ['refs', 'Справочники'],
-           ['users', 'Сотрудники'], ['audit', 'Журнал'], ['me', 'Мой пароль']]
+           ['users', 'Сотрудники'], ['audit', 'Журнал действий'], ['me', 'Мой пароль']]
         : [['me', 'Мой пароль']];
       el.innerHTML = `
         <div class="tabs">${tabs.map(([k, t], i) =>

@@ -442,6 +442,15 @@ function round2(x) {
   return Math.round((Number(x) || 0) * 100) / 100;
 }
 
+/*
+ * Сумма для журнала действий: «210 000 сом» вместо «210000». Журнал читает
+ * владелец глазами, а не программа, и слипшиеся нули там не разобрать.
+ */
+function money(x) {
+  const n = round2(x);
+  return n.toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + ' ' + getSetting('currency', 'сом');
+}
+
 function hashPassword(password, salt) {
   return crypto.scryptSync(String(password), salt, 64).toString('hex');
 }
@@ -552,6 +561,7 @@ module.exports = {
   MEDIA_DIR,
   nowIso,
   round2,
+  money,
   hashPassword,
   makeSalt,
   getSetting,

@@ -249,22 +249,47 @@ const routes = [
     },
   },
 
-  // --- Журнал операций ---
+  /*
+   * Журнал действий. Владелец должен видеть, кто что сделал, — поэтому
+   * отдаём не «последние 500», а любой отрезок с отбором по сотруднику,
+   * виду действия и датам, страницами. Без этого журнал за неделю работы
+   * магазина уже не показывает вчерашний день.
+   */
   {
     method: 'GET', path: '/api/audit', admin: true,
     handler: ({ query }) => {
       const cond = [];
       const args = [];
       if (query.entity) { cond.push('a.entity = ?'); args.push(query.entity); }
+      if (query.action) { cond.push('a.action = ?'); args.push(query.action); }
       if (query.user_id) { cond.push('a.user_id = ?'); args.push(Number(query.user_id)); }
       if (query.from) { cond.push('a.created_at >= ?'); args.push(query.from); }
-      if (query.to) { cond.push('a.created_at <= ?'); args.push(query.to); }
+      // Дату «по» задают днём — берём его целиком, до последней секунды.
+      if (query.to) { cond.push('a.created_at <= ?'); args.push(query.to.length === 10 ? query.to + 'T23:59:59.999Z' : query.to); }
+      if (query.search) {
+        cond.push('(a.details LIKE ? OR u.name LIKE ?)');
+        const like = '%' + String(query.search).trim() + '%';
+        args.push(like, like);
+      }
       const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
+      const limit = Math.min(Math.max(Number(query.limit) || 100, 1), 500);
+      const offset = Math.max(Number(query.offset) || 0, 0);
+      const total = db.prepare(
+        `SELECT COUNT(*) AS c FROM audit_log a LEFT JOIN users u ON u.id = a.user_id ${where}`
+      ).get(...args).c;
       const rows = db.prepare(
-        `SELECT a.*, u.name AS user_name FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
-         ${where} ORDER BY a.created_at DESC LIMIT 500`
+        `SELECT a.*, u.name AS user_name, u.role AS user_role
+         FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
+         ${where} ORDER BY a.created_at DESC, a.id DESC LIMIT ? OFFSET ?`
+      ).all(...args, limit, offset);
+      // Кто сколько сделал за выбранный отрезок — сводка над списком.
+      const byUser = db.prepare(
+        `SELECT COALESCE(u.name, 'Система') AS name, COUNT(*) AS count,
+                MAX(a.created_at) AS last_at
+         FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
+         ${where} GROUP BY a.user_id ORDER BY count DESC`
       ).all(...args);
-      return { items: rows };
+      return { items: rows, total, limit, offset, by_user: byUser };
     },
   },
 ];

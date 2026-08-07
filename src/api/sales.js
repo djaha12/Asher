@@ -1,5 +1,5 @@
 'use strict';
-const { db, nowIso, round2, audit, nextNumber, transaction } = require('../db');
+const { db, nowIso, round2, money, audit, nextNumber, transaction } = require('../db');
 const { ApiError } = require('./util');
 const { recordConsignmentSale, revokeConsignmentSale } = require('./debts');
 
@@ -132,7 +132,7 @@ function createSaleTx(body, session, opts = {}) {
   }
 
   audit(session.userId, 'sale', 'sale', saleId,
-    `${number} на ${total}${debt > 0 ? `, в долг ${debt}` : ''}`);
+    `${number} на ${money(total)}${debt > 0 ? `, в долг ${money(debt)}` : ''}`);
   return { saleId, number, total, paid, debt };
 }
 
@@ -256,9 +256,9 @@ const routes = [
       return transaction(() => {
         const { sale, returnedValue, cashRefund, debtCut } = returnItemsTx(saleId, itemIds, session);
         audit(session.userId, 'return', 'sale', saleId,
-          `${sale.number}: возврат на ${returnedValue}` +
-          (debtCut > 0.009 ? `, списан долг ${debtCut}` : '') +
-          (cashRefund > 0 ? `, деньгами ${cashRefund}` : ''));
+          `${sale.number}: возврат на ${money(returnedValue)}` +
+          (debtCut > 0.009 ? `, списан долг ${money(debtCut)}` : '') +
+          (cashRefund > 0 ? `, деньгами ${money(cashRefund)}` : ''));
         return { ...saleDetail(saleId, session.role), cash_refund: cashRefund, debt_written_off: debtCut };
       });
     },
@@ -342,10 +342,10 @@ const routes = [
         }
 
         audit(session.userId, 'exchange', 'sale', oldId,
-          `${ret.sale.number} → ${created.number}: зачёт ${creditApplied}` +
-          (extraPaid > 0 ? `, доплата ${extraPaid}` : '') +
-          (cashBack > 0 ? `, на руки ${cashBack}` : '') +
-          (created.debt > 0 ? `, долг ${created.debt}` : ''));
+          `${ret.sale.number} → ${created.number}: зачёт ${money(creditApplied)}` +
+          (extraPaid > 0 ? `, доплата ${money(extraPaid)}` : '') +
+          (cashBack > 0 ? `, на руки ${money(cashBack)}` : '') +
+          (created.debt > 0 ? `, долг ${money(created.debt)}` : ''));
 
         return {
           old: saleDetail(oldId, session.role),

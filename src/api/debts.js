@@ -11,7 +11,7 @@
  * Долг по чеку считается на лету: сумма невозвращённых позиций минус оплачено.
  * Так возврат товара сам уменьшает долг — отдельного пересчёта не нужно.
  */
-const { db, nowIso, round2, audit, transaction } = require('../db');
+const { db, nowIso, round2, money, audit, transaction } = require('../db');
 const { ApiError } = require('./util');
 
 const PAYMENT_METHODS = ['cash', 'card', 'transfer'];
@@ -257,7 +257,8 @@ const routes = [
              VALUES (?,?,?,?,?,?,?,?)`
           ).run(bal.customer_id ?? null, kind === 'sale' ? docId : null, kind === 'order' ? docId : null,
             part, method, note, session.userId, ts);
-          applied.push({ kind, id: docId, number: bal.number, amount: part });
+          applied.push({ kind, id: docId, number: bal.number, amount: part,
+            customer_id: bal.customer_id ?? null });
           left = round2(left - part);
         };
 
@@ -281,7 +282,12 @@ const routes = [
           throw new ApiError(400,
             `Платёж больше долга на ${left.toLocaleString('ru-RU')}. Долг закрыт не полностью или сумма указана с ошибкой.`);
         }
-        audit(session.userId, 'payment', 'debt', applied[0].id, `Погашение долга: ${amount}`);
+        // В журнале должно быть видно не только «сколько», но и «от кого и по чему».
+        const payer = db.prepare('SELECT name FROM customers WHERE id = ?')
+          .get(Number(body.customer_id) || applied[0].customer_id || 0);
+        audit(session.userId, 'payment', 'debt', applied[0].id,
+          `${payer ? payer.name + ': ' : ''}погашение долга ${money(amount)}` +
+          ` (${applied.map(a => a.number).join(', ')})`);
         return { applied, total: amount };
       });
     },
@@ -378,7 +384,7 @@ const routes = [
              VALUES ('expense', 'Оплата поставщику', ?, ?, ?, ?)`
           ).run(amount, `${supplier.name}${body.doc_number ? ` (${body.doc_number})` : ''}`, session.userId, ts);
         }
-        audit(session.userId, type, 'supplier', supplierId, `${supplier.name}: ${amount}`);
+        audit(session.userId, type, 'supplier', supplierId, `${supplier.name}: ${money(amount)}`);
         return { id: Number(info.lastInsertRowid) };
       });
     },

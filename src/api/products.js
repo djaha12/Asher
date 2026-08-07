@@ -445,7 +445,28 @@ const routes = [
         db.prepare(`DELETE FROM supplier_ops WHERE kind = 'return' AND product_id = ?`).run(id);
         db.prepare(`UPDATE products SET write_off_reason = '' WHERE id = ?`).run(id);
       }
-      audit(session.userId, 'update', 'product', id, existing.sku);
+      /*
+       * В журнале «изменение изделия» ничего не говорит владельцу. Смена
+       * статуса — резерв, списание, возврат на витрину — это поступок, а не
+       * правка описания, поэтому пишем её отдельной строкой и с причиной.
+       */
+      if (data.status !== undefined && data.status !== existing.status) {
+        const what = { reserved: 'резерв', in_stock: 'возврат на витрину', written_off: 'списание' };
+        const who = data.reserved_for !== undefined ? data.reserved_for : existing.reserved_for;
+        const forName = who
+          ? (db.prepare('SELECT name FROM customers WHERE id = ?').get(who) || {}).name : '';
+        const extra = [
+          data.status === 'reserved' && forName ? `для ${forName}` : '',
+          data.status === 'reserved' && (data.reserved_until || existing.reserved_until)
+            ? `до ${data.reserved_until || existing.reserved_until}` : '',
+          data.status === 'written_off' && (data.write_off_reason || existing.write_off_reason)
+            ? `причина: ${data.write_off_reason || existing.write_off_reason}` : '',
+        ].filter(Boolean).join(', ');
+        audit(session.userId, 'status', 'product', id,
+          `${existing.sku} ${existing.name} — ${what[data.status] || data.status}${extra ? ' (' + extra + ')' : ''}`);
+      } else {
+        audit(session.userId, 'update', 'product', id, `${existing.sku} ${existing.name}`);
+      }
       return { ok: true };
     },
   },
