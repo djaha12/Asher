@@ -23,6 +23,7 @@ const fs = require('node:fs');
 
 const { getSetting } = require('./src/db');
 const auth = require('./src/auth');
+const guard = require('./src/guard');
 const media = require('./src/api/images');
 const { presetFor, LOCALE_KEYS } = require('./src/locale');
 const { ApiError } = require('./src/api/util');
@@ -93,20 +94,72 @@ function readBody(req) {
   });
 }
 
-// защита от перебора пароля: после 10 неудач — пауза минута
-const loginFails = new Map();
-function loginAllowed(ip) {
-  const rec = loginFails.get(ip);
-  if (!rec) return true;
-  if (rec.count < 10) return true;
-  return Date.now() - rec.last > 60000;
+/*
+ * Система за обратным прокси (так она стоит на хостинге: снаружи https, внутрь
+ * идёт обычный http). Тогда адрес соединения — это адрес прокси, один и тот же
+ * для всех, и по нему нельзя ни считать попытки входа, ни писать в журнал.
+ * Настоящий адрес прокси кладёт в заголовок, но верить заголовку можно только
+ * если мы точно знаем, что перед нами прокси: иначе его подделает кто угодно.
+ */
+const TRUST_PROXY = process.env.ASHER_TRUST_PROXY === '1';
+
+function clientIp(req) {
+  if (TRUST_PROXY) {
+    const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    if (fwd) return fwd;
+  }
+  return req.socket.remoteAddress || '?';
 }
-function noteLoginFail(ip) {
-  const rec = loginFails.get(ip) || { count: 0, last: 0 };
-  if (Date.now() - rec.last > 60000) rec.count = 0;
-  rec.count++;
-  rec.last = Date.now();
-  loginFails.set(ip, rec);
+
+// Работаем ли по https — от этого зависят защитные заголовки и флаг у cookie.
+function isSecure(req) {
+  if (TRUST_PROXY && String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https') return true;
+  return Boolean(req.socket.encrypted);
+}
+
+/*
+ * Заголовки безопасности. Отдаём их на всё, включая страницу входа.
+ *
+ * CSP держит систему в её собственных файлах: даже если в названии изделия
+ * окажется чужой скрипт, выполнить его браузеру будет негде. 'unsafe-inline'
+ * для стилей оставлен намеренно — интерфейс расставляет размеры прямо в
+ * разметке, а запрет ничего не даёт: стилем данные не украдёшь.
+ */
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "media-src 'self' blob:",
+  "font-src 'self'",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join('; ');
+
+function securityHeaders(req) {
+  const h = {
+    'Content-Security-Policy': CSP,
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'same-origin',
+    'X-Frame-Options': 'DENY',
+    // Камера нужна для сканирования — оставляем её себе, остальное закрываем.
+    'Permissions-Policy': 'camera=(self), microphone=(), geolocation=(), payment=()',
+  };
+  // Раз уж зашли по https — впредь только по нему, без «случайного» http.
+  if (isSecure(req)) h['Strict-Transport-Security'] = 'max-age=31536000';
+  return h;
+}
+
+// Cookie сессии. Secure — только когда соединение защищено: иначе браузер
+// просто выбросит cookie, и в магазинной сети никто не сможет войти.
+function sessionCookie(req, token) {
+  const parts = [`asher_session=${token}`, 'HttpOnly', 'Path=/', 'SameSite=Lax',
+    `Max-Age=${30 * 86400}`];
+  if (isSecure(req)) parts.push('Secure');
+  return parts.join('; ');
 }
 
 // ---------- Статика ----------
@@ -136,12 +189,15 @@ function serveStatic(req, res, pathname) {
       // SPA: любые прочие адреса отдают index.html
       fs.readFile(path.join(PUBLIC_DIR, 'index.html'), (e2, index) => {
         if (e2) { res.writeHead(404); res.end('Not found'); return; }
-        res.writeHead(200, { 'Content-Type': MIME['.html'] });
+        res.writeHead(200, { 'Content-Type': MIME['.html'], ...securityHeaders(req) });
         res.end(index);
       });
       return;
     }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
+    res.writeHead(200, {
+      'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
+      ...securityHeaders(req),
+    });
     res.end(data);
   });
 }
@@ -197,18 +253,25 @@ const server = http.createServer(async (req, res) => {
 
     // --- вход/выход/кто я ---
     if (pathname === '/api/login' && req.method === 'POST') {
-      const ip = req.socket.remoteAddress || '?';
-      if (!loginAllowed(ip)) throw new ApiError(429, 'Слишком много попыток. Подождите минуту.');
+      const ip = clientIp(req);
       const body = JSON.parse((await readBody(req)).toString('utf8') || '{}');
-      const result = auth.login(body.username, body.password);
+      const wait = guard.retryAfter(ip, body.username);
+      if (wait) {
+        const mins = Math.ceil(wait / 60);
+        throw new ApiError(429, mins > 1
+          ? `Слишком много неудачных попыток. Попробуйте через ${mins} мин.`
+          : 'Слишком много неудачных попыток. Попробуйте через минуту.');
+      }
+      const result = auth.login(body.username, body.password, { ip });
       if (!result) {
-        noteLoginFail(ip);
+        guard.noteFail(ip, body.username);
         throw new ApiError(401, 'Неверный логин или пароль');
       }
-      loginFails.delete(ip);
+      guard.noteSuccess(ip, body.username);
       res.writeHead(200, {
         'Content-Type': 'application/json; charset=utf-8',
-        'Set-Cookie': `asher_session=${result.session.token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${30 * 86400}`,
+        'Set-Cookie': sessionCookie(req, result.session.token),
+        ...securityHeaders(req),
       });
       res.end(JSON.stringify({
         user: result.user,
@@ -234,7 +297,8 @@ const server = http.createServer(async (req, res) => {
       auth.destroySession(cookies.asher_session);
       res.writeHead(200, {
         'Content-Type': 'application/json; charset=utf-8',
-        'Set-Cookie': 'asher_session=; HttpOnly; Path=/; Max-Age=0',
+        'Set-Cookie': 'asher_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0',
+        ...securityHeaders(req),
       });
       res.end('{"ok":true}');
       return;

@@ -218,6 +218,22 @@ function maybeBackup() {
   }
 }
 
+/*
+ * Копия «здесь и сейчас» — для кнопки «Скачать резервную копию».
+ *
+ * Копии, которые система делает сама, лежат рядом с базой: сгорел компьютер —
+ * сгорели и они. Настоящая защита — копия в другом месте, поэтому владелец
+ * должен уметь забрать свежий снимок одним нажатием и положить его туда,
+ * где его точно не потеряют.
+ */
+function makeBackupNow() {
+  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  const target = path.join(BACKUP_DIR, `asher-${stamp}.db`);
+  db.exec(`VACUUM INTO '${target.replace(/'/g, "''")}'`);
+  return target;
+}
+
 function status() {
   const backups = (() => {
     try {
@@ -258,4 +274,4 @@ function start() {
   setInterval(maybeBackup, 3600 * 1000).unref();
 }
 
-module.exports = { start, status, SYNC_DIR, BACKUP_DIR };
+module.exports = { start, status, makeBackupNow, SYNC_DIR, BACKUP_DIR };

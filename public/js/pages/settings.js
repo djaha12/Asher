@@ -379,11 +379,18 @@ window.Pages.settings = (() => {
           { title: 'Имя', render: r => `<span class="strong">${ui.esc(r.name)}</span>` },
           { title: 'Роль', render: r => r.role === 'admin' ? '<span class="badge badge-gold">Администратор</span>' : '<span class="badge badge-gray">Продавец</span>' },
           { title: 'Статус', render: r => r.active ? '<span class="badge badge-good">Активен</span>' : '<span class="badge badge-crit">Отключён</span>' },
+          { title: 'Устройства', cls: 'num', render: r => r.devices
+            ? `<span title="Устройств, где выполнен вход">${r.devices}</span>` : '<span class="dim">—</span>' },
           { title: '', cls: 'nowrap', render: r =>
             `<button class="btn btn-sm" data-user-phone="${r.id}" title="Подключить телефон">📱</button>
+             ${r.devices ? `<button class="btn btn-sm" data-user-logout="${r.id}"
+               title="Завершить вход на всех устройствах">⎋</button>` : ''}
              <button class="btn btn-sm" data-user-edit="${r.id}">✎</button>` },
         ], items)}
         <button class="btn" id="user-add" style="margin-top:12px">+ Сотрудник</button>
+        <p class="form-hint">Столбец «Устройства» — сколько телефонов и компьютеров сейчас
+          в системе под этим логином. Потеряли телефон или человек уволился — нажмите ⎋:
+          вход прекратится немедленно на всех его устройствах.</p>
         <p class="form-hint">У каждого сотрудника — свой логин. Общий на всех логин
           обесценивает журнал: в нём будет видно, что действие сделал «кто-то».
           Кнопка 📱 открывает карточку подключения: сотрудник наводит камеру — и система
@@ -395,6 +402,19 @@ window.Pages.settings = (() => {
     }));
     box.querySelectorAll('[data-user-phone]').forEach(btn => btn.addEventListener('click', () => {
       phoneCard(items.find(u => u.id === Number(btn.dataset.userPhone)));
+    }));
+    box.querySelectorAll('[data-user-logout]').forEach(btn => btn.addEventListener('click', async () => {
+      const u = items.find(x => x.id === Number(btn.dataset.userLogout));
+      const yes = await ui.confirmDialog(
+        `Завершить вход «${u.name}» на всех устройствах (${u.devices})? ` +
+        'Чтобы работать дальше, ему нужно будет войти заново со своим паролем.',
+        { danger: true, okLabel: 'Завершить' });
+      if (!yes) return;
+      try {
+        const r = await api.post(`/api/users/${u.id}/logout-all`);
+        ui.toast(`Завершено сеансов: ${r.closed}`);
+        renderUsers(box);
+      } catch (e) { ui.toastErr(e); }
     }));
   }
 
@@ -471,8 +491,8 @@ window.Pages.settings = (() => {
           <option value="seller" ${u.role !== 'admin' ? 'selected' : ''}>Продавец</option>
           <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Администратор</option></select></label>
         <p class="form-hint" id="role-hint"></p>
-        <label class="field"><span>${isNew ? 'Пароль *' : 'Новый пароль (не обязательно)'}</span>
-          <input name="password" type="password" ${isNew ? 'required' : ''} minlength="6" autocomplete="new-password"></label>
+        <label class="field"><span>${isNew ? 'Пароль * (не короче 8 знаков)' : 'Новый пароль (не короче 8 знаков)'}</span>
+          <input name="password" type="password" ${isNew ? 'required' : ''} minlength="8" autocomplete="new-password"></label>
         ${!isNew ? `<label class="field" style="flex-direction:row;align-items:center;gap:8px">
           <input type="checkbox" name="active" ${u.active ? 'checked' : ''} style="width:auto"> <span style="font-weight:400">Активен (может входить в систему)</span></label>` : ''}
       </form>`,
@@ -530,6 +550,8 @@ window.Pages.settings = (() => {
     upload_photo: 'загрузка фото', delete_photo: 'удаление фото',
     upload_certificate: 'загрузка сертификата', delete_certificate: 'удаление сертификата',
     password: 'смена пароля', sync: 'автообмен с 1С',
+    login_failed: 'неудачный вход', logout_all: 'завершение всех сеансов',
+    backup: 'скачана резервная копия',
   };
   const AUDIT_ENTITIES = {
     product: 'изделие', products: 'изделия', customer: 'клиент', customers: 'клиенты',
@@ -540,7 +562,7 @@ window.Pages.settings = (() => {
   };
   // Действия, за которыми владелец следит чаще всего, — их выносим в отбор.
   const AUDIT_PICK = ['sale', 'return', 'exchange', 'payment', 'status', 'create', 'update',
-    'delete', 'import', 'transfer', 'finish', 'login'];
+    'delete', 'import', 'transfer', 'finish', 'login', 'login_failed'];
 
   async function renderAudit(box) {
     const users = await api.get('/api/users').then(r => r.items).catch(() => []);
@@ -630,21 +652,91 @@ window.Pages.settings = (() => {
 
   function renderMyPassword(box) {
     box.innerHTML = `
-      <div class="card" style="max-width:420px">
+      <div class="card" style="max-width:460px">
         <h3 class="card-title">Мой пароль</h3>
-        <label class="field"><span>Новый пароль (мин. 6 символов)</span>
-          <input type="password" id="my-pwd" minlength="6" autocomplete="new-password"></label>
+        <label class="field"><span>Новый пароль (не короче 8 знаков)</span>
+          <input type="password" id="my-pwd" minlength="8" autocomplete="new-password"></label>
+        <p class="form-hint">Смена пароля завершит вход на всех остальных устройствах —
+          это устройство останется в системе. Так и должно быть: пароль меняют,
+          когда подозревают, что его кто-то знает.</p>
         <button class="btn btn-primary" id="my-pwd-save">Сменить пароль</button>
       </div>`;
     box.querySelector('#my-pwd-save').addEventListener('click', async () => {
       const pwd = box.querySelector('#my-pwd').value;
-      if (pwd.length < 6) { ui.toast('Пароль минимум 6 символов', true); return; }
+      if (pwd.length < 8) { ui.toast('Пароль должен быть не короче 8 знаков', true); return; }
       try {
-        await api.post('/api/me/password', { password: pwd });
-        ui.toast('Пароль изменён');
+        const r = await api.post('/api/me/password', { password: pwd });
+        ui.toast(r.sessions_closed
+          ? `Пароль изменён. Завершено других входов: ${r.sessions_closed}`
+          : 'Пароль изменён');
         box.querySelector('#my-pwd').value = '';
       } catch (e) { ui.toastErr(e); }
     });
+  }
+
+  /*
+   * Безопасность одной страницей.
+   *
+   * Владельцу не нужно разбираться в заголовках и сертификатах — ему нужно
+   * видеть, всё ли в порядке, и уметь нажать две кнопки: сменить стандартный
+   * пароль и забрать копию базы. Всё остальное система делает сама.
+   */
+  async function renderSecurity(box) {
+    const [hint, users] = await Promise.all([
+      fetch('/api/login-hint').then(r => r.json()).catch(() => ({ default_admin: false })),
+      api.get('/api/users').then(r => r.items).catch(() => []),
+    ]);
+    const secure = location.protocol === 'https:';
+    const devices = users.reduce((n, u) => n + (u.devices || 0), 0);
+    const row = (good, title, text) => `
+      <div class="row" style="align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)">
+        <span class="badge ${good ? 'badge-good' : 'badge-crit'}" style="margin-top:2px">${good ? '✓' : '!'}</span>
+        <div><div class="strong">${title}</div><div class="muted">${text}</div></div>
+      </div>`;
+
+    box.innerHTML = `
+      <div class="two-col">
+        <div>
+          <div class="card">
+            <h3 class="card-title">Что с безопасностью</h3>
+            ${row(!hint.default_admin, 'Пароль администратора',
+              hint.default_admin
+                ? 'Стоит стандартный «admin123». Его знает любой, кто видел эту систему. Смените на вкладке «Мой пароль» — это первое, что нужно сделать.'
+                : 'Стандартный пароль сменён.')}
+            ${row(secure, 'Защищённое соединение (https)',
+              secure
+                ? 'Соединение зашифровано: пароли и цены нельзя подсмотреть по дороге.'
+                : 'Сейчас соединение обычное. Внутри магазинного Wi-Fi это допустимо. Когда система переедет в интернет, https нужен обязательно — иначе пароль виден любому в той же сети.')}
+            ${row(true, 'Подбор пароля',
+              'После пяти неудачных попыток вход закрывается на минуту, дальше пауза растёт до двух часов. Счёт идёт и по адресу, и по логину. Попытки видны в журнале действий.')}
+            ${row(true, 'Закупочные цены',
+              'Продавцы не получают их ни на экране, ни в ответах системы, и не могут стереть при правке изделия.')}
+            ${row(devices > 0, 'Входы на устройствах',
+              `Сейчас в системе устройств: ${devices}. Список — на вкладке «Сотрудники»; там же кнопка ⎋ завершает вход на всех устройствах человека.`)}
+          </div>
+        </div>
+        <div>
+          <div class="card">
+            <h3 class="card-title">Резервная копия</h3>
+            <p class="muted" style="margin-top:0">Система и так делает копию раз в сутки, но кладёт её
+              рядом с базой. Пропадёт компьютер — пропадут и копии. Нажмите кнопку, сохраните файл
+              в облако или на флешку, и данные переживут что угодно.</p>
+            <a class="btn btn-primary" href="/api/backup/download" download>Скачать резервную копию</a>
+            <p class="form-hint">Один файл — вся система целиком: изделия, продажи, клиенты, долги,
+              журнал. Восстановление: положить файл вместо <code>data/asher.db</code>.</p>
+          </div>
+          <div class="card">
+            <h3 class="card-title">Правила, о которых стоит помнить</h3>
+            <ul class="muted" style="margin:0;padding-left:18px;line-height:1.7">
+              <li>У каждого сотрудника свой логин — общий обесценивает журнал.</li>
+              <li>Уволился — не удаляйте, снимите «Активен»: вход закроется сразу,
+                а его продажи останутся в истории.</li>
+              <li>Потеряли телефон — нажмите ⎋ у этого сотрудника.</li>
+              <li>Пароль не короче 8 знаков и не из тех, что подбирают первыми.</li>
+            </ul>
+          </div>
+        </div>
+      </div>`;
   }
 
   return {
@@ -653,7 +745,8 @@ window.Pages.settings = (() => {
       const admin = App.isAdmin();
       const tabs = admin
         ? [['store', 'Магазин'], ['stores', 'Точки продаж'], ['refs', 'Справочники'],
-           ['users', 'Сотрудники'], ['audit', 'Журнал действий'], ['me', 'Мой пароль']]
+           ['users', 'Сотрудники'], ['audit', 'Журнал действий'],
+           ['security', 'Безопасность'], ['me', 'Мой пароль']]
         : [['me', 'Мой пароль']];
       el.innerHTML = `
         <div class="tabs">${tabs.map(([k, t], i) =>
@@ -668,6 +761,7 @@ window.Pages.settings = (() => {
           if (key === 'refs') await renderCatalogRefs(body);
           if (key === 'users') await renderUsers(body);
           if (key === 'audit') await renderAudit(body);
+          if (key === 'security') await renderSecurity(body);
           if (key === 'me') renderMyPassword(body);
         } catch (e) { body.innerHTML = `<div class="empty"><p>${ui.esc(e.message)}</p></div>`; }
       };

@@ -2,7 +2,7 @@
 const os = require('node:os');
 const { db, nowIso, audit, getSetting, setSetting, hashPassword, makeSalt } = require('../db');
 const { ApiError } = require('./util');
-const { changePassword } = require('../auth');
+const { changePassword, passwordProblem, destroyUserSessions, countUserSessions } = require('../auth');
 const { PRESETS, LOCALE_KEYS, presetFor } = require('../locale');
 
 // usd_rate — курс доллара для закупки: поставщики часто считают в валюте,
@@ -82,6 +82,30 @@ const routes = [
     // Состояние автообмена с 1С и резервных копий — показывается на странице импорта.
     method: 'GET', path: '/api/sync/status', admin: true,
     handler: () => require('../sync').status(),
+  },
+  {
+    /*
+     * Скачать резервную копию.
+     *
+     * Копии, которые система делает сама, лежат рядом с базой — от пожара,
+     * кражи ноутбука и пропавшего сервера они не спасают. Эта кнопка снимает
+     * свежий снимок и отдаёт его файлом: владелец кладёт его туда, где точно
+     * не потеряет. Один файл — вся система целиком.
+     */
+    method: 'GET', path: '/api/backup/download', admin: true, raw: true,
+    handler: ({ res, session }) => {
+      const fs = require('node:fs');
+      const file = require('../sync').makeBackupNow();
+      const data = fs.readFileSync(file);
+      const name = 'asher-' + new Date().toISOString().slice(0, 10) + '.db';
+      audit(session.userId, 'backup', 'settings', null, `Скачана резервная копия (${name})`);
+      res.writeHead(200, {
+        'Content-Type': 'application/octet-stream',
+        'Content-Disposition': `attachment; filename="${name}"`,
+        'Content-Length': data.length,
+      });
+      res.end(data);
+    },
   },
 
   // --- Категории ---
@@ -184,7 +208,11 @@ const routes = [
   {
     method: 'GET', path: '/api/users', admin: true,
     handler: () => ({
-      items: db.prepare('SELECT id, username, name, role, active, created_at FROM users ORDER BY id').all(),
+      items: db.prepare(
+        `SELECT u.id, u.username, u.name, u.role, u.active, u.created_at,
+                (SELECT COUNT(*) FROM sessions s WHERE s.user_id = u.id AND s.expires_at >= ?) AS devices
+         FROM users u ORDER BY u.id`
+      ).all(nowIso()),
     }),
   },
   {
@@ -198,7 +226,8 @@ const routes = [
         throw new ApiError(400, 'Логин: 3–30 символов, латиница, цифры, точки и дефисы');
       }
       if (!name) throw new ApiError(400, 'Имя обязательно');
-      if (password.length < 6) throw new ApiError(400, 'Пароль минимум 6 символов');
+      const weak = passwordProblem(password);
+      if (weak) throw new ApiError(400, weak);
       const dup = db.prepare('SELECT 1 FROM users WHERE username = ?').get(username);
       if (dup) throw new ApiError(400, 'Такой логин уже занят');
       const salt = makeSalt();
@@ -238,8 +267,14 @@ const routes = [
         if (!active) db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
       }
       if (body.password) {
-        if (String(body.password).length < 6) throw new ApiError(400, 'Пароль минимум 6 символов');
-        changePassword(id, String(body.password));
+        const weak = passwordProblem(body.password);
+        if (weak) throw new ApiError(400, weak);
+        // Свой пароль меняем, не выкидывая себя же из системы.
+        const keep = id === session.userId ? session.token : '';
+        const dropped = changePassword(id, String(body.password), { keepToken: keep });
+        audit(session.userId, 'password', 'user', id,
+          `Пароль сотрудника «${u.username}» сменён` +
+          (dropped ? `, завершено сеансов: ${dropped}` : ''));
       }
       audit(session.userId, 'update', 'user', id, u.username);
       return { ok: true };
@@ -250,10 +285,31 @@ const routes = [
     method: 'POST', path: '/api/me/password',
     handler: ({ body, session }) => {
       const pwd = String(body.password || '');
-      if (pwd.length < 6) throw new ApiError(400, 'Пароль минимум 6 символов');
-      changePassword(session.userId, pwd);
-      audit(session.userId, 'password', 'user', session.userId, 'Смена пароля');
-      return { ok: true };
+      const weak = passwordProblem(pwd);
+      if (weak) throw new ApiError(400, weak);
+      // Текущее устройство остаётся в системе, остальные — выходят.
+      const dropped = changePassword(session.userId, pwd, { keepToken: session.token });
+      audit(session.userId, 'password', 'user', session.userId,
+        'Смена пароля' + (dropped ? `, завершено других сеансов: ${dropped}` : ''));
+      return { ok: true, sessions_closed: dropped };
+    },
+  },
+  {
+    /*
+     * Завершить все входы сотрудника. Телефон потеряли или сотрудник ушёл —
+     * этой кнопкой его выкидывает со всех устройств немедленно, а не через
+     * месяц, когда сам истечёт сохранённый сеанс.
+     */
+    method: 'POST', path: '/api/users/:id/logout-all', admin: true,
+    handler: ({ params, session }) => {
+      const id = Number(params.id);
+      const u = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+      if (!u) throw new ApiError(404, 'Сотрудник не найден');
+      const keep = id === session.userId ? session.token : '';
+      const closed = destroyUserSessions(id, { keepToken: keep });
+      audit(session.userId, 'logout_all', 'user', id,
+        `${u.name}: завершено сеансов ${closed}`);
+      return { closed };
     },
   },
 
