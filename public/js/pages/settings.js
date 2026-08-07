@@ -93,6 +93,16 @@ window.Pages.settings = (() => {
                   <code style="font-size:19px;font-weight:600;flex:1;word-break:break-all">${ui.esc(a)}</code>
                   <button class="btn btn-sm" data-copy="${ui.esc(a)}">Копировать</button>
                 </div>`).join('')}
+              ${network.hostname_url ? `
+                <div class="card-title" style="margin-top:16px">Адрес, который не меняется</div>
+                <div class="row" style="margin-bottom:6px">
+                  <code style="font-size:19px;font-weight:600;flex:1;word-break:break-all">${ui.esc(network.hostname_url)}</code>
+                  <button class="btn btn-sm" data-copy="${ui.esc(network.hostname_url)}">Копировать</button>
+                </div>
+                <p class="form-hint">Адрес вида 192.168… роутер может однажды поменять — тогда
+                  сохранённая на телефонах ссылка перестанет открываться. Этот адрес привязан
+                  к имени компьютера и переживает такую смену. Если телефон его не открывает
+                  (бывает на старых роутерах) — пользуйтесь адресом с цифрами выше.</p>` : ''}
               <div class="hint-box" style="margin:14px 0 0">
                 <strong>Чтобы стало приложением.</strong> Открыв систему на телефоне, нажмите
                 в браузере «Поделиться» или «⋮» и выберите
@@ -369,14 +379,83 @@ window.Pages.settings = (() => {
           { title: 'Имя', render: r => `<span class="strong">${ui.esc(r.name)}</span>` },
           { title: 'Роль', render: r => r.role === 'admin' ? '<span class="badge badge-gold">Администратор</span>' : '<span class="badge badge-gray">Продавец</span>' },
           { title: 'Статус', render: r => r.active ? '<span class="badge badge-good">Активен</span>' : '<span class="badge badge-crit">Отключён</span>' },
-          { title: '', render: r => `<button class="btn btn-sm" data-user-edit="${r.id}">✎</button>` },
+          { title: '', cls: 'nowrap', render: r =>
+            `<button class="btn btn-sm" data-user-phone="${r.id}" title="Подключить телефон">📱</button>
+             <button class="btn btn-sm" data-user-edit="${r.id}">✎</button>` },
         ], items)}
         <button class="btn" id="user-add" style="margin-top:12px">+ Сотрудник</button>
+        <p class="form-hint">У каждого сотрудника — свой логин. Общий на всех логин
+          обесценивает журнал: в нём будет видно, что действие сделал «кто-то».
+          Кнопка 📱 открывает карточку подключения: сотрудник наводит камеру — и система
+          открывается у него на телефоне с уже подставленным логином.</p>
       </div>`;
     box.querySelector('#user-add').addEventListener('click', () => userDialog(null, () => renderUsers(box)));
     box.querySelectorAll('[data-user-edit]').forEach(btn => btn.addEventListener('click', () => {
       userDialog(items.find(u => u.id === Number(btn.dataset.userEdit)), () => renderUsers(box));
     }));
+    box.querySelectorAll('[data-user-phone]').forEach(btn => btn.addEventListener('click', () => {
+      phoneCard(items.find(u => u.id === Number(btn.dataset.userPhone)));
+    }));
+  }
+
+  /*
+   * Карточка подключения телефона.
+   *
+   * Шесть продавцов — шесть телефонов, и на каждом надо набрать адрес вида
+   * «192.168.1.14:3000», а потом логин. Вручную это шесть возможностей ошибиться.
+   * Карточку можно показать с экрана или распечатать: сотрудник наводит камеру,
+   * система открывается, логин уже стоит — остаётся ввести пароль.
+   */
+  async function phoneCard(u) {
+    if (!u) return;
+    const net = await api.get('/api/settings/network').catch(() => ({ addresses: [] }));
+    const base = net.addresses[0] || '';
+    const link = base ? `${base}/#login=${encodeURIComponent(u.username)}` : '';
+    const m = ui.modal({
+      title: 'Телефон сотрудника: ' + u.name,
+      size: 'sm',
+      body: `<div id="phone-card">
+        ${link ? `
+          <div class="phone-qr">${phoneQr(link)}</div>
+          <div style="text-align:center;margin-bottom:10px">
+            <div style="font-size:19px;font-weight:600">${ui.esc(u.name)}</div>
+            <div class="muted">логин: <b class="mono">${ui.esc(u.username)}</b></div>
+            <div class="muted mono" style="font-size:13px;word-break:break-all">${ui.esc(base)}</div>
+          </div>
+          <div class="hint-box" style="margin:0">
+            <strong>Что сделать на телефоне:</strong>
+            <div style="margin-top:6px">1. Навести камеру на код — откроется система.</div>
+            <div>2. Ввести пароль (логин уже подставлен).</div>
+            <div>3. В браузере нажать «Поделиться» → <b>«На экран “Домой”»</b> (iPhone)
+              или «⋮» → <b>«Установить приложение»</b> (Android) — появится значок Asher.</div>
+            <div style="margin-top:6px">Телефон должен быть в том же Wi-Fi, что и компьютер.</div>
+          </div>`
+        : '<p class="muted">Компьютер не подключён к сети — адрес появится, когда включите Wi-Fi.</p>'}
+      </div>`,
+      footer: `<button class="btn" data-act="cancel">Закрыть</button>
+        ${link ? `<button class="btn" data-act="pwd">Задать пароль</button>
+          <button class="btn btn-primary" data-act="print">${ui.icon('print')} Печатать</button>` : ''}`,
+    });
+    m.foot.querySelector('[data-act=cancel]').onclick = m.close;
+    const pwdBtn = m.foot.querySelector('[data-act=pwd]');
+    if (pwdBtn) pwdBtn.onclick = () => { m.close(); userDialog(u, null); };
+    const printBtn = m.foot.querySelector('[data-act=print]');
+    if (printBtn) printBtn.onclick = () => {
+      const root = document.getElementById('print-root');
+      root.innerHTML = `<div style="padding:20mm;text-align:center">
+        <h2 style="margin:0 0 8px">Asher — вход для сотрудника</h2>
+        <div style="font-size:22px;font-weight:600;margin-bottom:4px">${ui.esc(u.name)}</div>
+        <div style="margin-bottom:14px">логин: <b>${ui.esc(u.username)}</b></div>
+        <div style="width:70mm;margin:0 auto 12px">${phoneQr(link)}</div>
+        <div style="font-family:monospace">${ui.esc(base)}</div>
+        <p style="margin-top:16px">Наведите камеру телефона на код, введите пароль,
+          затем добавьте страницу на главный экран.</p>
+      </div>`;
+      setTimeout(() => {
+        window.print();
+        setTimeout(() => { root.innerHTML = ''; }, 500);
+      }, 80);
+    };
   }
 
   function userDialog(u, onChange) {
@@ -386,7 +465,7 @@ window.Pages.settings = (() => {
       title: isNew ? 'Новый сотрудник' : 'Сотрудник: ' + u.name,
       size: 'sm',
       body: `<form id="user-form">
-        ${isNew ? `<label class="field"><span>Логин *</span><input name="username" required placeholder="anna" pattern="[a-z0-9._-]{3,30}"></label>` : ''}
+        ${isNew ? `<label class="field"><span>Логин *</span><input name="username" required placeholder="anna" autocapitalize="none" pattern="[a-z0-9._\\-]{3,30}"></label>` : ''}
         <label class="field"><span>Имя *</span><input name="name" required value="${ui.esc(u.name || '')}"></label>
         <label class="field"><span>Роль</span><select name="role">
           <option value="seller" ${u.role !== 'admin' ? 'selected' : ''}>Продавец</option>
@@ -417,7 +496,8 @@ window.Pages.settings = (() => {
       if (!form.reportValidity()) return;
       const v = ui.formValues(form);
       try {
-        if (isNew) await api.post('/api/users', v);
+        let created = null;
+        if (isNew) created = await api.post('/api/users', v);
         else {
           const payload = { name: v.name, role: v.role, active: v.active };
           if (v.password) payload.password = v.password;
@@ -425,6 +505,9 @@ window.Pages.settings = (() => {
         }
         ui.toast('Сохранено');
         m.close(); onChange && onChange();
+        // Завели человека — сразу показываем, как подключить его телефон:
+        // отдельно искать эту кнопку никто не станет.
+        if (isNew) phoneCard({ id: created && created.id, name: v.name, username: v.username });
       } catch (e) { ui.toastErr(e); }
     };
   }

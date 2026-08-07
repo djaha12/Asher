@@ -67,7 +67,15 @@ const routes = [
           addresses.push(`http://${iface.address}:${port}`);
         }
       }
-      return { addresses, port, hostname: os.hostname() };
+      /*
+       * Адрес по имени компьютера. Числовой адрес роутер однажды выдаст другой,
+       * и сохранённые на телефонах ссылки разом перестанут открываться —
+       * а имя компьютера остаётся тем же. Работает не в каждой сети, поэтому
+       * это дополнение к списку, а не замена ему.
+       */
+      const host = String(os.hostname() || '').split('.')[0];
+      const hostnameUrl = host && /^[a-z0-9-]+$/i.test(host) ? `http://${host}:${port}` : '';
+      return { addresses, port, hostname: os.hostname(), hostname_url: hostnameUrl };
     },
   },
   {

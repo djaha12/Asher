@@ -189,6 +189,17 @@ window.Pages.inventory = (() => {
       : `<div class="thumb-sm-empty">${ui.icon('gem')}</div>`;
   }
 
+  /*
+   * Таблица изделий пересчёта.
+   *
+   * В начале инвентаризации «не найдено» — это весь склад точки: на большом
+   * магазине несколько тысяч строк. Рисовать их все — значит подвесить телефон
+   * ровно в тот момент, когда продавец собрался сканировать. Показываем первую
+   * сотню: список всё равно тает с каждым сканированием, а полный перечень
+   * недостачи владелец смотрит в конце, когда строк остаются единицы.
+   */
+  const TABLE_CAP = 100;
+
   function itemsTable(rows, withRemove) {
     const cols = [
       { title: '', cls: 'nowrap', render: thumbCell },
@@ -202,7 +213,12 @@ window.Pages.inventory = (() => {
       cols.push({ title: '', render: r =>
         `<button class="btn btn-sm btn-danger" data-unscan="${r.id}" title="Убрать из отсканированного">×</button>` });
     }
-    return ui.table(cols, rows, { empty: '' });
+    const shown = rows.slice(0, TABLE_CAP);
+    return ui.table(cols, shown, { empty: '' })
+      + (rows.length > shown.length
+        ? `<div class="muted" style="margin-top:8px">Показано ${shown.length} из ${rows.length} —
+             список сокращается по мере сканирования.</div>`
+        : '');
   }
 
   async function finish(id, writeOff, data) {

@@ -47,7 +47,19 @@ window.App = (() => {
     showLogin() {
       document.getElementById('app').classList.add('hidden');
       document.getElementById('login-screen').classList.remove('hidden');
-      setTimeout(() => document.getElementById('login-username').focus(), 50);
+      /*
+       * Телефон подключают по QR с карточки сотрудника, а в ней зашит его логин:
+       * «…/#login=aigul». Подставляем логин сам — продавцу остаётся ввести только
+       * пароль. Пароль в ссылку не кладём: карточку могут сфотографировать.
+       */
+      const fromLink = /[#&?]login=([a-z0-9._-]{1,30})/i.exec(location.hash || '');
+      const userInput = document.getElementById('login-username');
+      if (fromLink) {
+        userInput.value = fromLink[1].toLowerCase();
+        setTimeout(() => document.getElementById('login-password').focus(), 50);
+      } else {
+        setTimeout(() => userInput.focus(), 50);
+      }
       // Подсказка про admin/admin123 видна только пока пароль стандартный.
       const hint = document.getElementById('login-hint');
       if (hint) {
@@ -184,6 +196,8 @@ window.App = (() => {
       App.storeName = res.store_name || 'Asher';
       if (res.locale) App.locale = res.locale;
       document.getElementById('login-password').value = '';
+      // Убираем «#login=…» из ссылки, чтобы дальше работали обычные разделы.
+      if (/^#login=/i.test(location.hash)) location.hash = '#/dashboard';
       App.showApp();
     } catch (err) {
       errEl.textContent = err.message;
