@@ -13,9 +13,15 @@ const routes = [
   // --- Общие настройки ---
   {
     method: 'GET', path: '/api/settings',
-    handler: () => {
+    handler: ({ session }) => {
       const out = {};
       for (const k of SETTING_KEYS) out[k] = getSetting(k);
+      /*
+       * Курс закупки — часть закупочной кухни: зная его и цену в долларах,
+       * закупочную считают в уме. Продавцу настройки нужны только ради валюты
+       * и формата сумм, поэтому курс отсюда убираем.
+       */
+      if (session.role !== 'admin') delete out.usd_rate;
       return out;
     },
   },
@@ -76,6 +82,31 @@ const routes = [
       const host = String(os.hostname() || '').split('.')[0];
       const hostnameUrl = host && /^[a-z0-9-]+$/i.test(host) ? `http://${host}:${port}` : '';
       return { addresses, port, hostname: os.hostname(), hostname_url: hostnameUrl };
+    },
+  },
+  {
+    /*
+     * Состояние безопасности — для страницы «Безопасность».
+     *
+     * Отдельно от публичного /api/login-hint: тот из интернета молчит, чтобы
+     * не объявлять всему свету «сюда можно как admin/admin123». Владельцу же
+     * знать об этом надо в любом случае, поэтому здесь — после входа и только
+     * администратору.
+     */
+    method: 'GET', path: '/api/security/status', admin: true,
+    handler: ({ req }) => {
+      const { defaultAdminActive, MIN_PASSWORD } = require('../auth');
+      const proxied = process.env.ASHER_TRUST_PROXY === '1';
+      return {
+        default_admin: defaultAdminActive(),
+        secure: proxied
+          ? String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https'
+          : Boolean(req.socket.encrypted),
+        behind_proxy: proxied,
+        min_password: MIN_PASSWORD,
+        devices: db.prepare('SELECT COUNT(*) AS c FROM sessions WHERE expires_at >= ?').get(nowIso()).c,
+        last_backup: getSetting('last_backup') || '',
+      };
     },
   },
   {

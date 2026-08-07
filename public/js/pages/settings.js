@@ -682,12 +682,12 @@ window.Pages.settings = (() => {
    * пароль и забрать копию базы. Всё остальное система делает сама.
    */
   async function renderSecurity(box) {
-    const [hint, users] = await Promise.all([
-      fetch('/api/login-hint').then(r => r.json()).catch(() => ({ default_admin: false })),
-      api.get('/api/users').then(r => r.items).catch(() => []),
-    ]);
-    const secure = location.protocol === 'https:';
-    const devices = users.reduce((n, u) => n + (u.devices || 0), 0);
+    // Спрашиваем систему, а не браузер: только сервер знает, что перед ним
+    // прокси с https и что пароль администратора всё ещё стандартный.
+    const st = await api.get('/api/security/status').catch(() => ({}));
+    const hint = { default_admin: st.default_admin };
+    const secure = Boolean(st.secure);
+    const devices = Number(st.devices) || 0;
     const row = (good, title, text) => `
       <div class="row" style="align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)">
         <span class="badge ${good ? 'badge-good' : 'badge-crit'}" style="margin-top:2px">${good ? '✓' : '!'}</span>
@@ -703,6 +703,10 @@ window.Pages.settings = (() => {
               hint.default_admin
                 ? 'Стоит стандартный «admin123». Его знает любой, кто видел эту систему. Смените на вкладке «Мой пароль» — это первое, что нужно сделать.'
                 : 'Стандартный пароль сменён.')}
+            ${row(Boolean(st.last_backup), 'Резервная копия',
+              st.last_backup
+                ? `Последняя копия: ${ui.dt(st.last_backup)}. Не забывайте забирать её наружу — кнопка справа.`
+                : 'Копий ещё не было. Нажмите «Скачать резервную копию» справа.')}
             ${row(secure, 'Защищённое соединение (https)',
               secure
                 ? 'Соединение зашифровано: пароли и цены нельзя подсмотреть по дороге.'

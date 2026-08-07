@@ -229,8 +229,22 @@ function maybeBackup() {
 function makeBackupNow() {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-  const target = path.join(BACKUP_DIR, `asher-${stamp}.db`);
+  let target = path.join(BACKUP_DIR, `asher-${stamp}.db`);
+  // Две копии в одну секунду — VACUUM INTO на существующий файл падает.
+  let n = 1;
+  while (fs.existsSync(target)) target = path.join(BACKUP_DIR, `asher-${stamp}-${n++}.db`);
   db.exec(`VACUUM INTO '${target.replace(/'/g, "''")}'`);
+  /*
+   * Чистим старые тут же. Иначе частые нажатия «Скачать копию» тихо забьют
+   * диск: каждая копия — это вся база целиком.
+   */
+  const old = fs.readdirSync(BACKUP_DIR)
+    .filter(f => /^asher-.*\.db$/.test(f))
+    .sort()
+    .slice(0, -BACKUPS_KEEP);
+  for (const f of old) {
+    if (path.join(BACKUP_DIR, f) !== target) fs.rmSync(path.join(BACKUP_DIR, f), { force: true });
+  }
   return target;
 }
 

@@ -156,7 +156,14 @@ function pick(row, mapping, field) {
 
 function toCsv(headers, rows) {
   const esc = v => {
-    const s = String(v ?? '');
+    let s = String(v ?? '');
+    /*
+     * Excel считает формулой всё, что начинается с «=», «+», «−» или «@».
+     * Название изделия приходит от людей и из 1С, поэтому в выгрузке такая
+     * строка выполнилась бы у того, кто её открыл. Ставим апостроф — Excel
+     * показывает текст как есть и ничего не вычисляет.
+     */
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
     return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const lines = [headers.map(esc).join(';')];

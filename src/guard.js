@@ -112,16 +112,42 @@ function noteFail(ip, username, now = Date.now()) {
   }
 }
 
+/*
+ * Общий поток попыток входа.
+ *
+ * Проверка пароля намеренно медленная — так задумано, чтобы подбор был дорогим.
+ * Но это же делает страницу входа удобной мишенью: поток запросов с разных
+ * адресов займёт процессор целиком, и система станет тормозить у всех, ещё
+ * до того как сработают счётчики по логину и адресу.
+ *
+ * Поэтому есть общий потолок: сколько всего попыток система готова проверять
+ * в минуту. Магазин из семи человек к нему не подойдёт и близко. Если поток
+ * его превысил, лишние попытки отбиваются сразу, не тратя процессор.
+ *
+ * Здесь важен размен: во время такого потока в систему нельзя будет войти
+ * заново. Зато уже открытые смены на телефонах продолжают работать, и магазин
+ * торгует — это лучше, чем сервер, лежащий под нагрузкой целиком.
+ */
+const GLOBAL_PER_MINUTE = 60;
+let windowStart = 0;
+let windowCount = 0;
+
+function globalOverload(now = Date.now()) {
+  if (now - windowStart > 60000) { windowStart = now; windowCount = 0; }
+  windowCount++;
+  return windowCount > GLOBAL_PER_MINUTE;
+}
+
 // Вошли успешно — снимаем счётчики и по адресу, и по логину.
 function noteSuccess(ip, username) {
   for (const key of keysFor(ip, username)) fails.delete(key);
 }
 
-function reset() { fails.clear(); lastPrune = 0; }
+function reset() { fails.clear(); lastPrune = 0; windowStart = 0; windowCount = 0; }
 
 // Для проверок: сколько ключей сейчас под наблюдением и что по конкретному.
 function size() { return fails.size; }
 function peek(key) { return fails.get(key) || null; }
 
-module.exports = { retryAfter, noteFail, noteSuccess, reset, size, peek,
-  USER_STEPS, IP_STEPS };
+module.exports = { retryAfter, noteFail, noteSuccess, globalOverload, reset, size, peek,
+  USER_STEPS, IP_STEPS, GLOBAL_PER_MINUTE };

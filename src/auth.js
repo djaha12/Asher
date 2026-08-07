@@ -48,9 +48,22 @@ function countUserSessions(userId) {
     .get(userId, nowIso()).c;
 }
 
+/*
+ * Соль-пустышка для несуществующих логинов.
+ *
+ * Если на «такого логина нет» отвечать сразу, а на «пароль не тот» — после
+ * подсчёта свёртки, разница во времени ответа выдаёт, какие логины в системе
+ * есть. Дальше подбирают уже прицельно. Поэтому считаем свёртку всегда,
+ * даже когда считать не с чем.
+ */
+const DUMMY_SALT = makeSalt();
+
 function login(username, password, { ip = '' } = {}) {
   const user = db.prepare('SELECT * FROM users WHERE username = ? AND active = 1').get(String(username || '').trim());
-  if (!user) return null;
+  if (!user) {
+    hashPassword(String(password || ''), DUMMY_SALT);
+    return null;
+  }
   const hash = hashPassword(String(password || ''), user.salt);
   const ok = crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(user.password_hash));
   if (!ok) return null;

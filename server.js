@@ -111,6 +111,25 @@ function clientIp(req) {
   return req.socket.remoteAddress || '?';
 }
 
+/*
+ * Пришли ли из домашней сети — из магазинного Wi-Fi, а не из интернета.
+ * По этому различаем, что можно показывать до входа: подсказка «admin/admin123»
+ * уместна за прилавком и недопустима на публичном адресе.
+ */
+function isLocalRequest(req) {
+  if (TRUST_PROXY && req.headers['x-forwarded-for']) {
+    // За прокси мы всегда «в интернете»: система выставлена наружу.
+    return false;
+  }
+  const ip = String(req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+  return ip === '127.0.0.1' || ip === '::1'
+    || /^10\./.test(ip)
+    || /^192\.168\./.test(ip)
+    || /^172\.(1[6-9]|2\d|3[01])\./.test(ip)
+    || /^169\.254\./.test(ip)
+    || /^f[cd]/i.test(ip);          // локальные адреса IPv6
+}
+
 // Работаем ли по https — от этого зависят защитные заголовки и флаг у cookie.
 function isSecure(req) {
   if (TRUST_PROXY && String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https') return true;
@@ -255,6 +274,10 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/api/login' && req.method === 'POST') {
       const ip = clientIp(req);
       const body = JSON.parse((await readBody(req)).toString('utf8') || '{}');
+      // Сначала общий потолок — он отбивает поток, не тратя процессор на пароль.
+      if (guard.globalOverload()) {
+        throw new ApiError(429, 'Система сейчас перегружена попытками входа. Попробуйте через минуту.');
+      }
       const wait = guard.retryAfter(ip, body.username);
       if (wait) {
         const mins = Math.ceil(wait / 60);
@@ -288,9 +311,21 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 200, { app: 'asher', port: server.address() && server.address().port });
       return;
     }
-    // Странице входа: показывать ли подсказку про стандартные логин и пароль.
+    /*
+     * Странице входа: показывать ли подсказку про стандартные логин и пароль.
+     *
+     * Подсказка нужна за прилавком — люди путают поля и вводят пароль в логин.
+     * Но снаружи она означала бы объявление «сюда можно зайти как admin/admin123»
+     * для любого, кто нашёл адрес. Поэтому из интернета отвечаем «нечего
+     * показывать», даже если пароль и правда стандартный.
+     */
     if (pathname === '/api/login-hint' && req.method === 'GET') {
-      sendJson(res, 200, { default_admin: auth.defaultAdminActive() });
+      sendJson(res, 200, {
+        default_admin: isLocalRequest(req) && auth.defaultAdminActive(),
+        // Владельцу нужно знать, что стандартный пароль всё ещё стоит, даже
+        // когда система в интернете, — эту строку читает страница «Безопасность»
+        // после входа, а не страница входа.
+      });
       return;
     }
     if (pathname === '/api/logout' && req.method === 'POST') {
