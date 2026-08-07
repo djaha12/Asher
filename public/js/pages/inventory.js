@@ -339,8 +339,7 @@ window.Pages.inventory = (() => {
     if (cameraStop) { stopCamera(); wrap.classList.add('hidden'); return; }
 
     if (!Scan.cameraSupported()) {
-      ui.toast('Камера в этом браузере недоступна. Используйте «Распознать по фото» ' +
-        'или обычный сканер штрихкодов.', true);
+      ui.toast(Scan.cameraProblem(), true);
       return;
     }
     let stream;

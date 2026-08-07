@@ -137,5 +137,24 @@ window.Scan = (() => {
 
   const cameraSupported = () => Boolean(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
 
-  return { decodeFile, pickAndDecode, candidates, watchVideo, cameraSupported };
+  /*
+   * Почему камера может быть недоступна.
+   *
+   * Браузеры дают доступ к камере только на защищённом адресе (https) либо на
+   * самом компьютере. По адресу вида «http://192.168.1.14:3000», то есть с
+   * телефона в магазинном Wi-Fi, камеру не даст ни Chrome, ни Safari — и дело
+   * не в разрешениях, поэтому «разрешите камеру в настройках» тут только сбивает
+   * с толку. Распознавание по фото и обычный сканер работают всегда.
+   */
+  function cameraProblem() {
+    if (cameraSupported()) return '';
+    const local = location.protocol === 'https:' || /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+    return local
+      ? 'Камера в этом браузере недоступна. Используйте «Распознать по фото» или сканер штрихкодов.'
+      : 'С телефона камера включается только по защищённому адресу (https) — по адресу с цифрами '
+        + 'браузер её не даёт. Печатайте бирки со штрихкодом и пользуйтесь «Распознать по фото» '
+        + 'или сканером. Чтобы заработала и камера, системе нужен адрес с https.';
+  }
+
+  return { decodeFile, pickAndDecode, candidates, watchVideo, cameraSupported, cameraProblem };
 })();
