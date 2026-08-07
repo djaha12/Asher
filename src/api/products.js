@@ -35,17 +35,30 @@ const MAIN_THUMB = `(SELECT pi.thumb FROM product_images pi
    WHERE pi.product_id = p.id ORDER BY pi.is_main DESC, pi.sort, pi.id LIMIT 1) AS thumb`;
 const PHOTO_COUNT = `(SELECT COUNT(*) FROM product_images pi WHERE pi.product_id = p.id) AS photo_count`;
 
+// Всё, что вместе складывается в закупочную цену.
+const PURCHASE_FIELDS = ['purchase_price', 'purchase_price_orig', 'purchase_rate', 'purchase_currency'];
+
 /*
  * Спрятать закупочную цену от продавца. Валютные поля прячем вместе с ней:
  * цена в долларах и курс перемножаются в ту же сумму, так что оставить их —
  * то же самое, что показать закупочную.
  */
 function hidePurchase(p) {
-  delete p.purchase_price;
-  delete p.purchase_price_orig;
-  delete p.purchase_rate;
-  delete p.purchase_currency;
+  for (const f of PURCHASE_FIELDS) delete p[f];
   return p;
+}
+
+/*
+ * И обратно: не дать продавцу записать закупочную. Дело не в запрете как
+ * таковом — форма редактирования у продавца этих полей не показывает, значит
+ * пришлёт пустые значения, и закупочная цена молча обнулилась бы. Поэтому на
+ * сервере эти поля у продавца просто не существуют: ни прочитать, ни стереть.
+ */
+function stripPurchaseInput(body, role) {
+  if (role === 'admin') return body;
+  const out = { ...body };
+  for (const f of PURCHASE_FIELDS) delete out[f];
+  return out;
 }
 
 function rowToProduct(r) {
@@ -371,7 +384,7 @@ const routes = [
   {
     method: 'POST', path: '/api/products',
     handler: ({ body, session }) => {
-      const data = validateProduct(body);
+      const data = validateProduct(stripPurchaseInput(body, session.role));
       const dup = db.prepare('SELECT id FROM products WHERE sku = ?').get(data.sku);
       if (dup) throw new ApiError(400, `Артикул «${data.sku}» уже существует`);
       // Артикул сканируется одним кодом и в кассе, и в инвентаризации,
@@ -401,7 +414,7 @@ const routes = [
       const id = Number(params.id);
       const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
       if (!existing) throw new ApiError(404, 'Изделие не найдено');
-      const data = validateProduct(body, { partial: true, existing });
+      const data = validateProduct(stripPurchaseInput(body, session.role), { partial: true, existing });
       if (data.sku && data.sku !== existing.sku) {
         const dup = db.prepare('SELECT id FROM products WHERE sku = ? AND id != ?').get(data.sku, id);
         if (dup) throw new ApiError(400, `Артикул «${data.sku}» уже существует`);

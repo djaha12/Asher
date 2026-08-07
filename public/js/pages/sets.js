@@ -64,8 +64,8 @@ window.Pages.sets = (() => {
         </div>
         <div class="row" style="margin-top:12px">
           ${s.complete ? `<button class="btn btn-primary grow" data-act="sell">${ui.icon('sale')} Продать комплект</button>` : ''}
-          <button class="btn" data-act="edit">Изменить</button>
-          <button class="btn btn-danger" data-act="disband">Разобрать</button>
+          ${App.isAdmin() ? `<button class="btn" data-act="edit">Изменить</button>
+          <button class="btn btn-danger" data-act="disband">Разобрать</button>` : ''}
         </div>
       </div>`;
   }
@@ -234,10 +234,13 @@ window.Pages.sets = (() => {
         остатки и граммы не задваиваются. В любой момент можно разобрать обратно.
       </div>
       <div class="toolbar">
-        <button class="btn btn-primary" id="sets-new">${ui.icon('plus')} Собрать комплект</button>
+        ${App.isAdmin()
+          ? `<button class="btn btn-primary" id="sets-new">${ui.icon('plus')} Собрать комплект</button>`
+          : '<div class="muted">Комплекты собирает администратор — продать готовый может любой продавец.</div>'}
       </div>
       <div id="sets-list"></div>`;
-    el.querySelector('#sets-new').onclick = () => editDialog(null, refresh);
+    const newBtn = el.querySelector('#sets-new');
+    if (newBtn) newBtn.onclick = () => editDialog(null, refresh);
     await refresh();
   }
 

@@ -352,6 +352,16 @@ window.Pages.settings = (() => {
   async function renderUsers(box) {
     const { items } = await api.get('/api/users');
     box.innerHTML = `
+      <div class="hint-box" style="max-width:720px">
+        <strong>Две роли — два вида системы.</strong>
+        <div style="margin-top:8px"><span class="badge badge-gold">Администратор</span> —
+          видит всё: закупочные цены, наценку, прибыль, расчёты с поставщиками,
+          аналитику, финансы, импорт из 1С и журнал операций.</div>
+        <div style="margin-top:6px"><span class="badge badge-gray">Продавец</span> —
+          работает за прилавком: каталог, продажи, обмены и возвраты, клиенты, долги
+          клиентов, заказы, комплекты, инвентаризация, бирки. Закупочных цен, наценки
+          и прибыли не видит нигде — ни в карточке изделия, ни в чеке, ни в отчётах.</div>
+      </div>
       <div class="card" style="max-width:720px">
         <h3 class="card-title">Сотрудники</h3>
         ${ui.table([
@@ -381,6 +391,7 @@ window.Pages.settings = (() => {
         <label class="field"><span>Роль</span><select name="role">
           <option value="seller" ${u.role !== 'admin' ? 'selected' : ''}>Продавец</option>
           <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Администратор</option></select></label>
+        <p class="form-hint" id="role-hint"></p>
         <label class="field"><span>${isNew ? 'Пароль *' : 'Новый пароль (не обязательно)'}</span>
           <input name="password" type="password" ${isNew ? 'required' : ''} minlength="6" autocomplete="new-password"></label>
         ${!isNew ? `<label class="field" style="flex-direction:row;align-items:center;gap:8px">
@@ -389,6 +400,17 @@ window.Pages.settings = (() => {
       footer: `<button class="btn" data-act="cancel">Отмена</button>
         <button class="btn btn-primary" data-act="ok">${isNew ? 'Создать' : 'Сохранить'}</button>`,
     });
+    // Владельцу важно понимать, что именно он открывает человеку, — пишем прямо здесь.
+    const roleSel = m.body.querySelector('[name=role]');
+    const roleHint = m.body.querySelector('#role-hint');
+    const showRoleHint = () => {
+      roleHint.textContent = roleSel.value === 'admin'
+        ? 'Администратор видит закупочные цены, наценку, прибыль, расчёты с поставщиками, аналитику и финансы.'
+        : 'Продавец работает с каталогом, продажами, клиентами и долгами, но закупочных цен, наценки и прибыли не видит нигде.';
+    };
+    roleSel.addEventListener('change', showRoleHint);
+    showRoleHint();
+
     m.foot.querySelector('[data-act=cancel]').onclick = m.close;
     m.foot.querySelector('[data-act=ok]').onclick = async () => {
       const form = m.body.querySelector('#user-form');

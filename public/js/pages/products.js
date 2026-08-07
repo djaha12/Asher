@@ -558,6 +558,9 @@ window.Pages.products = (() => {
   function openEditor(p, onChange) {
     const isNew = !p || !p.id;
     p = p || {};
+    // Продавцу закупочная не показывается вовсе: ни поля, ни валютной справки.
+    // Сервер эти поля от него всё равно не примет — форма просто не врёт.
+    const admin = App.isAdmin();
     const catOpts = cats.map(c => `<option value="${c.id}" ${p.category_id === c.id ? 'selected' : ''}>${ui.esc(c.name)}</option>`).join('');
     const supOpts = suppliers.map(s => `<option value="${s.id}" ${p.supplier_id === s.id ? 'selected' : ''}>${ui.esc(s.name)}</option>`).join('');
     // Новое изделие по умолчанию попадает на основную точку — лишний выбор ни к чему.
@@ -592,12 +595,12 @@ window.Pages.products = (() => {
           <label class="field"><span>Размер</span><input name="size" value="${ui.esc(p.size || '')}" placeholder="17,5"></label>
         </div>
         <div class="form-grid-3">
-          <label class="field"><span>Закупочная цена</span><input name="purchase_price" type="number" step="0.01" min="0" value="${p.purchase_price || ''}"></label>
+          ${admin ? `<label class="field"><span>Закупочная цена</span><input name="purchase_price" type="number" step="0.01" min="0" value="${p.purchase_price || ''}"></label>` : ''}
           <label class="field"><span>Розничная цена *</span><input name="retail_price" type="number" step="0.01" min="0" required value="${p.retail_price || ''}"></label>
           <label class="field"><span>Поставщик</span><select name="supplier_id"><option value="">—</option>${supOpts}</select></label>
         </div>
         <!-- Закупка в валюте: поставщики часто считают в долларах, а учёт идёт в валюте магазина -->
-        <label class="row-tight" style="cursor:pointer;margin-bottom:8px">
+        ${admin ? `<label class="row-tight" style="cursor:pointer;margin-bottom:8px">
           <input type="checkbox" id="pf-usd" ${p.purchase_currency ? 'checked' : ''}
             style="width:18px;height:18px;cursor:pointer"> Закупка в валюте</label>
         <div class="form-grid-3 ${p.purchase_currency ? '' : 'hidden'}" id="pf-usd-fields">
@@ -613,7 +616,7 @@ window.Pages.products = (() => {
             <input name="purchase_rate" type="number" step="0.0001" min="0"
               value="${p.purchase_rate || ''}"></label>
         </div>
-        <div class="form-hint hidden" id="pf-usd-calc"></div>
+        <div class="form-hint hidden" id="pf-usd-calc"></div>` : ''}
         <div class="form-grid-3">
           <label class="field"><span>Точка продаж</span><select name="store_id">${storeOpts}</select></label>
           <label class="field"><span>Чей товар</span><select name="ownership">
@@ -643,6 +646,7 @@ window.Pages.products = (() => {
     });
 
     // ---- Закупка в валюте: подставляем курс из настроек и показываем итог ----
+    // У продавца этого блока в форме нет — весь расчёт ниже пропускаем.
     const usdCb = m.body.querySelector('#pf-usd');
     const usdFields = m.body.querySelector('#pf-usd-fields');
     const usdCalc = m.body.querySelector('#pf-usd-calc');
@@ -667,14 +671,16 @@ window.Pages.products = (() => {
         usdCalc.textContent = 'Укажите цену в валюте и курс — сумма посчитается сама.';
       }
     }
-    usdCb.addEventListener('change', () => {
-      // Курс подставляем из настроек магазина: он там один и всегда под рукой.
-      if (usdCb.checked && !rateInput.value) rateInput.value = usdRate;
+    if (admin) {
+      usdCb.addEventListener('change', () => {
+        // Курс подставляем из настроек магазина: он там один и всегда под рукой.
+        if (usdCb.checked && !rateInput.value) rateInput.value = usdRate;
+        recalcUsd();
+      });
+      origInput.addEventListener('input', recalcUsd);
+      rateInput.addEventListener('input', recalcUsd);
       recalcUsd();
-    });
-    origInput.addEventListener('input', recalcUsd);
-    rateInput.addEventListener('input', recalcUsd);
-    recalcUsd();
+    }
     m.body.addEventListener('click', e => {
       if (e.target.classList.contains('gem-del')) e.target.closest('.gem-row').remove();
     });
@@ -699,7 +705,7 @@ window.Pages.products = (() => {
         // Проба и главный бриллиант — отдельные поля изделия
         fineness: v.fineness, carat: Number(v.carat) || 0,
         color: v.color, clarity: v.clarity,
-        purchase_price: v.purchase_price, retail_price: v.retail_price,
+        retail_price: v.retail_price,
         location: v.location, description: v.description,
         store_id: v.store_id || null, ownership: v.ownership,
         gems, gem_summary: gemsSummary(gems),
@@ -709,14 +715,17 @@ window.Pages.products = (() => {
        * так браузер, импорт из 1С и автообмен не могут разойтись в арифметике.
        * Галочку сняли — валютную справку очищаем, чтобы карточка не врала.
        */
-      if (usdCb.checked) {
-        payload.purchase_currency = (v.purchase_currency || 'USD').trim();
-        payload.purchase_price_orig = Number(v.purchase_price_orig) || 0;
-        payload.purchase_rate = Number(v.purchase_rate) || 0;
-      } else if (p.purchase_currency) {
-        payload.purchase_currency = '';
-        payload.purchase_price_orig = 0;
-        payload.purchase_rate = 0;
+      if (admin) {
+        payload.purchase_price = v.purchase_price;
+        if (usdCb.checked) {
+          payload.purchase_currency = (v.purchase_currency || 'USD').trim();
+          payload.purchase_price_orig = Number(v.purchase_price_orig) || 0;
+          payload.purchase_rate = Number(v.purchase_rate) || 0;
+        } else if (p.purchase_currency) {
+          payload.purchase_currency = '';
+          payload.purchase_price_orig = 0;
+          payload.purchase_rate = 0;
+        }
       }
       if (payload.ownership === 'consignment' && !payload.supplier_id) {
         ui.toast('Для товара на реализации укажите поставщика — владельца изделия', true);
