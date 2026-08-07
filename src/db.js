@@ -364,6 +364,44 @@ function migrate() {
   // поэтому долг, возвраты и маржа считаются ровно как раньше.
   addColumn('sale_items', 'set_id', 'INTEGER REFERENCES product_sets(id) ON DELETE SET NULL');
 
+  /*
+   * Проба и характеристики главного бриллианта — отдельными полями.
+   * Раньше проба была частью строки металла («Белое золото 750»), а караты,
+   * цвет и чистота лежали внутри списка вставок и в каталоге не показывались.
+   * Для дома, торгующего только бриллиантами, это главные признаки товара:
+   * по ним ищут, сравнивают и назначают цену.
+   */
+  addColumn('products', 'fineness', `TEXT DEFAULT ''`);
+  addColumn('products', 'carat', 'REAL NOT NULL DEFAULT 0');
+  addColumn('products', 'color', `TEXT DEFAULT ''`);
+  addColumn('products', 'clarity', `TEXT DEFAULT ''`);
+
+  // Разбираем старую строку металла на металл и пробу: «Белое золото 750»
+  // превращается в «Белое золото» + «750». Данные не теряются.
+  if (!getSetting('migrated_fineness')) {
+    const rows = db.prepare(`SELECT id, metal FROM products WHERE metal LIKE '%_ ___'`).all();
+    const upd = db.prepare('UPDATE products SET metal = ?, fineness = ? WHERE id = ?');
+    for (const r of rows) {
+      const m = String(r.metal || '').match(/^(.*?)\s*(\d{3})\s*$/);
+      if (m && m[1]) upd.run(m[1].trim(), m[2], r.id);
+    }
+    setSetting('migrated_fineness', '1');
+  }
+
+  // Караты, цвет и чистоту главного камня переносим из списка вставок наверх.
+  if (!getSetting('migrated_carat')) {
+    const rows = db.prepare(`SELECT id, gems FROM products WHERE gems != '' AND gems != '[]'`).all();
+    const upd = db.prepare('UPDATE products SET carat = ?, color = ?, clarity = ? WHERE id = ?');
+    for (const r of rows) {
+      let gems = [];
+      try { gems = JSON.parse(r.gems || '[]'); } catch { continue; }
+      // Главный камень — самый крупный по каратам.
+      const main = gems.slice().sort((a, b) => (Number(b.carat) || 0) - (Number(a.carat) || 0))[0];
+      if (main) upd.run(Number(main.carat) || 0, String(main.color || ''), String(main.clarity || ''), r.id);
+    }
+    setSetting('migrated_carat', '1');
+  }
+
   // Номера сертификатов одной строкой — для поиска по каталогу и в кассе.
   // Собирается сервером из gems при каждом сохранении изделия.
   addColumn('products', 'cert_index', `TEXT NOT NULL DEFAULT ''`);

@@ -58,10 +58,11 @@ const routes = [
       // Склад в граммах по металлам — для ювелира это такой же понятный
       // показатель, как деньги: сколько золота лежит в витрине.
       const stockByMetal = db.prepare(
-        `SELECT CASE WHEN metal = '' THEN 'Без металла' ELSE metal END AS metal,
+        `SELECT CASE WHEN metal = '' THEN 'Без металла'
+                     ELSE TRIM(metal || ' ' || COALESCE(fineness, '')) END AS metal,
                 COUNT(*) AS cnt, COALESCE(SUM(weight),0) AS weight, COALESCE(SUM(retail_price),0) AS retail
          FROM products WHERE status IN ('in_stock','reserved')
-         GROUP BY metal ORDER BY weight DESC`
+         GROUP BY metal, fineness ORDER BY weight DESC`
       ).all();
       const reserved = db.prepare(`SELECT COUNT(*) AS cnt FROM products WHERE status = 'reserved'`).get();
       const customers = db.prepare('SELECT COUNT(*) AS cnt FROM customers').get();
@@ -207,12 +208,12 @@ const routes = [
       const { cond, args } = rangeCond(query);
       const where = cond.length ? 'AND ' + cond.join(' AND ') : '';
       const rows = db.prepare(
-        `SELECT COALESCE(NULLIF(p.metal, ''), 'Не указан') AS name,
+        `SELECT TRIM(COALESCE(NULLIF(p.metal, ''), 'Не указан') || ' ' || COALESCE(p.fineness, '')) AS name,
                 COUNT(*) AS items_sold,
                 COALESCE(SUM(si.final_price), 0) AS revenue
          FROM sale_items si JOIN sales s ON s.id = si.sale_id JOIN products p ON p.id = si.product_id
          WHERE si.returned = 0 ${where}
-         GROUP BY COALESCE(NULLIF(p.metal, ''), 'Не указан') ORDER BY revenue DESC`
+         GROUP BY p.metal, p.fineness ORDER BY revenue DESC`
       ).all(...args);
       return { items: rows.map(r => ({ ...r, revenue: round2(r.revenue) })) };
     },
@@ -291,10 +292,10 @@ const routes = [
          GROUP BY c.id ORDER BY retail DESC`
       ).all();
       const byMetal = db.prepare(
-        `SELECT COALESCE(NULLIF(metal, ''), 'Не указан') AS name, COUNT(*) AS cnt,
+        `SELECT TRIM(COALESCE(NULLIF(metal, ''), 'Не указан') || ' ' || COALESCE(fineness, '')) AS name, COUNT(*) AS cnt,
                 COALESCE(SUM(weight), 0) AS weight, COALESCE(SUM(retail_price), 0) AS retail
          FROM products WHERE status IN ('in_stock','reserved')
-         GROUP BY COALESCE(NULLIF(metal, ''), 'Не указан') ORDER BY retail DESC`
+         GROUP BY metal, fineness ORDER BY retail DESC`
       ).all();
       const stale = db.prepare(
         `SELECT id, sku, name, metal, retail_price, created_at FROM products

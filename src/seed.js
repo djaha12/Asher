@@ -76,7 +76,7 @@ const LAST_M = ['Иванов', 'Асанов', 'Сидоров', 'Жумаба�
 const MID_F = ['Сергеевна', 'Александровна', 'Владимировна', 'Андреевна', 'Игоревна'];
 const MID_M = ['Сергеевич', 'Александрович', 'Владимирович', 'Андреевич', 'Игоревич'];
 const PREFS = ['Белое золото, бриллианты', 'Классика, жемчуг', 'Розовое золото, минимализм', 'Крупные камни, статусные вещи',
-  'Сапфиры, синий цвет', 'Изумруды', 'Только платина', 'Винтажный стиль', ''];
+  'Крупные караты', 'Чистота от VS1', 'Классические огранки', 'Винтажный стиль', ''];
 
 const insCust = db.prepare(
   `INSERT INTO customers (name, phone, email, birthday, anniversary, discount, ring_size, preferences, notes, created_at)
@@ -101,12 +101,13 @@ for (let i = 0; i < 26; i++) {
 
 // ---------- Изделия ----------
 const cats = Object.fromEntries(db.prepare('SELECT id, name FROM categories').all().map(c => [c.name, c.id]));
-const METALS = ['Золото 585', 'Золото 750', 'Белое золото 585', 'Розовое золото 585', 'Платина 950', 'Серебро 925'];
+// Дом работает только с золотом 750-й пробы, преимущественно белым.
+const METALS = ['Белое золото', 'Белое золото', 'Белое золото', 'Жёлтое золото', 'Красное золото'];
+const FINENESS = '750';
 const NAMES_POOL = ['Аврора', 'Сияние', 'Венеция', 'Ночь', 'Каприз', 'Мираж', 'Элегия', 'Луна', 'Классика', 'Гармония',
   'Афина', 'Софи', 'Империал', 'Флоренция', 'Россыпь', 'Нежность', 'Вдохновение', 'Монако', 'Селена', 'Ривьера'];
 const COLORS = ['D', 'E', 'F', 'G', 'H', 'I'];
 const CLARITY = ['IF', 'VVS1', 'VVS2', 'VS1', 'VS2', 'SI1'];
-const GEM_OTHER = ['Сапфир', 'Изумруд', 'Рубин', 'Жемчуг', 'Топаз', 'Аметист'];
 
 const CATEGORY_SPECS = {
   'Кольца': { count: 40, w: [1.8, 6.5], price: [45000, 780000], sizes: ['15,5', '16', '16,5', '17', '17,5', '18', '18,5'] },
@@ -124,13 +125,16 @@ const PREFIX = { 'Кольца': 'Кольцо', 'Серьги': 'Серьги',
 
 function gemsFor(withDiamond, price) {
   if (!withDiamond) return [];
-  const gems = [];
-  if (chance(0.8)) {
-    const carat = price > 400000 ? rnd(0.7, 2.5) : rnd(0.1, 0.7);
-    gems.push({ type: 'Бриллиант', carat: Math.round(carat * 100) / 100, color: pick(COLORS), clarity: pick(CLARITY), cut: 'Кр-57', count: chance(0.3) ? ri(2, 12) : 1 });
-  } else {
-    gems.push({ type: pick(GEM_OTHER), carat: Math.round(rnd(0.3, 3) * 100) / 100, color: '', clarity: '', cut: '', count: 1 });
-    if (chance(0.5)) gems.push({ type: 'Бриллиант', carat: Math.round(rnd(0.05, 0.4) * 100) / 100, color: pick(COLORS), clarity: pick(CLARITY), cut: 'Кр-57', count: ri(2, 18) });
+  // Только бриллианты: другие камни дом не продаёт.
+  const carat = price > 400000 ? rnd(0.7, 2.5) : rnd(0.1, 0.7);
+  const gems = [{
+    type: 'Бриллиант', carat: Math.round(carat * 100) / 100,
+    color: pick(COLORS), clarity: pick(CLARITY), cut: 'Кр-57',
+    count: chance(0.3) ? ri(2, 12) : 1,
+  }];
+  if (chance(0.35)) {
+    gems.push({ type: 'Бриллиант', carat: Math.round(rnd(0.01, 0.05) * 100) / 100,
+      color: pick(COLORS), clarity: pick(CLARITY), cut: 'Кр-57', count: ri(6, 24) });
   }
   return gems;
 }
@@ -140,9 +144,10 @@ function gemSummary(gems) {
 }
 
 const insProd = db.prepare(
-  `INSERT INTO products (sku, barcode, name, category_id, metal, weight, size, gems, gem_summary,
+  `INSERT INTO products (sku, barcode, name, category_id, metal, fineness, weight, size,
+     carat, color, clarity, gems, gem_summary,
      purchase_price, retail_price, supplier_id, status, location, description, created_at)
-   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'in_stock',?,?,?)`
+   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'in_stock',?,?,?)`
 );
 const products = [];
 let skuN = 1;
@@ -152,14 +157,17 @@ for (const [catName, spec] of Object.entries(CATEGORY_SPECS)) {
     const purchase = Math.round(retail / rnd(1.7, 2.2) / 100) * 100;
     const withGems = catName !== 'Цепи' || chance(0.2);
     const gems = gemsFor(withGems, retail);
-    const metal = pick(METALS.slice(0, catName === 'Часы' ? 2 : METALS.length));
-    const name = `${PREFIX[catName]} ${gems.length && gems[0].type === 'Бриллиант' ? 'с бриллиантом' : gems.length ? 'со вставкой' : ''} «${pick(NAMES_POOL)}»`.replace('  ', ' ');
+    const metal = pick(METALS);
+    const name = `${PREFIX[catName]} ${gems.length ? 'с бриллиантом' : ''} «${pick(NAMES_POOL)}»`.replace('  ', ' ');
     const sku = `AS-${String(skuN).padStart(5, '0')}`;
     const barcode = `2000000${String(skuN).padStart(6, '0')}`;
     skuN++;
     const createdDays = ri(5, 300);
-    const info = insProd.run(sku, barcode, name, cats[catName], metal,
+    // Главный камень выносим в поля изделия — по ним ищут и сравнивают.
+    const main = gems[0] || {};
+    const info = insProd.run(sku, barcode, name, cats[catName], metal, FINENESS,
       Math.round(rnd(spec.w[0], spec.w[1]) * 100) / 100, pick(spec.sizes),
+      main.carat || 0, main.color || '', main.clarity || '',
       JSON.stringify(gems), gemSummary(gems), purchase, retail,
       pick(supplierIds), pick(['Витрина 1', 'Витрина 2', 'Витрина 3', 'Сейф']),
       '', isoDaysAgo(createdDays));

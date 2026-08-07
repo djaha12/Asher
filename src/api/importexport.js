@@ -107,9 +107,15 @@ const PRODUCT_MAP_HINTS = {
   name: ['наименование', 'номенклатура', 'название', 'товар'],
   barcode: ['штрихкод', 'штрих-код', 'шк'],
   category: ['категория', 'группа', 'вид номенклатуры', 'группа номенклатуры', 'тип'],
-  metal: ['металл', 'проба', 'сплав'],
+  metal: ['металл', 'сплав', 'цвет металла'],
+  // Проба идёт отдельной колонкой: «Белое золото» + «750».
+  fineness: ['проба', 'проба металла'],
   weight: ['вес', 'вес, г', 'масса'],
   size: ['размер', 'длина'],
+  // Главный бриллиант: караты, цвет, чистота — по ним ищут и оценивают.
+  carat: ['караты', 'карат', 'каратность', 'вес камня', 'ct'],
+  color: ['цвет', 'цвет камня', 'цвет бриллианта'],
+  clarity: ['чистота', 'чистота камня', 'качество'],
   gem_summary: ['вставка', 'вставки', 'камень', 'камни'],
   purchase_price: ['закупочная цена', 'цена закупки', 'закупка', 'себестоимость', 'цена поступления'],
   retail_price: ['розничная цена', 'цена продажи', 'цена', 'розница', 'стоимость'],
@@ -227,9 +233,10 @@ function importCsv(body, userId) {
         ? Number(body.store_id)
         : (db.prepare('SELECT id FROM stores ORDER BY is_default DESC, sort, id LIMIT 1').get() || {}).id || null;
       const ins = db.prepare(
-        `INSERT INTO products (sku, barcode, name, category_id, metal, weight, size, gem_summary,
+        `INSERT INTO products (sku, barcode, name, category_id, metal, fineness, weight, size,
+           carat, color, clarity, gem_summary,
            purchase_price, retail_price, description, store_id, status, created_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'in_stock', ?)`
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'in_stock', ?)`
       );
       let autoSku = Number(db.prepare('SELECT COUNT(*) AS c FROM products').get().c) + 1;
       for (let i = 0; i < rows.length; i++) {
@@ -285,8 +292,12 @@ function importCsv(body, userId) {
             barcode: pick(row, mapping, 'barcode'),
             category_id: catName ? categoryId : undefined,
             metal: pick(row, mapping, 'metal'),
+            fineness: pick(row, mapping, 'fineness'),
             weight: mapping.weight !== undefined ? parseNumber(pick(row, mapping, 'weight')) : undefined,
             size: pick(row, mapping, 'size'),
+            carat: mapping.carat !== undefined ? parseNumber(pick(row, mapping, 'carat')) : undefined,
+            color: (pick(row, mapping, 'color') || '').toUpperCase() || undefined,
+            clarity: (pick(row, mapping, 'clarity') || '').toUpperCase() || undefined,
             gem_summary: pick(row, mapping, 'gem_summary'),
             purchase_price: mapping.purchase_price !== undefined
               ? round2(parseNumber(pick(row, mapping, 'purchase_price'))) : undefined,
@@ -309,8 +320,12 @@ function importCsv(body, userId) {
         }
 
         ins.run(sku, pick(row, mapping, 'barcode') || '', name, categoryId,
-          pick(row, mapping, 'metal') || '', parseNumber(pick(row, mapping, 'weight')),
-          pick(row, mapping, 'size') || '', pick(row, mapping, 'gem_summary') || '',
+          pick(row, mapping, 'metal') || '', pick(row, mapping, 'fineness') || '',
+          parseNumber(pick(row, mapping, 'weight')), pick(row, mapping, 'size') || '',
+          parseNumber(pick(row, mapping, 'carat')),
+          (pick(row, mapping, 'color') || '').toUpperCase(),
+          (pick(row, mapping, 'clarity') || '').toUpperCase(),
+          pick(row, mapping, 'gem_summary') || '',
           round2(parseNumber(pick(row, mapping, 'purchase_price'))),
           round2(parseNumber(pick(row, mapping, 'retail_price'))),
           pick(row, mapping, 'description') || '', targetStore, nowIso());
@@ -378,15 +393,18 @@ const routes = [
     method: 'GET', path: '/api/export/products', admin: true, raw: true,
     handler: ({ res }) => {
       const rows = db.prepare(
-        `SELECT p.sku, p.barcode, p.name, c.name AS category, p.metal, p.weight, p.size, p.gem_summary,
+        `SELECT p.sku, p.barcode, p.name, c.name AS category, p.metal, p.fineness, p.weight, p.size,
+                p.carat, p.color, p.clarity, p.gem_summary,
                 p.purchase_price, p.retail_price, p.status, p.location, p.created_at
          FROM products p LEFT JOIN categories c ON c.id = p.category_id ORDER BY p.id`
       ).all();
       const statusRu = { in_stock: 'В наличии', reserved: 'Резерв', sold: 'Продано', written_off: 'Списано' };
       csvResponse(res, 'изделия.csv', toCsv(
-        ['Артикул', 'Штрихкод', 'Наименование', 'Категория', 'Металл', 'Вес', 'Размер', 'Вставки',
+        ['Артикул', 'Штрихкод', 'Наименование', 'Категория', 'Металл', 'Проба', 'Вес', 'Размер',
+          'Караты', 'Цвет', 'Чистота', 'Вставки',
           'Закупочная цена', 'Розничная цена', 'Статус', 'Расположение', 'Дата создания'],
-        rows.map(r => [r.sku, r.barcode, r.name, r.category || '', r.metal, r.weight, r.size, r.gem_summary,
+        rows.map(r => [r.sku, r.barcode, r.name, r.category || '', r.metal, r.fineness, r.weight, r.size,
+          r.carat || '', r.color, r.clarity, r.gem_summary,
           r.purchase_price, r.retail_price, statusRu[r.status] || r.status, r.location, r.created_at])
       ));
     },

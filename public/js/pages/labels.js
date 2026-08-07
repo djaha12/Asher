@@ -15,7 +15,8 @@ window.Pages.labels = (() => {
 
   // Что печатать на бирке — набор полей запоминается между сеансами.
   const OPTS_KEY = 'asher_label_opts';
-  const defaultOpts = { name: true, sku: true, metal: true, weight: true, price: true, barcode: true, qr: false, store: false };
+  const defaultOpts = { name: true, sku: true, metal: true, stone: true, weight: true,
+    price: true, barcode: true, qr: false, store: false };
   function loadOpts() {
     try { return { ...defaultOpts, ...JSON.parse(localStorage.getItem(OPTS_KEY) || '{}') }; }
     catch { return { ...defaultOpts }; }
@@ -38,13 +39,18 @@ window.Pages.labels = (() => {
 
   function labelHtml(p, o = opts) {
     const code = p.barcode || p.sku;
-    const meta = [o.metal ? p.metal : '', o.weight && p.weight ? ui.num(p.weight) + ' г' : '', p.size]
+    // Металл печатаем вместе с пробой, характеристику камня — отдельной строкой.
+    const metal = [p.metal, p.fineness].filter(Boolean).join(' ');
+    const stone = [p.carat ? ui.num(p.carat) + ' ct' : '', p.color, p.clarity]
+      .filter(Boolean).join(' · ');
+    const meta = [o.metal ? metal : '', o.weight && p.weight ? ui.num(p.weight) + ' г' : '', p.size]
       .filter(Boolean).join(' · ');
     return `
       <div class="jlabel">
         ${o.name ? `<div class="jl-name">${ui.esc(p.name)}</div>` : ''}
         ${o.sku ? `<div class="jl-sku">${ui.esc(p.sku)}</div>` : ''}
         ${meta ? `<div>${ui.esc(meta)}</div>` : ''}
+        ${o.stone && stone ? `<div class="jl-stone">${ui.esc(stone)}</div>` : ''}
         ${o.store && p.store_name ? `<div>${ui.esc(p.store_name)}</div>` : ''}
         ${o.price ? `<div class="jl-price">${ui.money(p.retail_price)}</div>` : ''}
         ${o.qr && code ? `<div class="jl-qr">${qrSvg(code)}</div>` : ''}
@@ -189,7 +195,8 @@ window.Pages.labels = (() => {
             <div class="row" style="gap:14px;margin-bottom:14px">
               ${optRow('name', 'Название')}
               ${optRow('sku', 'Артикул')}
-              ${optRow('metal', 'Металл')}
+              ${optRow('metal', 'Металл и проба')}
+              ${optRow('stone', 'Караты, цвет, чистота')}
               ${optRow('weight', 'Вес')}
               ${optRow('price', 'Цена')}
               ${optRow('barcode', 'Штрихкод')}

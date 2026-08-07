@@ -6,9 +6,23 @@ const { listImages, listCertificates, removeFiles } = require('./images');
 const PRODUCT_FIELDS = ['sku', 'barcode', 'name', 'category_id', 'metal', 'weight', 'size', 'gems',
   'gem_summary', 'purchase_price', 'retail_price', 'supplier_id', 'status', 'reserved_for',
   'location', 'description', 'store_id', 'ownership', 'reserved_until', 'write_off_reason',
-  'purchase_currency', 'purchase_price_orig', 'purchase_rate', 'cert_index'];
+  'purchase_currency', 'purchase_price_orig', 'purchase_rate', 'cert_index',
+  'fineness', 'carat', 'color', 'clarity'];
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Общепринятые шкалы бриллианта: цвет от бесцветного, чистота от безупречной.
+const COLOR_SCALE = ['D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N'];
+const CLARITY_SCALE = ['FL', 'IF', 'VVS1', 'VVS2', 'VS1', 'VS2', 'SI1', 'SI2', 'SI3', 'I1', 'I2', 'I3'];
+function byScale(scale) {
+  return (a, b) => {
+    const ia = scale.indexOf(a), ib = scale.indexOf(b);
+    if (ia === -1 && ib === -1) return a.localeCompare(b);
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  };
+}
 
 // Номер сертификата пишут по-разному: «GIA 2141438171», «2141-438-171».
 // Для поиска приводим к одному виду — буквы, цифры и дефис.
@@ -61,6 +75,14 @@ function validateProduct(body, { partial = false, existing = null } = {}) {
   if (body.category_id !== undefined) out.category_id = toId(body.category_id, 'категория');
   if (body.supplier_id !== undefined) out.supplier_id = toId(body.supplier_id, 'поставщик');
   if (body.metal !== undefined) out.metal = String(body.metal || '').trim();
+  // Проба и характеристики главного бриллианта — отдельные поля изделия.
+  if (body.fineness !== undefined) out.fineness = String(body.fineness || '').trim().slice(0, 10);
+  if (body.color !== undefined) out.color = String(body.color || '').trim().toUpperCase().slice(0, 12);
+  if (body.clarity !== undefined) out.clarity = String(body.clarity || '').trim().toUpperCase().slice(0, 12);
+  if (body.carat !== undefined) {
+    out.carat = Math.round((Number(body.carat) || 0) * 1000) / 1000;
+    if (out.carat < 0) throw new ApiError(400, 'Каратность не может быть отрицательной');
+  }
   if (body.size !== undefined) out.size = String(body.size || '').trim();
   if (body.location !== undefined) out.location = String(body.location || '').trim();
   if (body.description !== undefined) out.description = String(body.description || '').trim();
@@ -205,6 +227,12 @@ const routes = [
       if (query.status) { cond.push('p.status = ?'); args.push(query.status); }
       if (query.category_id) { cond.push('p.category_id = ?'); args.push(Number(query.category_id)); }
       if (query.metal) { cond.push('p.metal = ?'); args.push(query.metal); }
+      // Проба, цвет и чистота — то, по чему отбирают бриллианты.
+      if (query.fineness) { cond.push('p.fineness = ?'); args.push(query.fineness); }
+      if (query.color) { cond.push('p.color = ?'); args.push(query.color); }
+      if (query.clarity) { cond.push('p.clarity = ?'); args.push(query.clarity); }
+      if (query.carat_min) { cond.push('p.carat >= ?'); args.push(Number(query.carat_min)); }
+      if (query.carat_max) { cond.push('p.carat <= ?'); args.push(Number(query.carat_max)); }
       if (query.store_id) { cond.push('p.store_id = ?'); args.push(Number(query.store_id)); }
       if (query.ownership) { cond.push('p.ownership = ?'); args.push(query.ownership); }
       if (query.has_photo === '1') cond.push('EXISTS (SELECT 1 FROM product_images pi WHERE pi.product_id = p.id)');
@@ -216,6 +244,8 @@ const routes = [
         sku: 'p.sku COLLATE NOCASE',
         price_asc: 'p.retail_price',
         price_desc: 'p.retail_price DESC',
+        carat_desc: 'p.carat DESC, p.retail_price DESC',
+        carat_asc: 'p.carat, p.retail_price',
       };
       const order = SORTS[query.sort] || SORTS.new;
       const limit = Math.min(Number(query.limit) || 500, 2000);
@@ -268,9 +298,21 @@ const routes = [
   {
     method: 'GET', path: '/api/products/meta',
     handler: () => {
-      const metals = db.prepare(`SELECT DISTINCT metal FROM products WHERE metal != '' ORDER BY metal`).all();
+      // Списки для фильтров собираем из того, что реально лежит на складе,
+      // а не из заранее выдуманного перечня.
+      const distinct = col => db.prepare(
+        `SELECT DISTINCT ${col} AS v FROM products WHERE ${col} != '' ORDER BY ${col}`
+      ).all().map(r => r.v);
       const counts = db.prepare(`SELECT status, COUNT(*) AS c FROM products GROUP BY status`).all();
-      return { metals: metals.map(m => m.metal), status_counts: counts };
+      return {
+        metals: distinct('metal'),
+        fineness: distinct('fineness'),
+        // Цвет и чистота бриллианта идут по своей шкале, а не по алфавиту:
+        // D лучше E, IF лучше VS1 — сортируем в этом порядке.
+        colors: distinct('color').sort(byScale(COLOR_SCALE)),
+        clarities: distinct('clarity').sort(byScale(CLARITY_SCALE)),
+        status_counts: counts,
+      };
     },
   },
   {

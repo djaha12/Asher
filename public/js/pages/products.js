@@ -4,20 +4,56 @@ window.Pages = window.Pages || {};
 window.Pages.products = (() => {
   let cats = [], suppliers = [], stores = [];
   let usdRate = '';   // курс из настроек — подставляется при закупке в валюте
-  let filters = { search: '', status: '', category_id: '', metal: '', store_id: '', has_photo: '', sort: 'new' };
+  let meta = { metals: [], fineness: [], colors: [], clarities: [] };
+
+  /*
+   * Дом торгует только бриллиантами в золоте 750-й пробы, поэтому подсказки
+   * короткие: лишние варианты в списке только мешают продавцу.
+   * Поле остаётся обычным — вписать своё значение можно всегда.
+   */
+  const METALS = ['Белое золото', 'Жёлтое золото', 'Красное золото'];
+  const FINENESS = ['750'];
+  const GEMS = ['Бриллиант'];
+  // Общепринятые шкалы: цвет от бесцветного, чистота от безупречной.
+  const COLORS = ['D', 'E', 'F', 'G', 'H', 'I', 'J'];
+  const CLARITIES = ['IF', 'VVS1', 'VVS2', 'VS1', 'VS2', 'SI1', 'SI2'];
+
+  const opts = list => list.map(v => `<option>${ui.esc(v)}</option>`).join('');
+  // К подсказкам добавляем то, что уже есть на складе: ничего не потеряется,
+  // если раньше заводили другой металл или цвет.
+  const merged = (base, extra) => [...new Set([...base, ...(extra || [])])];
+  const DATALISTS = () => `
+    <datalist id="gem-types">${opts(GEMS)}</datalist>
+    <datalist id="cert-labs"><option>GIA</option><option>IGI</option><option>HRD</option><option>AGS</option><option>GRS</option></datalist>
+    <datalist id="metal-list">${opts(merged(METALS, meta.metals))}</datalist>
+    <datalist id="fineness-list">${opts(merged(FINENESS, meta.fineness))}</datalist>
+    <datalist id="color-list">${opts(merged(COLORS, meta.colors))}</datalist>
+    <datalist id="clarity-list">${opts(merged(CLARITIES, meta.clarities))}</datalist>`;
+
+  // Металл и проба вместе — «Белое золото 750», как говорят в магазине.
+  const metalLabel = p => [p.metal, p.fineness].filter(Boolean).join(' ');
+  // Характеристика камня одной строкой: «0,50 ct · G · VS1»
+  const stoneLabel = p => [
+    p.carat ? ui.num(p.carat) + ' ct' : '', p.color, p.clarity,
+  ].filter(Boolean).join(' · ');
+  let filters = { search: '', status: '', category_id: '', metal: '', store_id: '',
+    has_photo: '', color: '', clarity: '', sort: 'new' };
   // Вид каталога запоминается: кому-то привычнее плитки с фото, кому-то таблица.
   const VIEW_KEY = 'asher_products_view';
   let view = localStorage.getItem(VIEW_KEY) || 'grid';
 
   async function loadRefs() {
-    const [c, s, st, settings] = await Promise.all([
+    const [c, s, st, settings, m] = await Promise.all([
       api.get('/api/categories').then(r => r.items),
       api.get('/api/suppliers').then(r => r.items),
       api.get('/api/stores').then(r => r.items).catch(() => []),
       api.get('/api/settings').catch(() => ({})),
+      api.get('/api/products/meta').catch(() => ({})),
     ]);
     cats = c; suppliers = s; stores = st;
     usdRate = settings.usd_rate || '';
+    meta = { metals: m.metals || [], fineness: m.fineness || [],
+      colors: m.colors || [], clarities: m.clarities || [] };
   }
 
   function gemsSummary(gems) {
@@ -58,7 +94,9 @@ window.Pages.products = (() => {
       { title: 'Артикул', render: r => `<span class="mono strong">${ui.highlight(r.sku, filters.search)}</span>` },
       { title: 'Наименование', render: r => `${ui.highlight(r.name, filters.search)}${r.gem_summary ? `<div class="dim" style="font-size:12px">${ui.esc(r.gem_summary)}</div>` : ''}` },
       { title: 'Категория', render: r => `<span class="dim">${ui.esc(r.category_name || '—')}</span>` },
-      { title: 'Металл', render: r => ui.esc(r.metal || '—') },
+      { title: 'Металл', render: r => ui.esc(metalLabel(r) || '—') },
+      { title: 'Бриллиант', render: r => stoneLabel(r)
+        ? `<span class="mono">${ui.esc(stoneLabel(r))}</span>` : '<span class="dim">—</span>' },
       { title: 'Вес', cls: 'num', render: r => r.weight ? ui.num(r.weight) + ' г' : '—' },
     ];
     if (stores.length > 1) cols.push({ title: 'Точка', render: r => `<span class="dim">${ui.esc(r.store_name || '—')}</span>` });
@@ -91,8 +129,9 @@ window.Pages.products = (() => {
         <div class="pcard-body">
           <div class="pcard-sku">${ui.highlight(r.sku, filters.search)}</div>
           <div class="pcard-name">${ui.highlight(r.name, filters.search)}</div>
-          <div class="pcard-meta">${[r.metal, r.weight ? ui.num(r.weight) + ' г' : '', r.size]
+          <div class="pcard-meta">${[metalLabel(r), r.weight ? ui.num(r.weight) + ' г' : '', r.size]
             .filter(Boolean).map(ui.esc).join(' · ') || '&nbsp;'}</div>
+          ${stoneLabel(r) ? `<div class="pcard-stone">${ui.esc(stoneLabel(r))}</div>` : ''}
           <div class="pcard-price">${ui.money(r.retail_price)}</div>
         </div>
       </div>`;
@@ -118,8 +157,10 @@ window.Pages.products = (() => {
                 <dt>Артикул</dt><dd class="mono strong">${ui.esc(p.sku)}</dd>
                 <dt>Штрихкод</dt><dd class="mono">${ui.esc(p.barcode || '—')}</dd>
                 <dt>Категория</dt><dd>${ui.esc(p.category_name || '—')}</dd>
-                <dt>Металл</dt><dd>${ui.esc(p.metal || '—')}</dd>
-                <dt>Вес</dt><dd>${p.weight ? ui.num(p.weight) + ' г' : '—'}</dd>
+                <dt>Металл</dt><dd>${ui.esc(metalLabel(p) || '—')}</dd>
+                <dt>Бриллиант</dt><dd>${stoneLabel(p)
+                  ? `<span class="strong">${ui.esc(stoneLabel(p))}</span>` : '—'}</dd>
+                <dt>Вес изделия</dt><dd>${p.weight ? ui.num(p.weight) + ' г' : '—'}</dd>
                 <dt>Размер</dt><dd>${ui.esc(p.size || '—')}</dd>
                 <dt>Статус</dt><dd>${ui.badge('status', p.status)}${p.reserved_for_name ? ' за ' + ui.esc(p.reserved_for_name) : ''}
                   ${p.status === 'reserved' && p.reserved_until
@@ -526,9 +567,7 @@ window.Pages.products = (() => {
       title: isNew ? 'Новое изделие' : 'Изделие: ' + p.name,
       size: 'lg',
       body: `<form id="prod-form">
-        <datalist id="gem-types"><option>Бриллиант</option><option>Сапфир</option><option>Изумруд</option><option>Рубин</option><option>Жемчуг</option><option>Топаз</option><option>Аметист</option><option>Фианит</option></datalist>
-        <datalist id="cert-labs"><option>GIA</option><option>IGI</option><option>HRD</option><option>AGS</option><option>GRS</option></datalist>
-        <datalist id="metal-list"><option>Золото 585</option><option>Золото 750</option><option>Белое золото 585</option><option>Белое золото 750</option><option>Розовое золото 585</option><option>Платина 950</option><option>Серебро 925</option></datalist>
+        ${DATALISTS()}
         <div class="form-grid-3">
           <label class="field"><span>Артикул *</span><input name="sku" required value="${ui.esc(p.sku || '')}" placeholder="AS-00120"></label>
           <label class="field"><span>Штрихкод</span><input name="barcode" value="${ui.esc(p.barcode || '')}" placeholder="2000000000015"></label>
@@ -536,8 +575,20 @@ window.Pages.products = (() => {
         </div>
         <label class="field"><span>Наименование *</span><input name="name" required value="${ui.esc(p.name || '')}" placeholder="Кольцо с бриллиантом «Сияние»"></label>
         <div class="form-grid-3">
-          <label class="field"><span>Металл</span><input name="metal" value="${ui.esc(p.metal || '')}" list="metal-list" placeholder="Золото 585"></label>
-          <label class="field"><span>Вес, г</span><input name="weight" type="number" step="0.01" min="0" value="${p.weight || ''}"></label>
+          <label class="field"><span>Металл</span><input name="metal" value="${ui.esc(p.metal || '')}" list="metal-list" placeholder="Белое золото"></label>
+          <label class="field"><span>Проба</span><input name="fineness" value="${ui.esc(p.fineness || '')}" list="fineness-list" placeholder="750"></label>
+          <label class="field"><span>Вес изделия, г</span><input name="weight" type="number" step="0.01" min="0" value="${p.weight || ''}"></label>
+        </div>
+        <!-- Главный бриллиант: то, по чему изделие ищут, сравнивают и оценивают -->
+        <div class="form-grid-3">
+          <label class="field"><span>Каратность</span>
+            <input name="carat" type="number" step="0.001" min="0" value="${p.carat || ''}" placeholder="0,50"></label>
+          <label class="field"><span>Цвет</span>
+            <input name="color" value="${ui.esc(p.color || '')}" list="color-list" placeholder="G"></label>
+          <label class="field"><span>Чистота</span>
+            <input name="clarity" value="${ui.esc(p.clarity || '')}" list="clarity-list" placeholder="VS1"></label>
+        </div>
+        <div class="form-grid-3">
           <label class="field"><span>Размер</span><input name="size" value="${ui.esc(p.size || '')}" placeholder="17,5"></label>
         </div>
         <div class="form-grid-3">
@@ -645,6 +696,9 @@ window.Pages.products = (() => {
         sku: v.sku, barcode: v.barcode, name: v.name,
         category_id: v.category_id || null, supplier_id: v.supplier_id || null,
         metal: v.metal, weight: v.weight, size: v.size,
+        // Проба и главный бриллиант — отдельные поля изделия
+        fineness: v.fineness, carat: Number(v.carat) || 0,
+        color: v.color, clarity: v.clarity,
         purchase_price: v.purchase_price, retail_price: v.retail_price,
         location: v.location, description: v.description,
         store_id: v.store_id || null, ownership: v.ownership,
@@ -703,6 +757,10 @@ window.Pages.products = (() => {
             ${cats.map(c => `<option value="${c.id}">${ui.esc(c.name)}</option>`).join('')}</select>
           <select class="input" id="pf-metal"><option value="">Любой металл</option>
             ${meta.metals.map(mt => `<option>${ui.esc(mt)}</option>`).join('')}</select>
+          <select class="input" id="pf-color"><option value="">Любой цвет</option>
+            ${(meta.colors || []).map(v => `<option>${ui.esc(v)}</option>`).join('')}</select>
+          <select class="input" id="pf-clarity"><option value="">Любая чистота</option>
+            ${(meta.clarities || []).map(v => `<option>${ui.esc(v)}</option>`).join('')}</select>
           ${stores.length > 1 ? `<select class="input" id="pf-store"><option value="">Все точки</option>
             ${stores.map(s => `<option value="${s.id}">${ui.esc(s.name)}</option>`).join('')}</select>` : ''}
           <select class="input" id="pf-sort">
@@ -711,6 +769,8 @@ window.Pages.products = (() => {
             <option value="sku">По артикулу</option>
             <option value="price_desc">Сначала дорогие</option>
             <option value="price_asc">Сначала дешёвые</option>
+            <option value="carat_desc">Сначала крупные караты</option>
+            <option value="carat_asc">Сначала мелкие караты</option>
           </select>
           <div class="spacer"></div>
           <button class="btn" id="pf-view" title="Плитки или таблица">${view === 'grid' ? '☰ Списком' : '▦ Плитками'}</button>
@@ -736,6 +796,8 @@ window.Pages.products = (() => {
       el.querySelector('#pf-search').addEventListener('input', ui.debounce(e => { filters.search = e.target.value.trim(); doRefresh(); }));
       el.querySelector('#pf-cat').addEventListener('change', e => { filters.category_id = e.target.value; doRefresh(); });
       el.querySelector('#pf-metal').addEventListener('change', e => { filters.metal = e.target.value; doRefresh(); });
+      el.querySelector('#pf-color').addEventListener('change', e => { filters.color = e.target.value; doRefresh(); });
+      el.querySelector('#pf-clarity').addEventListener('change', e => { filters.clarity = e.target.value; doRefresh(); });
       el.querySelector('#pf-sort').addEventListener('change', e => { filters.sort = e.target.value; doRefresh(); });
       const storeSel = el.querySelector('#pf-store');
       if (storeSel) storeSel.addEventListener('change', e => { filters.store_id = e.target.value; doRefresh(); });
