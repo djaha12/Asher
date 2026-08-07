@@ -10,3 +10,4 @@ data/*.db-shm
 asher-скрытый-запуск.vbs
 asher-открыть.vbs
 asher-выключить.vbs
+data/asher-port.txt

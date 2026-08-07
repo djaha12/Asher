@@ -217,6 +217,14 @@ const server = http.createServer(async (req, res) => {
       }));
       return;
     }
+    /*
+     * Отклик «я Asher» — по нему запускающаяся копия понимает, что система
+     * уже работает, и не поднимает вторую на той же базе.
+     */
+    if (pathname === '/api/ping') {
+      sendJson(res, 200, { app: 'asher', port: server.address() && server.address().port });
+      return;
+    }
     // Странице входа: показывать ли подсказку про стандартные логин и пароль.
     if (pathname === '/api/login-hint' && req.method === 'GET') {
       sendJson(res, 200, { default_admin: auth.defaultAdminActive() });
@@ -303,8 +311,8 @@ function lanAddresses(port) {
 
 // Открыть браузер на странице входа. Только для запуска ярлыком (СТАРТ.bat):
 // сам порт известен здесь, а не в ярлыке, поэтому и адрес открываем отсюда.
-function openBrowser(url) {
-  if (process.env.ASHER_OPEN !== '1') return;
+function openBrowser(url, force = false) {
+  if (!force && process.env.ASHER_OPEN !== '1') return;
   const { spawn } = require('node:child_process');
   const [cmd, args] = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
     : process.platform === 'darwin' ? ['open', [url]]
@@ -319,16 +327,46 @@ function openBrowser(url) {
 }
 
 /*
- * На рабочем компьютере порт 3000 нередко занят другой программой. Вместо
- * падения с непонятной ошибкой берём следующий свободный и печатаем его.
+ * Кто занял порт: наша же система или посторонняя программа. Различать
+ * обязательно — две копии Asher на одной базе мешают друг другу писать,
+ * и в работе это выглядит как случайные ошибки на ровном месте.
+ */
+function askWhoIsThere(port) {
+  return new Promise(resolve => {
+    const req = http.get({ host: '127.0.0.1', port, path: '/api/ping', timeout: 1500 }, res => {
+      let body = '';
+      res.on('data', d => { body += d; });
+      res.on('end', () => { try { resolve(JSON.parse(body)); } catch { resolve(null); } });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+  });
+}
+
+/*
+ * Порт занят. Если там уже работает Asher — вторую копию не поднимаем, а
+ * открываем существующую: одна база, один хозяин. Если это чужая программа —
+ * спокойно берём следующий свободный порт.
  */
 let portTries = 0;
-server.on('error', e => {
-  if (e.code === 'EADDRINUSE' && portTries < 10) {
-    portTries++;
-    if (portTries === 1) console.log(`  Порт ${PORT} занят другой программой, беру следующий свободный…`);
-    server.listen(PORT + portTries);
-    return;
+server.on('error', async e => {
+  if (e.code === 'EADDRINUSE') {
+    const busyPort = PORT + portTries;
+    const who = await askWhoIsThere(busyPort);
+    if (who && who.app === 'asher') {
+      const url = `http://localhost:${busyPort}`;
+      console.log(`\n  Система уже работает: ${url}`);
+      console.log('  Второй раз запускать не нужно — открываю то, что уже работает.\n');
+      openBrowser(url, true);
+      setTimeout(() => process.exit(0), 1500);
+      return;
+    }
+    if (portTries < 10) {
+      portTries++;
+      if (portTries === 1) console.log(`  Порт ${PORT} занят другой программой, беру следующий свободный…`);
+      server.listen(PORT + portTries);
+      return;
+    }
   }
   console.error('\n  Не удалось запустить систему:', e.message, '\n');
   process.exit(1);
@@ -340,6 +378,15 @@ server.on('listening', () => {
   // а не запрошенный: он мог смениться из-за занятости.
   process.env.ASHER_ACTUAL_PORT = String(port);
   const local = `http://localhost:${port}`;
+  /*
+   * Записываем занятый порт рядом с базой: ярлыки на Рабочем столе открывают
+   * систему по этому файлу, а не по угаданному адресу. Иначе после смены
+   * порта значок вёл бы в пустоту.
+   */
+  try {
+    fs.writeFileSync(path.join(path.dirname(require('./src/db').DB_PATH), 'asher-port.txt'),
+      String(port), 'utf8');
+  } catch { /* не записалось — ярлык просто попробует обычный адрес */ }
   console.log(`\n  Asher CRM запущена`);
   console.log(`  НЕ ЗАКРЫВАЙТЕ это окно, пока работаете с системой — сворачивайте.`);
   console.log(`\n  На этом компьютере:  ${local}`);
