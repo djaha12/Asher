@@ -1,4 +1,5 @@
 'use strict';
+require('./устройство');   // проверки называют себя устройством, как настоящее приложение
 const ВЫВОД = require('node:path').join(__dirname, '.вывод');
 /*
  * Живое обновление экрана.
@@ -40,10 +41,19 @@ async function войти(page, логин, пароль) {
 (async () => {
   const b = await chromium.launch();
 
-  // Ноутбук владельца и телефон продавца — разные устройства, разные окна.
+  /*
+   * Ноутбук владельца и телефон продавца — именно РАЗНЫЕ устройства, и это
+   * здесь принципиально: половина проверки в том, что своё же действие не
+   * вызывает лишней перерисовки. С одной отметкой на двоих сервер считал бы
+   * продажу с ноутбука «своей» для телефона, и проверка потеряла бы смысл.
+   *
+   * Телефон при этом системе незнаком — он попадёт на экран ожидания. Ниже
+   * владелец разрешает его, как разрешал бы в жизни.
+   */
   const ноутбук = await (await b.newContext({ viewport: { width: 1500, height: 1000 } })).newPage();
   const телефон = await (await b.newContext({
     viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true,
+    устройство: 'seller-phone-live',
   })).newPage();
 
   const ошибки = [];
@@ -60,8 +70,33 @@ async function войти(page, логин, пароль) {
   }
 
   await войти(ноутбук, 'admin', 'admin123');
-  await войти(телефон, 'anna', 'seller123');
-  check('оба устройства вошли', true);
+
+  /*
+   * Телефон продавца — новое устройство. Он не входит сразу, а показывает код
+   * и ждёт. Владелец с ноутбука разрешает — и телефон входит сам, не спрашивая
+   * пароль заново. Ровно так это и выглядит в магазине.
+   */
+  await телефон.goto(BASE, { waitUntil: 'networkidle' });
+  await телефон.fill('#login-username', 'anna');
+  await телефон.fill('#login-password', 'seller123');
+  await телефон.click('#login-form button[type=submit]');
+  await телефон.waitForSelector('#login-wait:not(.hidden)', { timeout: 15000 });
+  const код = (await телефон.textContent('#login-wait-code')).trim();
+  check('незнакомый телефон не пустили, показан код', /^[A-Z0-9]{4}$/.test(код), код);
+
+  const разрешено = await ноутбук.evaluate(async (к) => {
+    const r = await fetch('/api/devices', { credentials: 'include' });
+    const j = await r.json();
+    const d = (j.pending || []).find(x => x.code === к);
+    if (!d) return { ok: false, ждут: (j.pending || []).map(x => x.code) };
+    const a = await fetch(`/api/devices/${d.id}/approve`, { method: 'POST', credentials: 'include' });
+    return { ok: a.status === 200, кто: d.username };
+  }, код);
+  check('владелец видит этот телефон в ожидающих и разрешает', разрешено.ok, разрешено);
+
+  // Разрешили — приложение входит само, пароль повторно не спрашивая.
+  await телефон.waitForSelector('#app:not(.hidden)', { timeout: 20000 });
+  check('телефон вошёл сам после разрешения', true);
 
   console.log('\n=== Каталог обновляется сам ===');
   // Телефон смотрит на изделия в наличии и НИЧЕГО не трогает дальше.

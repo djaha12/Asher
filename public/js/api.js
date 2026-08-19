@@ -40,7 +40,12 @@ window.api = (() => {
     let data = null;
     try { data = await res.json(); } catch { /* пустой ответ */ }
     if (!res.ok) {
-      throw new Error((data && data.error) || `Ошибка ${res.status}`);
+      const err = new Error((data && data.error) || `Ошибка ${res.status}`);
+      // Кроме текста ошибке нужны и подробности: например, вход с нового
+      // устройства отвечает отказом, но вместе с кодом, который надо показать.
+      err.status = res.status;
+      err.data = data;
+      throw err;
     }
     return data;
   }

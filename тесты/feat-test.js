@@ -1,3 +1,4 @@
+require('./устройство');   // проверки называют себя устройством, как настоящее приложение
 const ВЫВОД = require('node:path').join(__dirname, '.вывод');
 const { chromium } = require('./браузер');
 const BASE = process.env.BASE || 'http://127.0.0.1:3122';

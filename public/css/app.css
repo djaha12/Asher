@@ -167,6 +167,24 @@ svg.i {
   padding: 10px 13px; margin-bottom: 14px; font-size: 13.5px;
 }
 
+/*
+ * Ожидание разрешения на новое устройство. Экран должен читаться с телефона
+ * в торговом зале и без объяснений: крупный код, который диктуют владельцу,
+ * и понятно, что делать дальше.
+ */
+.login-wait {
+  background: var(--warn-soft, rgba(200,150,40,.12));
+  border: 1px solid var(--warn, #c8963c);
+  border-radius: var(--radius-sm); padding: 14px; margin-bottom: 14px;
+}
+.login-wait-title { font-weight: 700; margin-bottom: 8px; }
+.login-wait p { margin: 0 0 10px; font-size: 13.5px; line-height: 1.5; }
+.login-wait-code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 34px; font-weight: 700; letter-spacing: .18em;
+  text-align: center; margin: 12px 0; color: var(--ink-1);
+}
+
 /* ============ Каркас ============ */
 
 .app { display: flex; min-height: 100vh; }

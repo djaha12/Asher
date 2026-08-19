@@ -184,24 +184,77 @@ window.App = (() => {
   }
 
   // ---------- Вход ----------
+  let ждёмРазрешения = null;   // таймер ожидания разрешения устройства
+
+  function прекратитьОжидание() {
+    if (ждёмРазрешения) { clearInterval(ждёмРазрешения); ждёмРазрешения = null; }
+    document.getElementById('login-wait').classList.add('hidden');
+    document.getElementById('login-form').querySelector('button[type=submit]').classList.remove('hidden');
+  }
+  document.getElementById('login-wait-cancel').addEventListener('click', () => {
+    прекратитьОжидание();
+    document.getElementById('login-password').value = '';
+  });
+
+  async function войти(логин, пароль) {
+    const res = await api.post('/api/login', { username: логин, password: пароль });
+    App.user = res.user;
+    App.storeName = res.store_name || 'Asher';
+    App.storePhone = res.store_phone || '';
+    if (res.locale) App.locale = res.locale;
+    document.getElementById('login-password').value = '';
+    прекратитьОжидание();
+    // Убираем «#login=…» из ссылки, чтобы дальше работали обычные разделы.
+    if (/^#login=/i.test(location.hash)) location.hash = '#/dashboard';
+    App.showApp();
+  }
+
+  /*
+   * Ждём, пока владелец разрешит это устройство, и входим сами.
+   *
+   * Пароль держим в памяти этой функции и нигде не сохраняем: он уже был
+   * введён, и заставлять продавца набирать его второй раз — только повод
+   * набрать при чужих. Как только разрешение получено, вход происходит
+   * тем же паролем, без каких-либо обходных путей на сервере.
+   */
+  function ждатьРазрешения(логин, пароль, код) {
+    document.getElementById('login-wait-code').textContent = код || '····';
+    document.getElementById('login-wait').classList.remove('hidden');
+    document.getElementById('login-form').querySelector('button[type=submit]').classList.add('hidden');
+    if (ждёмРазрешения) clearInterval(ждёмРазрешения);
+    ждёмРазрешения = setInterval(async () => {
+      let с;
+      try {
+        с = await api.get('/api/login/device-status?username=' + encodeURIComponent(логин));
+      } catch { return; }   // нет связи — просто пробуем дальше
+      if (с && с.state === 'разрешено') {
+        clearInterval(ждёмРазрешения); ждёмРазрешения = null;
+        try { await войти(логин, пароль); }
+        catch (e) {
+          прекратитьОжидание();
+          const errEl = document.getElementById('login-error');
+          errEl.textContent = e.message;
+          errEl.classList.remove('hidden');
+        }
+      }
+    }, 3000);
+  }
+
   document.getElementById('login-form').addEventListener('submit', async e => {
     e.preventDefault();
     const errEl = document.getElementById('login-error');
     errEl.classList.add('hidden');
+    const логин = document.getElementById('login-username').value;
+    const пароль = document.getElementById('login-password').value;
     try {
-      const res = await api.post('/api/login', {
-        username: document.getElementById('login-username').value,
-        password: document.getElementById('login-password').value,
-      });
-      App.user = res.user;
-      App.storeName = res.store_name || 'Asher';
-      App.storePhone = res.store_phone || '';
-      if (res.locale) App.locale = res.locale;
-      document.getElementById('login-password').value = '';
-      // Убираем «#login=…» из ссылки, чтобы дальше работали обычные разделы.
-      if (/^#login=/i.test(location.hash)) location.hash = '#/dashboard';
-      App.showApp();
+      await войти(логин, пароль);
     } catch (err) {
+      // Пароль верный, но устройство незнакомое — это не ошибка, а ожидание.
+      if (err.data && err.data.pending_device) {
+        ждатьРазрешения(логин, пароль, err.data.code);
+        return;
+      }
+      прекратитьОжидание();
       errEl.textContent = err.message;
       errEl.classList.remove('hidden');
     }
