@@ -72,7 +72,7 @@ window.Pages.analytics = (() => {
         <div class="card mb0">
           <h3 class="card-title">Лучшие клиенты</h3>
           ${ui.table([
-            { title: 'Клиент', render: r => `${ui.esc(r.name)} ${ui.badge('segment', r.segment)}` },
+            { title: 'Клиент', render: r => ui.esc(r.name) },
             { title: 'Покупок', cls: 'num', render: r => r.purchases },
             { title: 'Сумма', cls: 'num strong', render: r => ui.money(r.spent) },
           ], topCustomers.items, { empty: 'Нет продаж с клиентами за период' })}

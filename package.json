@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node server.js",
     "seed": "node src/seed.js",
-    "reset": "node src/seed.js --reset"
+    "reset": "node src/seed.js --reset",
+    "test": "node тесты/ПРОВЕРИТЬ.js"
   },
   "engines": {
     "node": ">=22.5.0"

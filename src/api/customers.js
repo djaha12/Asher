@@ -2,8 +2,8 @@
 const { db, nowIso, round2, audit } = require('../db');
 const { ApiError } = require('./util');
 
-const FIELDS = ['name', 'phone', 'email', 'birthday', 'anniversary', 'segment', 'discount',
-  'bonus_points', 'ring_size', 'preferences', 'notes'];
+const FIELDS = ['name', 'phone', 'email', 'birthday', 'anniversary', 'discount',
+  'ring_size', 'preferences', 'notes'];
 
 // «2020-13-45» не пройдёт: проверяем, что дата существует в календаре
 function isValidDate(s) {
@@ -27,17 +27,9 @@ function validateCustomer(body, { partial = false } = {}) {
       throw new ApiError(400, 'Дата должна быть реальной датой в формате ГГГГ-ММ-ДД');
     }
   }
-  if (body.segment !== undefined) {
-    if (!['new', 'regular', 'vip'].includes(body.segment)) throw new ApiError(400, 'Недопустимый сегмент');
-    out.segment = body.segment;
-  }
   if (body.discount !== undefined) {
     out.discount = round2(body.discount);
     if (out.discount < 0 || out.discount > 100) throw new ApiError(400, 'Скидка должна быть от 0 до 100%');
-  }
-  if (body.bonus_points !== undefined) {
-    out.bonus_points = round2(body.bonus_points);
-    if (out.bonus_points < 0) throw new ApiError(400, 'Бонусы не могут быть отрицательными');
   }
   return out;
 }
@@ -60,7 +52,6 @@ const routes = [
         const s = `%${String(query.search).toLowerCase()}%`;
         args.push(s, s, s);
       }
-      if (query.segment) { cond.push('c.segment = ?'); args.push(query.segment); }
       const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
       const rows = db.prepare(
         `SELECT c.*,
@@ -81,7 +72,7 @@ const routes = [
       const today = query.today && /^\d{4}-\d{2}-\d{2}$/.test(query.today)
         ? query.today : new Date().toISOString().slice(0, 10);
       const rows = db.prepare(
-        `SELECT id, name, phone, segment, birthday, anniversary FROM customers
+        `SELECT id, name, phone, birthday, anniversary FROM customers
          WHERE birthday != '' OR anniversary != ''`
       ).all();
       const base = new Date(today + 'T00:00:00Z');
@@ -94,7 +85,7 @@ const routes = [
           if (next < base) next = new Date(Date.UTC(base.getUTCFullYear() + 1, m - 1, d));
           const diff = Math.round((next - base) / 86400000);
           if (diff <= days) {
-            upcoming.push({ id: r.id, name: r.name, phone: r.phone, segment: r.segment,
+            upcoming.push({ id: r.id, name: r.name, phone: r.phone,
               kind, date: next.toISOString().slice(0, 10), in_days: diff });
           }
         }
@@ -169,7 +160,7 @@ const routes = [
       const hasOrders = db.prepare('SELECT 1 FROM service_orders WHERE customer_id = ? LIMIT 1').get(id);
       if (hasOrders) throw new ApiError(400, 'У клиента есть заказы или ремонт — удалить нельзя.');
       // резервы за клиентом освобождаем, чтобы изделия не зависли
-      db.prepare(`UPDATE products SET status = 'in_stock', reserved_for = NULL
+      db.prepare(`UPDATE products SET status = 'in_stock', reserved_for = NULL, reserved_until = ''
                   WHERE reserved_for = ? AND status = 'reserved'`).run(id);
       db.prepare('DELETE FROM customers WHERE id = ?').run(id);
       audit(session.userId, 'delete', 'customer', id, existing.name);

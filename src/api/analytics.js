@@ -51,9 +51,19 @@ const routes = [
       const month = periodStats(monthStartUtc, nowIso);
 
       const stock = db.prepare(
-        `SELECT COUNT(*) AS cnt, COALESCE(SUM(retail_price),0) AS retail, COALESCE(SUM(purchase_price),0) AS cost
+        `SELECT COUNT(*) AS cnt, COALESCE(SUM(retail_price),0) AS retail, COALESCE(SUM(purchase_price),0) AS cost,
+                COALESCE(SUM(weight),0) AS weight
          FROM products WHERE status IN ('in_stock','reserved')`
       ).get();
+      // Склад в граммах по металлам — для ювелира это такой же понятный
+      // показатель, как деньги: сколько золота лежит в витрине.
+      const stockByMetal = db.prepare(
+        `SELECT CASE WHEN metal = '' THEN 'Без металла'
+                     ELSE TRIM(metal || ' ' || COALESCE(fineness, '')) END AS metal,
+                COUNT(*) AS cnt, COALESCE(SUM(weight),0) AS weight, COALESCE(SUM(retail_price),0) AS retail
+         FROM products WHERE status IN ('in_stock','reserved')
+         GROUP BY metal, fineness ORDER BY weight DESC`
+      ).all();
       const reserved = db.prepare(`SELECT COUNT(*) AS cnt FROM products WHERE status = 'reserved'`).get();
       const customers = db.prepare('SELECT COUNT(*) AS cnt FROM customers').get();
       const activeOrders = db.prepare(
@@ -83,12 +93,52 @@ const routes = [
          ORDER BY s.created_at DESC LIMIT 6`
       ).all();
 
+      // Долги — на главной, чтобы владелец видел их каждое утро, не заходя в раздел.
+      const debtRows = db.prepare(
+        `SELECT s.customer_id, c.name AS customer_name, c.phone AS customer_phone, s.due_date,
+                round((SELECT COALESCE(SUM(si.final_price),0) FROM sale_items si
+                       WHERE si.sale_id = s.id AND si.returned = 0) - s.paid, 2) AS debt
+         FROM sales s JOIN customers c ON c.id = s.customer_id
+         WHERE (SELECT COALESCE(SUM(si.final_price),0) FROM sale_items si
+                WHERE si.sale_id = s.id AND si.returned = 0) - s.paid > 0.009`
+      ).all();
+      const orderDebtRows = db.prepare(
+        `SELECT o.customer_id, c.name AS customer_name, c.phone AS customer_phone, o.due_date,
+                round((CASE WHEN o.final_price > 0 THEN o.final_price ELSE o.estimate END) - o.paid, 2) AS debt
+         FROM service_orders o JOIN customers c ON c.id = o.customer_id
+         WHERE o.status = 'delivered'
+           AND round((CASE WHEN o.final_price > 0 THEN o.final_price ELSE o.estimate END) - o.paid, 2) > 0.009`
+      ).all();
+      const allDebts = [...debtRows, ...orderDebtRows];
+      const byDebtor = new Map();
+      for (const r of allDebts) {
+        const cur = byDebtor.get(r.customer_id) ||
+          { customer_id: r.customer_id, name: r.customer_name, phone: r.customer_phone, debt: 0, overdue: false };
+        cur.debt = round2(cur.debt + r.debt);
+        if (r.due_date && r.due_date < localDate) cur.overdue = true;
+        byDebtor.set(r.customer_id, cur);
+      }
+      const topDebtors = [...byDebtor.values()].sort((a, b) => b.debt - a.debt).slice(0, 6);
+      const debts = {
+        customers_owe: round2(allDebts.reduce((s, r) => s + r.debt, 0)),
+        overdue: round2(allDebts.filter(r => r.due_date && r.due_date < localDate)
+          .reduce((s, r) => s + r.debt, 0)),
+        debtors_count: byDebtor.size,
+        top: topDebtors,
+      };
+
       const result = {
         today, month,
-        stock: { count: Number(stock.cnt), retail_value: round2(stock.retail), cost_value: round2(stock.cost) },
+        stock: {
+          count: Number(stock.cnt), retail_value: round2(stock.retail), cost_value: round2(stock.cost),
+          weight: round2(stock.weight), by_metal: stockByMetal.map(m => ({
+            ...m, weight: round2(m.weight), retail: round2(m.retail),
+          })),
+        },
         reserved: Number(reserved.cnt),
         customers: Number(customers.cnt),
         orders: { active: Number(activeOrders.cnt), ready: Number(readyOrders.cnt) },
+        debts,
         revenue_14d: series,
         recent_sales: recentSales,
         store_name: getSetting('store_name'),
@@ -98,6 +148,14 @@ const routes = [
         for (const p of [result.today, result.month]) { delete p.profit; delete p.cogs; }
         delete result.stock.cost_value;
         delete result.stock.retail_value;
+        result.stock.by_metal.forEach(m => delete m.retail);
+      } else {
+        // Сколько должны мы — цифра для владельца.
+        const we = db.prepare(
+          `SELECT COALESCE(SUM(CASE WHEN type = 'payment' THEN -amount ELSE amount END), 0) AS balance
+           FROM supplier_ops`
+        ).get();
+        result.debts.we_owe = round2(Math.max(0, we.balance));
       }
       return result;
     },
@@ -150,12 +208,12 @@ const routes = [
       const { cond, args } = rangeCond(query);
       const where = cond.length ? 'AND ' + cond.join(' AND ') : '';
       const rows = db.prepare(
-        `SELECT COALESCE(NULLIF(p.metal, ''), 'Не указан') AS name,
+        `SELECT TRIM(COALESCE(NULLIF(p.metal, ''), 'Не указан') || ' ' || COALESCE(p.fineness, '')) AS name,
                 COUNT(*) AS items_sold,
                 COALESCE(SUM(si.final_price), 0) AS revenue
          FROM sale_items si JOIN sales s ON s.id = si.sale_id JOIN products p ON p.id = si.product_id
          WHERE si.returned = 0 ${where}
-         GROUP BY COALESCE(NULLIF(p.metal, ''), 'Не указан') ORDER BY revenue DESC`
+         GROUP BY p.metal, p.fineness ORDER BY revenue DESC`
       ).all(...args);
       return { items: rows.map(r => ({ ...r, revenue: round2(r.revenue) })) };
     },
@@ -181,7 +239,7 @@ const routes = [
       const { cond, args } = rangeCond(query);
       const where = cond.length ? 'AND ' + cond.join(' AND ') : '';
       const rows = db.prepare(
-        `SELECT c.id, c.name, c.phone, c.segment,
+        `SELECT c.id, c.name, c.phone,
                 COUNT(DISTINCT s.id) AS purchases,
                 COALESCE(SUM(si.final_price), 0) AS spent
          FROM sale_items si JOIN sales s ON s.id = si.sale_id JOIN customers c ON c.id = s.customer_id
@@ -234,10 +292,10 @@ const routes = [
          GROUP BY c.id ORDER BY retail DESC`
       ).all();
       const byMetal = db.prepare(
-        `SELECT COALESCE(NULLIF(metal, ''), 'Не указан') AS name, COUNT(*) AS cnt,
+        `SELECT TRIM(COALESCE(NULLIF(metal, ''), 'Не указан') || ' ' || COALESCE(fineness, '')) AS name, COUNT(*) AS cnt,
                 COALESCE(SUM(weight), 0) AS weight, COALESCE(SUM(retail_price), 0) AS retail
          FROM products WHERE status IN ('in_stock','reserved')
-         GROUP BY COALESCE(NULLIF(metal, ''), 'Не указан') ORDER BY retail DESC`
+         GROUP BY metal, fineness ORDER BY retail DESC`
       ).all();
       const stale = db.prepare(
         `SELECT id, sku, name, metal, retail_price, created_at FROM products

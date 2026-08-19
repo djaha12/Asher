@@ -5,3 +5,11 @@ data/*.db-wal
 data/*.db-shm
 *.log
 .DS_Store
+1С-ОБМЕН/
+РЕЗЕРВНЫЕ-КОПИИ/
+asher-скрытый-запуск.vbs
+asher-открыть.vbs
+asher-выключить.vbs
+data/asher-port.txt
+тесты/.вывод/
+.идёт-проверка

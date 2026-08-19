@@ -48,36 +48,39 @@ addUser('mikhail', 'Михаил Орлов', 'seller', 'seller123');
 const userIds = db.prepare('SELECT id FROM users').all().map(r => r.id);
 
 // ---------- Настройки ----------
-setSetting('store_name', 'Asher Jewelry');
-setSetting('store_address', 'Москва, Столешников пер., 7');
-setSetting('store_phone', '+7 495 120-45-67');
-setSetting('bonus_percent', '3');
-setSetting('vip_threshold', '500000');
+setSetting('store_name', 'Asher Diamonds');
+setSetting('store_address', 'Бишкек, ул. Киевская, 95');
+setSetting('store_phone', '+996 312 66-12-34');
 
 // ---------- Поставщики ----------
 const supplierNames = [
-  ['АлмазХолдинг', 'Отдел опта', '+7 495 780-11-22'],
-  ['Московский ювелирный завод', 'Ирина Салтыкова', '+7 495 234-56-78'],
-  ['Diamond District', 'Давид Аронов', '+7 926 111-22-33'],
-  ['Эстет', 'Менеджер Ольга', '+7 495 456-78-90'],
+  ['Алтын Групп', 'Отдел опта', '+996 312 88-11-22'],
+  ['Кыргыз Алтын', 'Айгуль Асанова', '+996 555 234-56-78'],
+  ['Diamond District (импорт)', 'Давид Аронов', '+996 770 111-22-33'],
+  ['Эстет', 'Менеджер Ольга', '+996 312 45-67-89'],
 ];
 const insSup = db.prepare('INSERT INTO suppliers (name, contact, phone, notes) VALUES (?,?,?,?)');
 for (const [n, c, p] of supplierNames) insSup.run(n, c, p, '');
 const supplierIds = db.prepare('SELECT id FROM suppliers').all().map(r => r.id);
 
 // ---------- Клиенты ----------
-const FIRST_F = ['Анна', 'Мария', 'Елена', 'Ольга', 'Наталья', 'Ирина', 'Светлана', 'Екатерина', 'Виктория', 'Дарья', 'Алина', 'Полина'];
-const LAST_F = ['Иванова', 'Смирнова', 'Кузнецова', 'Попова', 'Соколова', 'Лебедева', 'Козлова', 'Новикова', 'Морозова', 'Волкова'];
-const FIRST_M = ['Александр', 'Дмитрий', 'Сергей', 'Андрей', 'Алексей', 'Михаил', 'Владимир', 'Игорь', 'Николай', 'Тимур'];
-const LAST_M = ['Иванов', 'Петров', 'Сидоров', 'Кузнецов', 'Соколов', 'Михайлов', 'Фёдоров', 'Морозов', 'Волков', 'Богданов'];
+const MOBILE_PREFIX = ['500', '550', '555', '700', '705', '755', '770', '772', '990', '995'];
+const FIRST_F = ['Анна', 'Мария', 'Елена', 'Айгуль', 'Наталья', 'Жылдыз', 'Светлана', 'Айпери',
+  'Виктория', 'Гульнара', 'Алина', 'Бермет', 'Асель', 'Нургуль', 'Дарья', 'Чолпон'];
+const LAST_F = ['Иванова', 'Асанова', 'Кузнецова', 'Жумабаева', 'Соколова', 'Токтогулова',
+  'Бекова', 'Новикова', 'Садыкова', 'Осмонова', 'Мамытова', 'Абдырахманова'];
+const FIRST_M = ['Александр', 'Азамат', 'Сергей', 'Нурлан', 'Алексей', 'Тилек', 'Владимир',
+  'Эрлан', 'Николай', 'Тимур', 'Бакыт', 'Улан', 'Дмитрий', 'Мирлан'];
+const LAST_M = ['Иванов', 'Асанов', 'Сидоров', 'Жумабаев', 'Соколов', 'Токтогулов',
+  'Беков', 'Осмонов', 'Садыков', 'Мамытов', 'Абдырахманов', 'Волков'];
 const MID_F = ['Сергеевна', 'Александровна', 'Владимировна', 'Андреевна', 'Игоревна'];
 const MID_M = ['Сергеевич', 'Александрович', 'Владимирович', 'Андреевич', 'Игоревич'];
 const PREFS = ['Белое золото, бриллианты', 'Классика, жемчуг', 'Розовое золото, минимализм', 'Крупные камни, статусные вещи',
-  'Сапфиры, синий цвет', 'Изумруды', 'Только платина', 'Винтажный стиль', ''];
+  'Крупные караты', 'Чистота от VS1', 'Классические огранки', 'Винтажный стиль', ''];
 
 const insCust = db.prepare(
-  `INSERT INTO customers (name, phone, email, birthday, anniversary, segment, discount, bonus_points, ring_size, preferences, notes, created_at)
-   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
+  `INSERT INTO customers (name, phone, email, birthday, anniversary, discount, ring_size, preferences, notes, created_at)
+   VALUES (?,?,?,?,?,?,?,?,?,?)`
 );
 const customers = [];
 for (let i = 0; i < 26; i++) {
@@ -85,12 +88,12 @@ for (let i = 0; i < 26; i++) {
   const name = female
     ? `${pick(LAST_F)} ${pick(FIRST_F)} ${pick(MID_F)}`
     : `${pick(LAST_M)} ${pick(FIRST_M)} ${pick(MID_M)}`;
-  const phone = `+7 9${ri(10, 99)} ${ri(100, 999)}-${String(ri(0, 99)).padStart(2, '0')}-${String(ri(0, 99)).padStart(2, '0')}`;
+  const phone = `+996 ${pick(MOBILE_PREFIX)} ${ri(100, 999)}-${String(ri(0, 99)).padStart(2, '0')}-${String(ri(0, 99)).padStart(2, '0')}`;
   const birthday = chance(0.8) ? `${ri(1965, 2000)}-${String(ri(1, 12)).padStart(2, '0')}-${String(ri(1, 28)).padStart(2, '0')}` : '';
   const anniversary = chance(0.3) ? `${ri(2005, 2022)}-${String(ri(1, 12)).padStart(2, '0')}-${String(ri(1, 28)).padStart(2, '0')}` : '';
   const info = insCust.run(name, phone,
-    chance(0.5) ? `client${i + 1}@mail.ru` : '',
-    birthday, anniversary, 'new', chance(0.3) ? pick([3, 5, 7, 10]) : 0, 0,
+    chance(0.5) ? `client${i + 1}@${pick(['mail.ru', 'gmail.com'])}` : '',
+    birthday, anniversary, chance(0.3) ? pick([3, 5, 7, 10]) : 0,
     female && chance(0.7) ? pick(['15,5', '16', '16,5', '17', '17,5', '18']) : '',
     pick(PREFS), '', isoDaysAgo(ri(30, 400)));
   customers.push(Number(info.lastInsertRowid));
@@ -98,12 +101,13 @@ for (let i = 0; i < 26; i++) {
 
 // ---------- Изделия ----------
 const cats = Object.fromEntries(db.prepare('SELECT id, name FROM categories').all().map(c => [c.name, c.id]));
-const METALS = ['Золото 585', 'Золото 750', 'Белое золото 585', 'Розовое золото 585', 'Платина 950', 'Серебро 925'];
+// Дом работает только с золотом 750-й пробы, преимущественно белым.
+const METALS = ['Белое золото', 'Белое золото', 'Белое золото', 'Жёлтое золото', 'Красное золото'];
+const FINENESS = '750';
 const NAMES_POOL = ['Аврора', 'Сияние', 'Венеция', 'Ночь', 'Каприз', 'Мираж', 'Элегия', 'Луна', 'Классика', 'Гармония',
   'Афина', 'Софи', 'Империал', 'Флоренция', 'Россыпь', 'Нежность', 'Вдохновение', 'Монако', 'Селена', 'Ривьера'];
 const COLORS = ['D', 'E', 'F', 'G', 'H', 'I'];
 const CLARITY = ['IF', 'VVS1', 'VVS2', 'VS1', 'VS2', 'SI1'];
-const GEM_OTHER = ['Сапфир', 'Изумруд', 'Рубин', 'Жемчуг', 'Топаз', 'Аметист'];
 
 const CATEGORY_SPECS = {
   'Кольца': { count: 40, w: [1.8, 6.5], price: [45000, 780000], sizes: ['15,5', '16', '16,5', '17', '17,5', '18', '18,5'] },
@@ -121,13 +125,16 @@ const PREFIX = { 'Кольца': 'Кольцо', 'Серьги': 'Серьги',
 
 function gemsFor(withDiamond, price) {
   if (!withDiamond) return [];
-  const gems = [];
-  if (chance(0.8)) {
-    const carat = price > 400000 ? rnd(0.7, 2.5) : rnd(0.1, 0.7);
-    gems.push({ type: 'Бриллиант', carat: Math.round(carat * 100) / 100, color: pick(COLORS), clarity: pick(CLARITY), cut: 'Кр-57', count: chance(0.3) ? ri(2, 12) : 1 });
-  } else {
-    gems.push({ type: pick(GEM_OTHER), carat: Math.round(rnd(0.3, 3) * 100) / 100, color: '', clarity: '', cut: '', count: 1 });
-    if (chance(0.5)) gems.push({ type: 'Бриллиант', carat: Math.round(rnd(0.05, 0.4) * 100) / 100, color: pick(COLORS), clarity: pick(CLARITY), cut: 'Кр-57', count: ri(2, 18) });
+  // Только бриллианты: другие камни дом не продаёт.
+  const carat = price > 400000 ? rnd(0.7, 2.5) : rnd(0.1, 0.7);
+  const gems = [{
+    type: 'Бриллиант', carat: Math.round(carat * 100) / 100,
+    color: pick(COLORS), clarity: pick(CLARITY), cut: 'Кр-57',
+    count: chance(0.3) ? ri(2, 12) : 1,
+  }];
+  if (chance(0.35)) {
+    gems.push({ type: 'Бриллиант', carat: Math.round(rnd(0.01, 0.05) * 100) / 100,
+      color: pick(COLORS), clarity: pick(CLARITY), cut: 'Кр-57', count: ri(6, 24) });
   }
   return gems;
 }
@@ -137,9 +144,10 @@ function gemSummary(gems) {
 }
 
 const insProd = db.prepare(
-  `INSERT INTO products (sku, barcode, name, category_id, metal, weight, size, gems, gem_summary,
+  `INSERT INTO products (sku, barcode, name, category_id, metal, fineness, weight, size,
+     carat, color, clarity, gems, gem_summary,
      purchase_price, retail_price, supplier_id, status, location, description, created_at)
-   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'in_stock',?,?,?)`
+   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'in_stock',?,?,?)`
 );
 const products = [];
 let skuN = 1;
@@ -149,14 +157,17 @@ for (const [catName, spec] of Object.entries(CATEGORY_SPECS)) {
     const purchase = Math.round(retail / rnd(1.7, 2.2) / 100) * 100;
     const withGems = catName !== 'Цепи' || chance(0.2);
     const gems = gemsFor(withGems, retail);
-    const metal = pick(METALS.slice(0, catName === 'Часы' ? 2 : METALS.length));
-    const name = `${PREFIX[catName]} ${gems.length && gems[0].type === 'Бриллиант' ? 'с бриллиантом' : gems.length ? 'со вставкой' : ''} «${pick(NAMES_POOL)}»`.replace('  ', ' ');
+    const metal = pick(METALS);
+    const name = `${PREFIX[catName]} ${gems.length ? 'с бриллиантом' : ''} «${pick(NAMES_POOL)}»`.replace('  ', ' ');
     const sku = `AS-${String(skuN).padStart(5, '0')}`;
     const barcode = `2000000${String(skuN).padStart(6, '0')}`;
     skuN++;
     const createdDays = ri(5, 300);
-    const info = insProd.run(sku, barcode, name, cats[catName], metal,
+    // Главный камень выносим в поля изделия — по ним ищут и сравнивают.
+    const main = gems[0] || {};
+    const info = insProd.run(sku, barcode, name, cats[catName], metal, FINENESS,
       Math.round(rnd(spec.w[0], spec.w[1]) * 100) / 100, pick(spec.sizes),
+      main.carat || 0, main.color || '', main.clarity || '',
       JSON.stringify(gems), gemSummary(gems), purchase, retail,
       pick(supplierIds), pick(['Витрина 1', 'Витрина 2', 'Витрина 3', 'Сейф']),
       '', isoDaysAgo(createdDays));
@@ -165,7 +176,6 @@ for (const [catName, spec] of Object.entries(CATEGORY_SPECS)) {
 }
 
 // ---------- Продажи за последние ~8 месяцев ----------
-const bonusPct = 3;
 const available = [...products];
 const salesPlan = [];
 for (let day = 240; day >= 0; day--) {
@@ -179,9 +189,14 @@ salesPlan.sort((a, b) => b - a);
 
 const insSale = db.prepare(
   `INSERT INTO sales (number, customer_id, user_id, subtotal, discount_total, total, cost_total,
-     bonus_earned, bonus_spent, payment_method, status, note, created_at)
-   VALUES (?,?,?,?,?,?,?,?,?,?,'completed','',?)`
+     bonus_earned, bonus_spent, payment_method, status, paid, due_date, store_id, note, created_at)
+   VALUES (?,?,?,?,?,?,?,?,?,?,'completed',?,?,?,'',?)`
 );
+const insPayment = db.prepare(
+  `INSERT INTO payments (customer_id, sale_id, amount, method, note, user_id, created_at)
+   VALUES (?,?,?,?,?,?,?)`
+);
+const demoStoreId = (db.prepare('SELECT id FROM stores ORDER BY is_default DESC, id LIMIT 1').get() || {}).id || null;
 const insItem = db.prepare(
   'INSERT INTO sale_items (sale_id, product_id, price, discount, final_price, cost) VALUES (?,?,?,?,?,?)'
 );
@@ -190,8 +205,6 @@ const insFin = db.prepare(
   `INSERT INTO finance_ops (type, category, amount, note, sale_id, order_id, user_id, created_at)
    VALUES (?,?,?,?,?,?,?,?)`
 );
-const custBonus = new Map();
-const custSpent = new Map();
 
 let saleN = 0;
 const saleIds = [];
@@ -220,19 +233,30 @@ for (const day of salesPlan) {
     return { p, d, final: p.retail - d };
   });
   const total = round2(subtotal - discount);
-  const bonusEarned = customerId ? round2(total * bonusPct / 100) : 0;
+
+  // Примерно каждая восьмая покупка с клиентом — в рассрочку: так в демо-данных
+  // видно, как работает раздел долгов. Остальные оплачены полностью.
+  const inDebt = customerId && chance(0.12);
+  const paid = inDebt ? Math.round(total * pick([0.2, 0.3, 0.5]) / 100) * 100 : total;
+  // Часть долгов делаем просроченными, часть — со сроком в будущем.
+  const dueDate = inDebt
+    ? new Date(new Date(ts).getTime() + pick([-20, -5, 14, 40]) * DAY).toISOString().slice(0, 10)
+    : '';
+  const method = inDebt ? 'installment' : pick(['cash', 'card', 'card', 'card', 'transfer']);
+
   const info = insSale.run(number, customerId, pick(userIds), subtotal, discount, total, cost,
-    bonusEarned, 0, pick(['cash', 'card', 'card', 'card', 'transfer']), ts);
+    0, 0, method, paid, dueDate, demoStoreId, ts);
   const saleId = Number(info.lastInsertRowid);
-  saleIds.push({ saleId, number, total, customerId, ts, bonusEarned });
+  saleIds.push({ saleId, number, total, customerId, ts });
   for (const pr of prepared) {
     insItem.run(saleId, pr.p.id, pr.p.retail, pr.d, pr.final, pr.p.purchase);
     markSold.run(ts, pr.p.id);
   }
-  insFin.run('income', 'Продажа', total, `Чек ${number}`, saleId, null, userIds[0], ts);
-  if (customerId) {
-    custBonus.set(customerId, round2((custBonus.get(customerId) || 0) + bonusEarned));
-    custSpent.set(customerId, round2((custSpent.get(customerId) || 0) + total));
+  // В кассу попадает только фактически полученное — как и в рабочем режиме.
+  if (paid > 0) {
+    insFin.run('income', 'Продажа', paid, `Чек ${number}`, saleId, null, userIds[0], ts);
+    insPayment.run(customerId, saleId, paid, method === 'installment' ? 'cash' : method,
+      inDebt ? 'Первый взнос' : 'Оплата чека', userIds[0], ts);
   }
 }
 
@@ -245,18 +269,18 @@ if (saleIds.length > 10) {
   db.prepare(`UPDATE products SET status='in_stock', sold_at=NULL WHERE id = ?`).run(item.product_id);
   const left = db.prepare('SELECT COUNT(*) AS c FROM sale_items WHERE sale_id = ? AND returned = 0').get(target.saleId).c;
   db.prepare('UPDATE sales SET status = ? WHERE id = ?').run(Number(left) ? 'partial_return' : 'returned', target.saleId);
-  insFin.run('expense', 'Возврат покупателю', item.final_price, `Возврат по чеку ${target.number}`, target.saleId, null, userIds[0], retTs);
+  // Возвращаем деньгами только полученное: если чек был в рассрочку, часть суммы гасит долг.
+  const sale = db.prepare('SELECT paid FROM sales WHERE id = ?').get(target.saleId);
+  const newEffective = round2(db.prepare(
+    'SELECT COALESCE(SUM(final_price),0) AS s FROM sale_items WHERE sale_id = ? AND returned = 0'
+  ).get(target.saleId).s);
+  const cashRefund = round2(Math.max(0, sale.paid - newEffective));
+  if (cashRefund > 0) {
+    db.prepare('UPDATE sales SET paid = ? WHERE id = ?').run(newEffective, target.saleId);
+    insFin.run('expense', 'Возврат покупателю', cashRefund, `Возврат по чеку ${target.number}`, target.saleId, null, userIds[0], retTs);
+  }
   const av = products.find(p => p.id === item.product_id);
   if (av) available.push(av);
-}
-
-// бонусы и сегменты клиентов
-for (const [cid, bonus] of custBonus) {
-  const spent = custSpent.get(cid) || 0;
-  const purchases = db.prepare(`SELECT COUNT(*) AS c FROM sales WHERE customer_id = ? AND status != 'returned'`).get(cid).c;
-  const segment = spent >= 500000 ? 'vip' : (Number(purchases) >= 2 ? 'regular' : 'new');
-  db.prepare('UPDATE customers SET bonus_points = ?, segment = ? WHERE id = ?')
-    .run(round2(bonus * 0.6), segment, cid); // часть бонусов «потрачена» ранее
 }
 
 // пара резервов
@@ -335,15 +359,69 @@ for (let m = 1; m <= 7; m++) {
   d.setDate(28);
   d.setHours(12, 0, 0, 0);
   if (d.getTime() > NOW) continue;
-  insFin.run('expense', 'Налоги', ri(40, 90) * 1000, 'УСН, взносы', null, null, userIds[0], d.toISOString());
+  insFin.run('expense', 'Налоги', ri(40, 90) * 1000, '', null, null, userIds[0], d.toISOString());
 }
+
+// ---------- Точки, товар на реализации, расчёты с поставщиками ----------
+
+// Весь товар должен где-то лежать — иначе его не увидит инвентаризация.
+if (demoStoreId) db.prepare('UPDATE products SET store_id = ? WHERE store_id IS NULL').run(demoStoreId);
+
+// Вторая точка и несколько перемещённых на неё изделий.
+const secondStore = Number(db.prepare(
+  'INSERT INTO stores (name, address, phone, is_default, sort) VALUES (?,?,?,0,1)'
+).run('Салон на Чуй', 'пр. Чуй, 155, Бишкек', '+996 312 90-45-67').lastInsertRowid);
+const toMove = db.prepare(`SELECT id FROM products WHERE status='in_stock' ORDER BY RANDOM() LIMIT 12`).all();
+for (const p of toMove) {
+  db.prepare('UPDATE products SET store_id = ? WHERE id = ?').run(secondStore, p.id);
+  db.prepare(
+    `INSERT INTO stock_transfers (product_id, from_store_id, to_store_id, note, user_id, created_at)
+     VALUES (?,?,?,?,?,?)`
+  ).run(p.id, demoStoreId, secondStore, 'Пополнение витрины', userIds[0], isoDaysAgo(ri(3, 30)));
+}
+
+// Часть изделий берём на реализацию — так видно раздел «На реализации».
+const consignmentSupplier = supplierIds[0];
+const toConsign = db.prepare(`SELECT id FROM products WHERE status='in_stock' ORDER BY RANDOM() LIMIT 9`).all();
+for (const p of toConsign) {
+  db.prepare(`UPDATE products SET ownership='consignment', supplier_id=? WHERE id=?`)
+    .run(consignmentSupplier, p.id);
+}
+
+// Расчёты с поставщиками: поставки и частичные оплаты.
+const insSupOp = db.prepare(
+  `INSERT INTO supplier_ops (supplier_id, type, amount, doc_number, doc_date, due_date, note, method, user_id, created_at)
+   VALUES (?,?,?,?,?,?,?,?,?,?)`
+);
+supplierIds.forEach((sid, i) => {
+  for (let k = 0; k < 2; k++) {
+    const days = ri(20, 150);
+    const ts = isoDaysAgo(days);
+    const amount = ri(250, 800) * 1000;
+    insSupOp.run(sid, 'invoice', amount, `НК-${100 + i * 10 + k}`, ts.slice(0, 10),
+      new Date(new Date(ts).getTime() + 45 * DAY).toISOString().slice(0, 10),
+      'Поставка изделий', '', userIds[0], ts);
+    // Большую часть поставок оплатили, одну оставляем висеть долгом.
+    if (!(i === 0 && k === 0)) {
+      const payTs = isoDaysAgo(Math.max(1, days - ri(5, 15)));
+      insSupOp.run(sid, 'payment', amount, '', payTs.slice(0, 10), '', 'Оплата по накладной',
+        'transfer', userIds[0], payTs);
+      insFin.run('expense', 'Оплата поставщику', amount, `Расчёт с поставщиком`, null, null, userIds[0], payTs);
+    }
+  }
+});
 
 const stats = {
   users: db.prepare('SELECT COUNT(*) c FROM users').get().c,
   products: db.prepare('SELECT COUNT(*) c FROM products').get().c,
   sold: db.prepare(`SELECT COUNT(*) c FROM products WHERE status='sold'`).get().c,
+  consignment: db.prepare(`SELECT COUNT(*) c FROM products WHERE ownership='consignment'`).get().c,
   customers: db.prepare('SELECT COUNT(*) c FROM customers').get().c,
   sales: db.prepare('SELECT COUNT(*) c FROM sales').get().c,
+  debtors: db.prepare(
+    `SELECT COUNT(DISTINCT customer_id) c FROM sales s
+     WHERE (SELECT COALESCE(SUM(final_price),0) FROM sale_items WHERE sale_id=s.id AND returned=0) - s.paid > 0.009`
+  ).get().c,
   orders: db.prepare('SELECT COUNT(*) c FROM service_orders').get().c,
   finance: db.prepare('SELECT COUNT(*) c FROM finance_ops').get().c,
 };

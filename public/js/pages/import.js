@@ -47,18 +47,45 @@ window.Pages.import = (() => {
             <li>Загрузите файл здесь — Asher сам предложит соответствие колонок.</li>
           </ol>
           <p class="muted" style="font-size:12.5px">Также подойдёт любая таблица из Excel/Google Sheets, сохранённая как CSV: первая строка — названия колонок.</p>
+          <p class="form-hint" style="margin-bottom:0"><b>Только переоценка?</b> Достаточно файла из двух
+            колонок — <b>артикул и цена</b>, без наименований. Система найдёт изделия по артикулу
+            и проставит новые цены, ничего лишнего не создавая.</p>
         </div>
+      </div>
+
+      <h2 class="section-title">Фотографии изделий</h2>
+      <div class="card">
+        <div class="hint-box" style="margin-bottom:14px">
+          <strong>Перенос фотографий из 1С.</strong> Если фотографии лежат папкой и названы
+          артикулом изделия — <code>AS-00120.jpg</code>, <code>AS-00120_2.jpg</code> — укажите папку,
+          и система разложит их по изделиям сама. Второй и третий ракурс распознаются по суффиксу
+          <code>_2</code>, <code>-3</code> или <code>(2)</code>.
+        </div>
+        <div class="dropzone" id="ph-drop">
+          <div class="dz-ico">${ui.icon('folder')}</div>
+          <div class="dz-main">Выбрать папку с фотографиями</div>
+          <div class="dz-sub">Или перетащите сюда файлы — имя файла должно совпадать с артикулом</div>
+        </div>
+        <div id="ph-result" style="margin-top:14px"></div>
+      </div>
+
+      <h2 class="section-title">Автообмен с 1С и резервные копии</h2>
+      <div class="card" id="sync-card">
+        <div class="muted">Загрузка…</div>
       </div>
 
       <h2 class="section-title">Экспорт данных из Asher</h2>
       <div class="card">
         <p class="muted" style="margin-top:0">Резервная копия или перенос в Excel — данные выгружаются в CSV (открывается в Excel).</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
-          <a class="btn" href="/api/export/products" download>💍 Изделия</a>
-          <a class="btn" href="/api/export/customers" download>👤 Клиенты</a>
-          <a class="btn" href="/api/export/sales" download>₽ Продажи</a>
+          <a class="btn" href="/api/export/products" download>${ui.icon('gem')} Изделия</a>
+          <a class="btn" href="/api/export/customers" download>${ui.icon('users')} Клиенты</a>
+          <a class="btn" href="/api/export/sales" download>${ui.icon('csv')} Продажи</a>
         </div>
       </div>`;
+
+    bindPhotoImport(el);
+    renderSyncCard(el).catch(() => {});
 
     const fileInput = el.querySelector('#imp-file');
     const nextBtn = el.querySelector('#imp-next');
@@ -78,6 +105,144 @@ window.Pages.import = (() => {
     });
   }
 
+  // ---------- Автообмен с 1С и резервные копии ----------
+
+  async function renderSyncCard(el) {
+    const card = el.querySelector('#sync-card');
+    let s;
+    try { s = await api.get('/api/sync/status'); }
+    catch { if (card) card.innerHTML = '<div class="muted">Состояние автообмена недоступно.</div>'; return; }
+    if (!card || !card.isConnected) return;
+
+    const logRows = (s.log || []).slice(0, 8);
+    card.innerHTML = `
+      <div class="hint-box" style="margin-bottom:14px">
+        <strong>Ничего нажимать не нужно.</strong> Рядом с программой есть папка
+        <code>1С-ОБМЕН</code> — положите в неё CSV-выгрузку из 1С, и система сама обновит цены,
+        добавит новые изделия и перенесёт файл в подпапку «обработано» вместе с отчётом.
+        Файлы с нераспознанными колонками попадают в «ошибки». Названия и категории не трогаются.
+      </div>
+      <div class="grid grid-2">
+        <div>
+          <div class="card-title">Последние обмены</div>
+          ${logRows.length ? ui.table([
+            { title: 'Когда', render: r => ui.esc(ui.dt(r.created_at)) },
+            { title: 'Файл', render: r => `<span class="mono">${ui.esc(r.file)}</span>` },
+            { title: 'Результат', render: r => r.status === 'ok'
+              ? `<span class="good">+${r.created} новых, ${r.updated} обновлено</span>`
+              : `<span class="warn">${ui.esc(r.message || 'ошибка')}</span>` },
+          ], logRows, { empty: '' })
+          : '<div class="muted">Обменов ещё не было. Папка ждёт первый файл.</div>'}
+        </div>
+        <div>
+          <div class="card-title">Резервные копии</div>
+          <p class="muted" style="margin-top:0">
+            Раз в сутки снимок базы сохраняется в папку <code>РЕЗЕРВНЫЕ-КОПИИ</code>
+            (хранятся последние 14). Это защита от поломки компьютера — время от времени
+            копируйте эту папку на флешку или в облако.
+          </p>
+          <div>${s.backups_count
+            ? `Копий: <b>${s.backups_count}</b> · последняя: <span class="mono">${ui.esc(s.latest_backup)}</span>`
+            : 'Первая копия появится после запуска системы.'}</div>
+        </div>
+      </div>`;
+  }
+
+  // ---------- Массовый перенос фотографий ----------
+
+  function bindPhotoImport(el) {
+    const drop = el.querySelector('#ph-drop');
+    const result = el.querySelector('#ph-result');
+
+    drop.addEventListener('click', async () => handleFiles(await Photos.pickFolder()));
+    drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+    drop.addEventListener('drop', async e => {
+      e.preventDefault();
+      drop.classList.remove('over');
+      handleFiles([...e.dataTransfer.files]);
+    });
+
+    async function handleFiles(files) {
+      const images = (files || []).filter(Photos.isImage);
+      if (!images.length) { ui.toast('Изображений не найдено', true); return; }
+
+      // Сначала спрашиваем сервер, какому изделию какой файл принадлежит —
+      // так пользователь видит расклад до того, как что-то загрузится.
+      const names = images.map(f => f.name);
+      let match;
+      try { match = await api.post('/api/images/match', { names }); }
+      catch (e) { ui.toastErr(e); return; }
+
+      const matched = images.filter(f => match.matched[f.name]);
+      const unmatched = match.unmatched;
+      const withPhotos = matched.filter(f => match.already[f.name]).length;
+
+      result.innerHTML = `
+        <div class="grid grid-3" style="margin-bottom:14px">
+          <div class="stat-tile"><div class="stat-label">Файлов выбрано</div>
+            <div class="stat-value">${images.length}</div></div>
+          <div class="stat-tile"><div class="stat-label">Нашли своё изделие</div>
+            <div class="stat-value good">${matched.length}</div></div>
+          <div class="stat-tile"><div class="stat-label">Не нашли артикул</div>
+            <div class="stat-value ${unmatched.length ? 'warn' : ''}">${unmatched.length}</div></div>
+        </div>
+        ${withPhotos ? `<p class="muted">У ${withPhotos} изделий фотографии уже есть — новые добавятся к ним.</p>` : ''}
+        ${unmatched.length ? `<details style="margin-bottom:12px">
+          <summary style="cursor:pointer">Показать файлы без совпадения (${unmatched.length})</summary>
+          <div class="muted" style="font-size:13px;margin-top:8px;max-height:160px;overflow:auto">
+            ${unmatched.slice(0, 300).map(n => ui.esc(n)).join('<br>')}
+          </div></details>` : ''}
+        ${matched.length ? `
+          <div class="progress-label"><span id="ph-status">Готово к загрузке</span><span id="ph-count"></span></div>
+          <div class="progress"><div class="pr-fill" id="ph-fill" style="width:0%"></div></div>
+          <div class="row" style="margin-top:12px">
+            <button class="btn btn-primary" id="ph-go">Загрузить ${matched.length} фотографий</button>
+            <button class="btn" id="ph-cancel" disabled>Остановить</button>
+          </div>` : '<p class="muted">Загружать нечего: ни одно имя файла не совпало с артикулом.</p>'}`;
+
+      if (!matched.length) return;
+
+      const goBtn = result.querySelector('#ph-go');
+      const cancelBtn = result.querySelector('#ph-cancel');
+      const fill = result.querySelector('#ph-fill');
+      const status = result.querySelector('#ph-status');
+      const counter = result.querySelector('#ph-count');
+      let stop = false;
+
+      cancelBtn.addEventListener('click', () => { stop = true; status.textContent = 'Останавливаю…'; });
+      goBtn.addEventListener('click', async () => {
+        goBtn.disabled = true;
+        cancelBtn.disabled = false;
+        let done = 0;
+        const failed = [];
+        for (const file of matched) {
+          if (stop) break;
+          status.textContent = `Загружаю: ${file.name}`;
+          try {
+            await Photos.upload(match.matched[file.name], file);
+          } catch (e) {
+            failed.push(`${file.name}: ${e.message}`);
+          }
+          done++;
+          const pct = Math.round(done / matched.length * 100);
+          fill.style.width = pct + '%';
+          counter.textContent = `${done} из ${matched.length} · ${pct}%`;
+        }
+        cancelBtn.disabled = true;
+        status.textContent = stop
+          ? `Остановлено. Загружено ${done - failed.length} фотографий.`
+          : `Готово: загружено ${done - failed.length} из ${matched.length}.`;
+        if (failed.length) {
+          result.insertAdjacentHTML('beforeend',
+            `<div class="hint-box" style="margin-top:12px"><strong>Не загрузились (${failed.length}):</strong><br>
+             ${failed.slice(0, 20).map(f => ui.esc(f)).join('<br>')}</div>`);
+        }
+        ui.toast(`Фотографий загружено: ${done - failed.length}`);
+      });
+    }
+  }
+
   function renderStep2(el) {
     const { preview, entity } = state;
     const colOptions = idx => `<option value="">— не переносить —</option>` +
@@ -92,6 +257,32 @@ window.Pages.import = (() => {
             <label class="field"><span>${FIELD_LABELS[f] || f}</span>
               <select data-field="${f}">${colOptions(preview.suggested_mapping[f])}</select></label>`).join('')}
         </div>
+        <div id="imp-priceonly" class="hint-box hidden">
+          <strong>Это прайс-лист.</strong> В файле нет наименований — значит, новые изделия
+          из него не создаются. Система найдёт изделия по артикулу и проставит им цены.
+          Артикулы, которых нет в каталоге, попадут в отчёт списком.
+        </div>
+        ${entity === 'products' ? `
+          <div class="hint-box" id="imp-update-box">
+            <label class="row-tight" style="cursor:pointer">
+              <input type="checkbox" id="imp-update" style="width:20px;height:20px;cursor:pointer">
+              <strong>Это повторная выгрузка — обновить то, что уже есть</strong>
+            </label>
+            <div id="imp-update-opts" class="hidden" style="margin-top:10px">
+              Изделия сопоставляются по артикулу. Что перезаписать из файла:
+              <div class="row" style="gap:14px;margin-top:8px">
+                <label class="row-tight" style="cursor:pointer"><input type="checkbox" data-uf="retail_price" checked style="width:20px;height:20px"> Розничная цена</label>
+                <label class="row-tight" style="cursor:pointer"><input type="checkbox" data-uf="purchase_price" checked style="width:20px;height:20px"> Закупочная цена</label>
+                <label class="row-tight" style="cursor:pointer"><input type="checkbox" data-uf="name" style="width:20px;height:20px"> Наименование</label>
+                <label class="row-tight" style="cursor:pointer"><input type="checkbox" data-uf="barcode" style="width:20px;height:20px"> Штрихкод</label>
+                <label class="row-tight" style="cursor:pointer"><input type="checkbox" data-uf="category_id" style="width:20px;height:20px"> Категория</label>
+                <label class="row-tight" style="cursor:pointer"><input type="checkbox" data-uf="weight" style="width:20px;height:20px"> Вес</label>
+              </div>
+              <p style="margin:10px 0 0">Проданные и списанные изделия не трогаем — у них своя история.
+              Новых позиций из файла это не касается: они добавятся в любом случае.</p>
+            </div>
+          </div>` : `
+          <p class="form-hint">Клиенты с уже известным телефоном будут пропущены — задвоений не появится.</p>`}
         <div style="display:flex;gap:10px">
           <button class="btn" id="imp-back">← Назад</button>
           <button class="btn btn-primary" id="imp-commit">Импортировать ${preview.total_rows} строк</button>
@@ -107,16 +298,79 @@ window.Pages.import = (() => {
       </div>`;
 
     el.querySelector('#imp-back').addEventListener('click', () => renderStep1(el));
+    const updateCb = el.querySelector('#imp-update');
+    if (updateCb) {
+      updateCb.addEventListener('change', () => {
+        el.querySelector('#imp-update-opts').classList.toggle('hidden', !updateCb.checked);
+        syncMode();
+      });
+    }
+
+    /*
+     * Как только видно, что колонка наименования не выбрана, переключаем
+     * страницу в вид прайс-листа: настройки перезаписи полей там не нужны,
+     * а кнопка должна честно говорить, что произойдёт.
+     */
+    function syncMode() {
+      const nameSel = el.querySelector('#imp-mapping select[data-field=name]');
+      const priceOnly = entity === 'products' && nameSel && nameSel.value === '';
+      const box = el.querySelector('#imp-priceonly');
+      const updBox = el.querySelector('#imp-update-box');
+      if (box) box.classList.toggle('hidden', !priceOnly);
+      if (updBox) updBox.classList.toggle('hidden', priceOnly);
+      // В прайс-листе наименование не обязательно — звёздочка ввела бы в заблуждение.
+      if (nameSel) {
+        const label = nameSel.closest('.field').querySelector('span');
+        if (label) label.textContent = priceOnly ? 'Наименование' : FIELD_LABELS.name;
+      }
+      const btn = el.querySelector('#imp-commit');
+      btn.textContent = priceOnly
+        ? `Проставить цены по артикулам (${preview.total_rows} строк)`
+        : (updateCb && updateCb.checked
+          ? `Обновить и добавить (${preview.total_rows} строк)`
+          : `Импортировать ${preview.total_rows} строк`);
+    }
+    el.querySelectorAll('#imp-mapping select').forEach(s => s.addEventListener('change', syncMode));
+    syncMode();
+
     el.querySelector('#imp-commit').addEventListener('click', async e => {
       const mapping = {};
       el.querySelectorAll('#imp-mapping select').forEach(s => {
         if (s.value !== '') mapping[s.dataset.field] = Number(s.value);
       });
-      if (mapping.name === undefined) { ui.toast('Укажите колонку «Наименование»', true); return; }
+      /*
+       * Файл без наименований — это прайс-лист: артикулы и цены. Такой импорт
+       * ничего не создаёт, а проставляет цены уже заведённым изделиям.
+       */
+      const priceOnly = entity === 'products' && mapping.name === undefined;
+      if (!priceOnly && mapping.name === undefined) {
+        ui.toast('Укажите колонку «Наименование»', true); return;
+      }
+      if (priceOnly && mapping.sku === undefined) {
+        ui.toast('В файле нет наименований — тогда нужна колонка «Артикул», по ней ищутся изделия', true);
+        return;
+      }
+      if (priceOnly && mapping.retail_price === undefined && mapping.purchase_price === undefined) {
+        ui.toast('В файле нет ни наименований, ни цен — обновлять нечего', true);
+        return;
+      }
+      const updateExisting = priceOnly || Boolean(updateCb && updateCb.checked);
+      const updateFields = priceOnly
+        ? ['retail_price', 'purchase_price']
+        : [...el.querySelectorAll('[data-uf]:checked')].map(c => c.dataset.uf);
+      if (updateExisting && !updateFields.length) {
+        ui.toast('Отметьте хотя бы одно поле для обновления', true);
+        return;
+      }
+      if (updateExisting && mapping.sku === undefined) {
+        ui.toast('Для обновления нужна колонка «Артикул» — по ней ищутся изделия', true);
+        return;
+      }
       e.target.disabled = true;
       try {
         const res = await api.post('/api/import/commit', {
           csv: state.csv, entity, mapping, delimiter: preview.delimiter,
+          update_existing: updateExisting, update_fields: updateFields,
         });
         renderResult(el, res);
       } catch (err) {
@@ -132,9 +386,13 @@ window.Pages.import = (() => {
         <h3 class="card-title">Импорт завершён</h3>
         <div class="grid grid-2">
           <div class="stat-tile" style="box-shadow:none"><div class="stat-label">Создано записей</div>
-            <div class="stat-value" style="color:var(--good)">${res.created}</div></div>
+            <div class="stat-value good">${res.created}</div></div>
+          ${res.updated ? `<div class="stat-tile" style="box-shadow:none"><div class="stat-label">Обновлено</div>
+            <div class="stat-value gold">${res.updated}</div></div>` : ''}
+          ${res.unchanged ? `<div class="stat-tile" style="box-shadow:none"><div class="stat-label">Без изменений</div>
+            <div class="stat-value">${res.unchanged}</div></div>` : ''}
           <div class="stat-tile" style="box-shadow:none"><div class="stat-label">Пропущено</div>
-            <div class="stat-value" style="color:${res.skipped ? 'var(--warn)' : 'var(--ink)'}">${res.skipped}</div></div>
+            <div class="stat-value ${res.skipped ? 'warn' : ''}">${res.skipped}</div></div>
         </div>
         ${res.errors.length ? `<h4>Замечания</h4><ul style="padding-left:18px;color:var(--ink-2);font-size:13px">
           ${res.errors.map(e => `<li>${ui.esc(e)}</li>`).join('')}</ul>` : ''}

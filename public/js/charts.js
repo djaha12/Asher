@@ -5,12 +5,20 @@
 window.charts = (() => {
   const INK2 = '#57534b', MUTED = '#8d8781', GRID = '#e7e2d6', BASE = '#c9c2ae';
 
+  // Короткая подпись оси: «1,5 млн» вместо «1 500 000».
+  // Формат разрядов берём из локали магазина, а не из жёстко заданной русской.
   function compact(n) {
     const v = Number(n) || 0;
     const a = Math.abs(v);
-    if (a >= 1e6) return (v / 1e6).toLocaleString('ru-RU', { maximumFractionDigits: 1 }) + ' млн';
-    if (a >= 1e3) return (v / 1e3).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) + ' тыс';
-    return v.toLocaleString('ru-RU');
+    const l = (window.App && window.App.locale) || {};
+    const loc = l.number_locale || 'ru-RU';
+    const fmt = (x, digits) => {
+      try { return x.toLocaleString(loc, { maximumFractionDigits: digits }); }
+      catch { return x.toLocaleString('ru-RU', { maximumFractionDigits: digits }); }
+    };
+    if (a >= 1e6) return fmt(v / 1e6, 1) + ' млн';
+    if (a >= 1e3) return fmt(v / 1e3, 0) + ' тыс';
+    return fmt(v, 2);
   }
 
   function niceTicks(maxV, count = 4) {
