@@ -6,6 +6,22 @@ window.Pages.settings = (() => {
    * QR с адресом системы: продавец наводит камеру телефона — и всё, никакого
    * набора «192.168...» вручную. Так же подключается второй, третий телефон.
    */
+  /*
+   * Адрес, который надо дать телефону.
+   *
+   * Пока система стоит в магазине, владелец смотрит её на самом компьютере —
+   * по «localhost», а такой адрес на телефоне не откроется: нужен адрес
+   * компьютера в сети Wi-Fi. Но как только система переедет на свой домен,
+   * правильный адрес — ровно тот, по которому владелец сейчас и работает.
+   * Поэтому: сидим на localhost — берём сетевой адрес, во всех остальных
+   * случаях берём адрес из строки браузера. Он заведомо рабочий.
+   */
+  function publicBase(net) {
+    const local = /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(location.hostname);
+    if (!local) return location.origin;
+    return (net && net.addresses && net.addresses[0]) || '';
+  }
+
   function phoneQr(address) {
     try {
       qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
@@ -23,6 +39,9 @@ window.Pages.settings = (() => {
       api.get('/api/settings/network').catch(() => ({ addresses: [] })),
     ]);
     const cur = s.currency || 'сом';
+    // Работаем ли уже по своему адресу в интернете — от этого зависит,
+    // что показывать: домен или список адресов в магазинной сети.
+    const onDomain = !/^(localhost|127\.0\.0\.1|\[::1\]|\d+\.\d+\.\d+\.\d+)$/i.test(location.hostname);
 
     box.innerHTML = `
       <div class="two-col">
@@ -95,19 +114,26 @@ window.Pages.settings = (() => {
         <div>
           <div class="card">
             <h3 class="card-title">Открыть на телефоне</h3>
-            ${network.addresses.length ? `
+            ${publicBase(network) ? `
               <p class="muted" style="margin-top:0">Наведите камеру телефона на этот код —
-              система откроется сама. Телефон должен быть в том же Wi-Fi, что и компьютер.</p>
-              <div class="phone-qr">${phoneQr(network.addresses[0])}</div>
+              система откроется сама.${onDomain ? '' : ' Телефон должен быть в том же Wi-Fi, что и компьютер.'}</p>
+              <div class="phone-qr">${phoneQr(publicBase(network))}</div>
+              <div class="row" style="justify-content:center;margin-bottom:6px">
+                <code style="font-size:17px;font-weight:600">${ui.esc(publicBase(network))}</code>
+                <button class="btn btn-sm" data-copy="${ui.esc(publicBase(network))}">Копировать</button>
+              </div>
+              ${onDomain ? `<div class="hint-box" style="margin:0 0 12px">
+                Система работает по своему адресу в интернете — телефоны открывают её
+                откуда угодно, а не только из магазинного Wi-Fi.</div>` : ''}
               <p class="muted" style="font-size:13px;text-align:center;margin-top:0">
                 Так подключается любое число телефонов — просто дайте каждому сканировать.</p>
-              <div class="card-title" style="margin-top:16px">Или наберите адрес вручную</div>
-              ${network.addresses.map(a => `
+              ${onDomain ? '' : `<div class="card-title" style="margin-top:16px">Или наберите адрес вручную</div>`}
+              ${onDomain ? '' : network.addresses.map(a => `
                 <div class="row" style="margin-bottom:8px">
                   <code style="font-size:19px;font-weight:600;flex:1;word-break:break-all">${ui.esc(a)}</code>
                   <button class="btn btn-sm" data-copy="${ui.esc(a)}">Копировать</button>
                 </div>`).join('')}
-              ${network.hostname_url ? `
+              ${onDomain || !network.hostname_url ? '' : `
                 <div class="card-title" style="margin-top:16px">Адрес, который не меняется</div>
                 <div class="row" style="margin-bottom:6px">
                   <code style="font-size:19px;font-weight:600;flex:1;word-break:break-all">${ui.esc(network.hostname_url)}</code>
@@ -116,7 +142,7 @@ window.Pages.settings = (() => {
                 <p class="form-hint">Адрес вида 192.168… роутер может однажды поменять — тогда
                   сохранённая на телефонах ссылка перестанет открываться. Этот адрес привязан
                   к имени компьютера и переживает такую смену. Если телефон его не открывает
-                  (бывает на старых роутерах) — пользуйтесь адресом с цифрами выше.</p>` : ''}
+                  (бывает на старых роутерах) — пользуйтесь адресом с цифрами выше.</p>`}
               <div class="hint-box" style="margin:14px 0 0">
                 <strong>Чтобы стало приложением.</strong> Открыв систему на телефоне, нажмите
                 в браузере «Поделиться» или «⋮» и выберите
@@ -443,7 +469,7 @@ window.Pages.settings = (() => {
   async function phoneCard(u) {
     if (!u) return;
     const net = await api.get('/api/settings/network').catch(() => ({ addresses: [] }));
-    const base = net.addresses[0] || '';
+    const base = publicBase(net);
     const link = base ? `${base}/#login=${encodeURIComponent(u.username)}` : '';
     const m = ui.modal({
       title: 'Телефон сотрудника: ' + u.name,
@@ -462,7 +488,9 @@ window.Pages.settings = (() => {
             <div>2. Ввести пароль (логин уже подставлен).</div>
             <div>3. В браузере нажать «Поделиться» → <b>«На экран “Домой”»</b> (iPhone)
               или «⋮» → <b>«Установить приложение»</b> (Android) — появится значок Asher.</div>
-            <div style="margin-top:6px">Телефон должен быть в том же Wi-Fi, что и компьютер.</div>
+            <div style="margin-top:6px">${/^(localhost|127\.0\.0\.1|\[::1\]|\d+\.\d+\.\d+\.\d+)$/i.test(location.hostname)
+              ? 'Телефон должен быть в том же Wi-Fi, что и компьютер.'
+              : 'Работает откуда угодно — Wi-Fi магазина не нужен.'}</div>
           </div>`
         : '<p class="muted">Компьютер не подключён к сети — адрес появится, когда включите Wi-Fi.</p>'}
       </div>`,
