@@ -38,11 +38,20 @@ if [ -z "$DOMAIN_IP" ]; then
   Обновление адреса занимает от нескольких минут до пары часов.
   После этого запустите скрипт заново."
 fi
-if [ -n "$SERVER_IP" ] && [ "$DOMAIN_IP" != "$SERVER_IP" ]; then
+if [ -z "$SERVER_IP" ]; then
+  # Не смогли узнать свой внешний адрес — значит и сравнить не с чем.
+  # Говорим об этом прямо, а не делаем вид, что проверка прошла.
+  echo "   ВНИМАНИЕ: не удалось узнать внешний адрес этого сервера."
+  echo "   Домен указывает на $DOMAIN_IP — проверьте сами, что это адрес ЭТОГО сервера."
+  echo "   Если нет — прервите скрипт (Ctrl+C) и поправьте запись A у регистратора."
+  echo "   Продолжаю через 15 секунд..."
+  sleep 15
+elif [ "$DOMAIN_IP" != "$SERVER_IP" ]; then
   die "Домен $DOMAIN указывает на $DOMAIN_IP, а этот сервер — $SERVER_IP.
   Поправьте запись A у регистратора и запустите скрипт заново."
+else
+  echo "   домен указывает сюда ($SERVER_IP) — можно продолжать"
 fi
-echo "   домен указывает сюда — можно продолжать"
 
 say "2/8. Обновляю сервер и ставлю нужное"
 export DEBIAN_FRONTEND=noninteractive
@@ -67,12 +76,33 @@ if ! command -v caddy >/dev/null; then
 fi
 
 say "5/8. Разворачиваю систему в $APP_DIR"
+# Приватный репозиторий по https не падает, а спрашивает логин и ждёт вечно.
+# Запрещаем спрашивать: пусть лучше честно упадёт с понятным объяснением.
+export GIT_TERMINAL_PROMPT=0
+export GIT_ASKPASS=/bin/true
 id -u "$APP_USER" >/dev/null 2>&1 || useradd -m -s /bin/bash "$APP_USER"
-if [ -d "$APP_DIR/.git" ]; then
+if [ -f "$APP_DIR/server.js" ] && [ ! -d "$APP_DIR/.git" ]; then
+  # Папку привезли вручную (архивом с GitHub) — обновлять нечего, работаем как есть.
+  echo "   нашёл готовую папку $APP_DIR — беру её"
+  chown -R "$APP_USER:$APP_USER" "$APP_DIR"
+elif [ -d "$APP_DIR/.git" ]; then
   sudo -u "$APP_USER" git -C "$APP_DIR" fetch --quiet origin "$BRANCH"
   sudo -u "$APP_USER" git -C "$APP_DIR" checkout --quiet -B "$BRANCH" "origin/$BRANCH"
 else
-  sudo -u "$APP_USER" git clone --quiet --branch "$BRANCH" "$REPO" "$APP_DIR"
+  if ! sudo -u "$APP_USER" GIT_TERMINAL_PROMPT=0 git clone --quiet --branch "$BRANCH" "$REPO" "$APP_DIR" 2>/tmp/asher-clone.err; then
+    echo
+    cat /tmp/asher-clone.err >&2
+    die "Не удалось скачать систему с GitHub.
+  Чаще всего это значит, что репозиторий закрытый — тогда сервер к нему не
+  допускают. Что делать: на компьютере магазина скачайте архив системы
+  (кнопка «Code → Download ZIP» на GitHub), распакуйте и отправьте папку
+  на сервер:
+
+      scp -r Asher-*/. root@ЭТОТ-СЕРВЕР:$APP_DIR/
+
+  затем на сервере:  chown -R $APP_USER:$APP_USER $APP_DIR
+  и запустите этот скрипт заново — он увидит готовую папку и продолжит."
+  fi
 fi
 sudo -u "$APP_USER" mkdir -p "$APP_DIR/data"
 
@@ -111,6 +141,23 @@ sleep 2
 systemctl is-active --quiet asher || die "Система не запустилась. Посмотрите: journalctl -u asher -n 50"
 
 say "7/8. Включаю https для $DOMAIN"
+# Занятый 80 или 443 — самая частая причина, по которой https не поднимается.
+# Проверяем ДО того, как трогать настройки Caddy.
+for port in 80 443; do
+  busy="$(ss -lntp 2>/dev/null | awk -v p=":$port\$" '$4 ~ p {print $NF; exit}')"
+  if [ -n "$busy" ] && ! echo "$busy" | grep -q caddy; then
+    die "Порт $port уже занят другой программой: $busy
+  Обычно это nginx или apache, поставленные хостингом заранее.
+  Остановите её и запустите скрипт заново, например:
+      systemctl disable --now nginx
+      systemctl disable --now apache2"
+  fi
+done
+# Существующие настройки Caddy сохраняем: вдруг на сервере уже что-то работает.
+if [ -f /etc/caddy/Caddyfile ] && ! grep -q "$DOMAIN" /etc/caddy/Caddyfile; then
+  cp /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.до-asher"
+  echo "   прежние настройки Caddy сохранены в /etc/caddy/Caddyfile.до-asher"
+fi
 cat >/etc/caddy/Caddyfile <<CADDY
 $DOMAIN {
     reverse_proxy 127.0.0.1:3000
@@ -120,7 +167,9 @@ $DOMAIN {
     }
 }
 CADDY
-systemctl reload caddy || systemctl restart caddy
+if ! systemctl reload caddy 2>/dev/null && ! systemctl restart caddy; then
+  die "Caddy не запустился. Посмотрите причину: journalctl -u caddy -n 50"
+fi
 
 say "8/8. Закрываю всё лишнее снаружи"
 ufw allow 22,80,443/tcp >/dev/null
@@ -135,26 +184,67 @@ for i in $(seq 1 30); do
   sleep 3
 done
 
-if [ "${OK:-}" = 1 ]; then
-  cat <<DONE
+PRINT_IP="${SERVER_IP:-АДРЕС-СЕРВЕРА}"
+
+# Итог печатаем ВСЕГДА, даже если https ещё не поднялся: владельцу нужны
+# команды переноса и диагностики, а не оборванный вывод.
+cat <<DONE
 
   ======================================================================
-   Готово. Система работает: https://$DOMAIN
+   Система установлена. Адрес: https://$DOMAIN
   ======================================================================
+DONE
 
-  Что сделать прямо сейчас:
+if [ "${OK:-}" != 1 ]; then
+  cat <<WAIT
 
-   1. Зайти под admin и СМЕНИТЬ ПАРОЛЬ — Настройки → Мой пароль.
-   2. Проверить Настройки → Безопасность: все строки должны быть зелёными.
-   3. Раздать продавцам новые карточки подключения:
-      Настройки → Сотрудники → 📱 у каждого. В коде уже будет $DOMAIN.
+  ВНИМАНИЕ: https://$DOMAIN пока не ответил.
+  Чаще всего сертификат ещё выдаётся — подождите 2-3 минуты и откройте адрес
+  в браузере. Если не открывается и дальше:
+      journalctl -u caddy -n 50     — что с сертификатом
+      journalctl -u asher -n 50     — что с самой системой
+      getent hosts $DOMAIN          — куда указывает домен
+  Остальные шаги ниже всё равно нужны.
+WAIT
+fi
 
-  Перенести данные с компьютера магазина (выполнять НА КОМПЬЮТЕРЕ):
+cat <<DONE
 
-      scp data/asher.db root@$(curl -fsS https://api.ipify.org):$APP_DIR/data/asher.db
-      scp -r data/images root@$(curl -fsS https://api.ipify.org):$APP_DIR/data/
+  ----------------------------------------------------------------------
+   ПЕРЕНОС ДАННЫХ С КОМПЬЮТЕРА МАГАЗИНА
+  ----------------------------------------------------------------------
 
-   после копирования на сервере: systemctl restart asher
+  Сейчас на сервере пустая система. Порядок важен — иначе часть продаж
+  потеряется.
+
+  1. На компьютере магазина ЗАКРОЙТЕ систему (чёрное окно) и убедитесь,
+     что рядом с data\asher.db не осталось файла asher.db-wal. Если остался —
+     значит окно закрыли крестиком, и в этом файле лежат последние операции:
+     запустите СТАРТ ещё раз и закройте окно сочетанием Ctrl+C.
+
+  2. Остановите систему на сервере, чтобы она не писала в базу во время замены:
+
+         ssh root@$PRINT_IP "systemctl stop asher && rm -f $APP_DIR/data/asher.db-wal $APP_DIR/data/asher.db-shm"
+
+  3. Скопируйте базу и фотографии (выполнять В ПАПКЕ С СИСТЕМОЙ на компьютере):
+
+         scp data/asher.db root@$PRINT_IP:$APP_DIR/data/asher.db
+         scp -r data/images root@$PRINT_IP:$APP_DIR/data/
+
+  4. Верните права и запустите:
+
+         ssh root@$PRINT_IP "chown -R $APP_USER:$APP_USER $APP_DIR/data && systemctl start asher"
+
+  Откройте https://$DOMAIN — изделия, продажи, клиенты и долги на месте.
+
+  ----------------------------------------------------------------------
+   ЧТО СДЕЛАТЬ ПОСЛЕ ПЕРЕНОСА
+  ----------------------------------------------------------------------
+
+   1. Войти под admin и СМЕНИТЬ ПАРОЛЬ — Настройки → Мой пароль.
+   2. Проверить Настройки → Безопасность: все строки зелёные.
+   3. Раздать продавцам новые карточки: Настройки → Сотрудники → 📱.
+      В коде будет уже $DOMAIN, старые карточки с 192.168 не работают.
 
   Полезные команды на сервере:
       systemctl status asher      — как себя чувствует
@@ -163,8 +253,3 @@ if [ "${OK:-}" = 1 ]; then
       cd $APP_DIR && sudo -u $APP_USER git pull && systemctl restart asher   — обновление
 
 DONE
-else
-  die "Система запущена, но https://$DOMAIN пока не отвечает.
-  Чаще всего это значит, что сертификат ещё выдаётся — подождите пару минут
-  и откройте адрес в браузере. Если не поможет: journalctl -u caddy -n 50"
-fi

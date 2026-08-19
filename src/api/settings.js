@@ -128,23 +128,57 @@ const routes = [
      * Скачать резервную копию.
      *
      * Копии, которые система делает сама, лежат рядом с базой — от пожара,
-     * кражи ноутбука и пропавшего сервера они не спасают. Эта кнопка снимает
-     * свежий снимок и отдаёт его файлом: владелец кладёт его туда, где точно
-     * не потеряет. Один файл — вся система целиком.
+     * кражи ноутбука и пропавшего сервера они не спасают. Эта кнопка собирает
+     * свежую копию и отдаёт одним файлом: владелец кладёт его туда, где точно
+     * не потеряет.
+     *
+     * В архив кладём И базу, И фотографии. Раньше отдавалась одна база, а
+     * рядом было написано «вся система целиком» — и это была неправда:
+     * фотографии изделий и сканы сертификатов лежат отдельными файлами.
+     * Владелец, потерявший компьютер, восстановил бы каталог без единого фото
+     * и узнал бы об этом в худший момент.
      */
     method: 'GET', path: '/api/backup/download', admin: true, raw: true,
     handler: ({ res, session }) => {
-      const fs = require('node:fs');
-      const file = require('../sync').makeBackupNow();
-      const data = fs.readFileSync(file);
-      const name = 'asher-' + new Date().toISOString().slice(0, 10) + '.db';
-      audit(session.userId, 'backup', 'settings', null, `Скачана резервная копия (${name})`);
-      res.writeHead(200, {
-        'Content-Type': 'application/octet-stream',
-        'Content-Disposition': `attachment; filename="${name}"`,
-        'Content-Length': data.length,
+      const { makeZip, listFiles } = require('../zip');
+      const { MEDIA_DIR } = require('../db');
+
+      const snapshot = require('../sync').makeBackupNow();
+      const entries = [{ name: 'data/asher.db', file: snapshot }];
+      // Фотографии кладём рядом с базой, сохраняя структуру папок: так архив
+      // распаковывается прямо поверх папки системы.
+      for (const f of listFiles(MEDIA_DIR)) {
+        entries.push({ name: 'data/images/' + f.name, file: f.file });
+      }
+      // Короткая записка внутрь архива: через полгода никто не вспомнит,
+      // что это за файл и что с ним делать.
+      entries.push({
+        name: 'КАК-ВОССТАНОВИТЬ.txt',
+        data: Buffer.from(
+          'Резервная копия Asher\r\n' +
+          'Снята: ' + new Date().toLocaleString('ru-RU') + '\r\n\r\n' +
+          'Внутри:\r\n' +
+          '  data/asher.db     — вся база: изделия, продажи, клиенты, долги, журнал\r\n' +
+          '  data/images/      — фотографии изделий и сканы сертификатов\r\n\r\n' +
+          'Как восстановить:\r\n' +
+          '  1. Закройте систему (чёрное окно).\r\n' +
+          '  2. Удалите папку data целиком — вместе с файлами asher.db-wal\r\n' +
+          '     и asher.db-shm, если они есть. Если оставить их рядом со старой\r\n' +
+          '     базой, система возьмёт данные из них, а не из копии.\r\n' +
+          '  3. Распакуйте этот архив в папку с системой — папка data появится заново.\r\n' +
+          '  4. Запустите СТАРТ.\r\n', 'utf8'),
       });
-      res.end(data);
+
+      const zip = makeZip(entries);
+      const name = 'asher-' + new Date().toISOString().slice(0, 10) + '.zip';
+      audit(session.userId, 'backup', 'settings', null,
+        `Скачана резервная копия (${name}, файлов: ${entries.length})`);
+      res.writeHead(200, {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': `attachment; filename="${name}"`,
+        'Content-Length': zip.length,
+      });
+      res.end(zip);
     },
   },
 

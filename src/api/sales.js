@@ -107,13 +107,30 @@ function createSaleTx(body, session, opts = {}) {
   const insItem = db.prepare(
     'INSERT INTO sale_items (sale_id, product_id, price, discount, final_price, cost, set_id) VALUES (?,?,?,?,?,?,?)'
   );
+  /*
+   * Условие «и только если оно ещё не продано» — страховка, а не проверка.
+   * Наличие изделия уже проверено выше, и вся продажа идёт внутри одной
+   * исключительной транзакции (BEGIN IMMEDIATE в src/db.js), так что второй
+   * продавец физически ждёт своей очереди и увидит статус «продано».
+   *
+   * Но эта гарантия держится на устройстве системы: одна программа, один файл
+   * базы. Стоит однажды запустить две копии — на другом хостинге, в облаке,
+   * «чтобы быстрее» — и гарантия исчезает молча, без единой ошибки: два чека
+   * на одно кольцо, расхождение вылезет через месяц при инвентаризации.
+   * Здесь мы говорим то же самое языком самой базы, которой всё равно, сколько
+   * копий программы её открыли.
+   */
   const markSold = db.prepare(
     `UPDATE products SET status = 'sold', sold_at = ?, reserved_for = NULL, reserved_until = ''
-      WHERE id = ?`
+      WHERE id = ? AND status <> 'sold'`
   );
   for (const pr of prepared) {
     insItem.run(saleId, pr.product.id, pr.price, pr.discount, pr.final, pr.product.purchase_price, pr.setId);
-    markSold.run(createdAt, pr.product.id);
+    if (markSold.run(createdAt, pr.product.id).changes !== 1) {
+      // Ноль изменённых строк — изделие продали между проверкой и записью.
+      // Бросаем: транзакция откатится целиком, чек не появится.
+      throw new ApiError(409, `«${pr.product.name}» продали в этот же момент с другого устройства. Обновите каталог.`);
+    }
     // Продали чужое изделие — сразу становимся должны его владельцу.
     recordConsignmentSale(pr.product, saleId, session.userId);
   }
