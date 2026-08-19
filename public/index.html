@@ -40,6 +40,17 @@
             placeholder="admin123" required>
         </label>
         <div id="login-error" class="login-error hidden"></div>
+        <!-- Вход с нового устройства: пароль верный, но телефон незнакомый.
+             Пароля здесь уже не спрашиваем — как только владелец разрешит,
+             система войдёт сама. -->
+        <div id="login-wait" class="login-wait hidden">
+          <div class="login-wait-title">Новое устройство — нужно разрешение</div>
+          <p>Позвоните владельцу и назовите этот код. Он откроет
+             <b>Настройки → Безопасность</b> и разрешит вход.</p>
+          <div class="login-wait-code" id="login-wait-code">····</div>
+          <p class="muted">Как только разрешит, система войдёт сама — ждите на этом экране.</p>
+          <button type="button" class="btn btn-block" id="login-wait-cancel">Отмена</button>
+        </div>
         <button type="submit" class="btn btn-primary btn-block">Войти</button>
         <!-- Подсказка исчезает, как только пароль сменили со стандартного:
              дальше она только выдавала бы чужим, что вводить. -->

@@ -115,7 +115,45 @@ const routes = [
         min_password: MIN_PASSWORD,
         devices: db.prepare('SELECT COUNT(*) AS c FROM sessions WHERE expires_at >= ?').get(nowIso()).c,
         last_backup: getSetting('last_backup') || '',
+        pending_devices: db.prepare('SELECT COUNT(*) AS c FROM devices WHERE approved = 0').get().c,
       };
+    },
+  },
+  {
+    /*
+     * Устройства: кто откуда заходит и кто просится войти.
+     *
+     * Это вторая половина защиты входа. Пароль отвечает, знает ли человек
+     * пароль; список устройств отвечает, он ли это. Утёкший пароль сам по себе
+     * больше не пускает в систему — незнакомый телефон попадает сюда и ждёт,
+     * пока владелец его разрешит.
+     */
+    method: 'GET', path: '/api/devices', admin: true,
+    handler: () => {
+      const auth = require('../auth');
+      return { pending: auth.pendingDevices(), approved: auth.approvedDevices() };
+    },
+  },
+  {
+    method: 'POST', path: '/api/devices/:id/approve', admin: true,
+    handler: ({ params, session }) => {
+      const d = require('../auth').approveDevice(params.id, session.userId);
+      if (!d) throw new ApiError(404, 'Устройство не найдено');
+      return { ok: true };
+    },
+  },
+  {
+    /*
+     * Отклонить — и заодно оборвать все сеансы этого сотрудника, если
+     * устройство было разрешено раньше. Отклоняют в одном случае: телефон
+     * чужой. Значит пароль знает посторонний, и всё открытое по этому паролю
+     * надо закрыть сразу, не дожидаясь, пока владелец дойдёт до смены пароля.
+     */
+    method: 'POST', path: '/api/devices/:id/deny', admin: true,
+    handler: ({ params, session }) => {
+      const r = require('../auth').denyDevice(params.id, session.userId);
+      if (!r) throw new ApiError(404, 'Устройство не найдено');
+      return { ok: true, dropped: r.dropped };
     },
   },
   {

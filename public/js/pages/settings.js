@@ -727,6 +727,9 @@ window.Pages.settings = (() => {
     // Спрашиваем систему, а не браузер: только сервер знает, что перед ним
     // прокси с https и что пароль администратора всё ещё стандартный.
     const st = await api.get('/api/security/status').catch(() => ({}));
+    const устр = await api.get('/api/devices').catch(() => ({ pending: [], approved: [] }));
+    const ждут = устр.pending || [];
+    const разрешены = устр.approved || [];
     const hint = { default_admin: st.default_admin };
     const secure = Boolean(st.secure);
     const devices = Number(st.devices) || 0;
@@ -759,9 +762,45 @@ window.Pages.settings = (() => {
               'Продавцы не получают их ни на экране, ни в ответах системы, и не могут стереть при правке изделия.')}
             ${row(devices > 0, 'Входы на устройствах',
               `Сейчас в системе устройств: ${devices}. Список — на вкладке «Сотрудники»; там же кнопка ⎋ завершает вход на всех устройствах человека.`)}
+            ${row(ждут.length === 0, 'Вход только с разрешённых устройств',
+              ждут.length
+                ? `Прямо сейчас разрешения ждут: ${ждут.length}. Смотрите справа — если это не ваш сотрудник, отклоните и смените ему пароль.`
+                : 'Знающий пароль не войдёт с чужого телефона: незнакомое устройство ждёт вашего разрешения. Разрешённых устройств: ' + разрешены.length + '.')}
           </div>
         </div>
         <div>
+          ${ждут.length ? `
+          <div class="card" style="border-color:var(--crit)">
+            <h3 class="card-title">Просятся войти — ${ждут.length}</h3>
+            <p class="muted" style="margin-top:0">Разрешайте, только если сотрудник сам просит вас об
+              этом и называет тот же код. Если не просил — <b>отклоните</b>: значит его пароль
+              у постороннего, и после отклонения сразу смените этому сотруднику пароль.</p>
+            ${ждут.map(d => `
+              <div class="row" style="align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)">
+                <div class="login-wait-code" style="font-size:22px;margin:0;min-width:92px">${ui.esc(d.code)}</div>
+                <div style="flex:1">
+                  <div class="strong">${ui.esc(d.user_name)} <span class="muted">(${ui.esc(d.username)})</span></div>
+                  <div class="muted">${ui.dt(d.created_at)}${d.last_ip ? ' · адрес ' + ui.esc(d.last_ip) : ''}</div>
+                  ${d.name ? `<div class="muted" style="font-size:12px">${ui.esc(d.name)}</div>` : ''}
+                </div>
+                <button class="btn btn-primary" data-approve="${d.id}">Разрешить</button>
+                <button class="btn btn-danger" data-deny="${d.id}">Отклонить</button>
+              </div>`).join('')}
+          </div>` : ''}
+          ${разрешены.length ? `
+          <div class="card">
+            <h3 class="card-title">Разрешённые устройства — ${разрешены.length}</h3>
+            <p class="muted" style="margin-top:0">Если устройство пропало или его больше нет
+              у сотрудника — отклоните: вход с него прекратится сразу.</p>
+            ${разрешены.map(d => `
+              <div class="row" style="align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)">
+                <div style="flex:1">
+                  <div class="strong">${ui.esc(d.user_name)} <span class="muted">(${ui.esc(d.username)})</span></div>
+                  <div class="muted">код ${ui.esc(d.code)}${d.last_seen ? ' · был(а) ' + ui.dt(d.last_seen) : ''}${d.last_ip ? ' · ' + ui.esc(d.last_ip) : ''}</div>
+                </div>
+                <button class="btn btn-danger" data-deny="${d.id}">Убрать</button>
+              </div>`).join('')}
+          </div>` : ''}
           <div class="card">
             <h3 class="card-title">Резервная копия</h3>
             <p class="muted" style="margin-top:0">Система и так делает копию раз в сутки, но кладёт её
@@ -784,6 +823,24 @@ window.Pages.settings = (() => {
           </div>
         </div>
       </div>`;
+
+    box.querySelectorAll('[data-approve]').forEach(b => b.addEventListener('click', async () => {
+      b.disabled = true;
+      try {
+        await api.post(`/api/devices/${b.dataset.approve}/approve`);
+        ui.toast('Устройство разрешено — сотрудник войдёт сам');
+        await renderSecurity(box);
+      } catch (e) { b.disabled = false; ui.toastErr(e); }
+    }));
+    box.querySelectorAll('[data-deny]').forEach(b => b.addEventListener('click', async () => {
+      if (!await ui.confirmDialog('Отклонить это устройство? Вход с него прекратится сразу.', { danger: true, okLabel: 'Отклонить' })) return;
+      b.disabled = true;
+      try {
+        const r = await api.post(`/api/devices/${b.dataset.deny}/deny`);
+        ui.toast(r && r.dropped ? `Отклонено, завершено входов: ${r.dropped}` : 'Устройство отклонено');
+        await renderSecurity(box);
+      } catch (e) { b.disabled = false; ui.toastErr(e); }
+    }));
   }
 
   return {

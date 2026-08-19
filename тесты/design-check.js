@@ -1,3 +1,4 @@
+require('./устройство');   // проверки называют себя устройством, как настоящее приложение
 const ВЫВОД = require('node:path').join(__dirname, '.вывод');
 require('node:fs').mkdirSync(ВЫВОД + '/снимки', { recursive: true });
 const { chromium } = require('./браузер');

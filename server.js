@@ -286,10 +286,34 @@ const server = http.createServer(async (req, res) => {
           ? `Слишком много неудачных попыток. Попробуйте через ${mins} мин.`
           : 'Слишком много неудачных попыток. Попробуйте через минуту.');
       }
-      const result = auth.login(body.username, body.password, { ip });
+      const result = auth.login(body.username, body.password, {
+        ip,
+        deviceKey: req.headers['x-asher-device'] || '',
+        deviceName: String(req.headers['user-agent'] || '').slice(0, 80),
+      });
       if (!result) {
         guard.noteFail(ip, body.username);
         throw new ApiError(401, 'Неверный логин или пароль');
+      }
+      /*
+       * Пароль верный, но устройство незнакомое.
+       *
+       * Счётчик неудач НЕ трогаем: пароль-то правильный, и это либо сам
+       * сотрудник с нового телефона, либо тот, кому пароль достался. В обоих
+       * случаях запирать логин бессмысленно — дальше экрана ожидания всё
+       * равно никто не пройдёт, а сотруднику с новым телефоном мы бы только
+       * помешали. Зато в журнале уже стоит отметка о попытке.
+       */
+      if (result.pending) {
+        res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8', ...securityHeaders(req) });
+        res.end(JSON.stringify({
+          pending_device: true,
+          code: result.code || '',
+          error: result.reason === 'нет-ключа'
+            ? 'Это устройство не может подтвердить себя. Откройте систему в обычном браузере.'
+            : 'Вход с нового устройства. Владелец должен его разрешить: Настройки → Безопасность.',
+        }));
+        return;
       }
       guard.noteSuccess(ip, body.username);
       res.writeHead(200, {
@@ -304,6 +328,20 @@ const server = http.createServer(async (req, res) => {
         store_phone: getSetting('store_phone'),
         locale: currentLocale(),
       }));
+      return;
+    }
+    /*
+     * Экрану ожидания: разрешили уже это устройство или ещё нет.
+     *
+     * Отвечает одинаково и для несуществующего логина, и для незнакомого
+     * устройства — иначе по этому запросу можно было бы перебирать, какие
+     * логины в системе есть. Пароля здесь нет и быть не может: запрос лишь
+     * говорит «ждите» или «готово», а входит приложение по-прежнему паролем.
+     */
+    if (pathname === '/api/login/device-status' && req.method === 'GET') {
+      if (guard.globalOverload()) throw new ApiError(429, 'Слишком много запросов');
+      sendJson(res, 200, auth.deviceStateByKey(
+        url.searchParams.get('username'), req.headers['x-asher-device'] || ''));
       return;
     }
     /*

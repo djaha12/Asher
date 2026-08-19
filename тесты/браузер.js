@@ -58,9 +58,36 @@ const CHROME = путьКБраузеру();
  * launch() с уже подставленным браузером — наборам остаётся передать свои
  * настройки, не думая о том, где что установлено.
  */
+/*
+ * Каждое окно браузера тоже должно называть себя устройством.
+ *
+ * Система пускает только с известных устройств, а приложение берёт отметку
+ * из памяти браузера. Свежее окно в проверках — всегда «первый раз», и без
+ * этой подстановки каждое из них просилось бы на разрешение к владельцу.
+ * Подставляем ту же отметку, что у остальных проверок: она уже разрешена.
+ *
+ * Набору, которому нужны РАЗНЫЕ устройства (проверка живого обновления),
+ * достаточно передать своё значение в newContext({ устройство: '...' }).
+ */
+const { КЛЮЧ } = require('./устройство');
+
+function обернутьБраузер(b) {
+  const настоящий = b.newContext.bind(b);
+  b.newContext = async (opts = {}) => {
+    const { устройство, ...остальное } = opts;
+    const ctx = await настоящий(остальное);
+    await ctx.addInitScript(ключ => {
+      try { localStorage.setItem('asher-устройство', ключ); } catch { /* нет памяти — ну и ладно */ }
+    }, устройство || КЛЮЧ);
+    return ctx;
+  };
+  return b;
+}
+
 const chromium = {
   ...pw.chromium,
-  launch: (opts = {}) => pw.chromium.launch(CHROME ? { executablePath: CHROME, ...opts } : opts),
+  launch: async (opts = {}) =>
+    обернутьБраузер(await pw.chromium.launch(CHROME ? { executablePath: CHROME, ...opts } : opts)),
 };
 
-module.exports = { ...pw, chromium, CHROME };
+module.exports = { ...pw, chromium, CHROME, КЛЮЧ };

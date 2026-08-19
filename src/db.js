@@ -57,6 +57,40 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at TEXT NOT NULL
 );
 
+/*
+ * Устройства, с которых сотруднику разрешено входить.
+ *
+ * Пароль защищает от того, кто его не знает. Но пароль может утечь: записан
+ * на бумажке у кассы, подсмотрен через плечо, тот же самый, что от почты.
+ * После переезда в интернет страницу входа видит весь мир, и знающий пароль
+ * заходит откуда угодно — ни одна проверка сложности пароля этого не ловит.
+ *
+ * Поэтому вход разрешён только с известных устройств. Незнакомое устройство
+ * получает не отказ, а ожидание: владелец видит его у себя и разрешает одним
+ * нажатием. Укравший пароль не проходит дальше этого экрана, потому что
+ * разрешить может только владелец, уже находящийся внутри.
+ *
+ * approved = 0 — ждёт разрешения, 1 — разрешено.
+ * code — короткий номер, который видят и продавец, и владелец: по нему
+ * владелец понимает, что разрешает именно тот телефон, о котором его просят,
+ * а не чужой, подвернувшийся в списке в ту же минуту.
+ */
+CREATE TABLE IF NOT EXISTS devices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  device_key TEXT NOT NULL,
+  code TEXT NOT NULL DEFAULT '',
+  name TEXT NOT NULL DEFAULT '',
+  approved INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  approved_at TEXT NOT NULL DEFAULT '',
+  approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  last_seen TEXT NOT NULL DEFAULT '',
+  last_ip TEXT NOT NULL DEFAULT '',
+  UNIQUE (user_id, device_key)
+);
+CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id, approved);
+
 CREATE TABLE IF NOT EXISTS categories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
