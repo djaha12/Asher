@@ -24,6 +24,7 @@ const fs = require('node:fs');
 const { getSetting } = require('./src/db');
 const auth = require('./src/auth');
 const guard = require('./src/guard');
+const changes = require('./src/changes');
 const media = require('./src/api/images');
 const { presetFor, LOCALE_KEYS } = require('./src/locale');
 const { ApiError } = require('./src/api/util');
@@ -355,6 +356,17 @@ const server = http.createServer(async (req, res) => {
     // --- все остальные /api/* требуют сессию ---
     if (!session) throw new ApiError(401, 'Не авторизован');
 
+    /*
+     * «Что изменилось». Этот запрос приложение делает чаще всех остальных
+     * вместе взятых, поэтому отвечаем на него до общего разбора маршрутов
+     * и не трогая базу: ответ целиком лежит в памяти и весит десятки байт.
+     */
+    if (pathname === '/api/changes' && req.method === 'GET') {
+      sendJson(res, 200, changes.since(url.searchParams.get('since'),
+        req.headers['x-asher-device'] || ''));
+      return;
+    }
+
     const route = routes.find(r => r.method === req.method && r.regex.test(pathname));
     if (!route) throw new ApiError(404, 'Не найдено');
     if (route.admin && session.role !== 'admin') {
@@ -381,6 +393,19 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     const result = await route.handler(ctx);
+    /*
+     * Отмечаем изменение здесь, в одном месте на все маршруты, а не в каждом
+     * обработчике по отдельности. Обработчиков десятки, и новые будут
+     * появляться; отметку в них рано или поздно забыли бы поставить — и экран
+     * у продавцов молча перестал бы обновляться на этом разделе, причём
+     * заметили бы это очень нескоро.
+     *
+     * Считаем изменением любой успешный запрос, который не GET. Устройство,
+     * сделавшее его, помечаем: ему повторная перерисовка не нужна.
+     */
+    if (req.method !== 'GET') {
+      changes.bump(changes.разделПоАдресу(pathname), req.headers['x-asher-device'] || '');
+    }
     sendJson(res, 200, result ?? { ok: true });
   } catch (e) {
     if (e instanceof ApiError) {
