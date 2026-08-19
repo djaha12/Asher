@@ -44,6 +44,10 @@ const check = (n, c, e) => c ? (ok++, console.log('  ok  ' + n))
   await p.keyboard.press('Escape'); await p.waitForTimeout(600);
 
   console.log('\n=== Карточка изделия клиенту ===');
+  // Берём изделие в наличии: у списанного кнопки «Клиенту» нет по замыслу,
+  // а первым в каталоге легко оказывается именно списанное — его создают
+  // другие наборы. Тогда тест ловил бы порядок прогонов, а не ошибку.
+  await p.click('#pf-chips .chip[data-st=in_stock]'); await p.waitForTimeout(1500);
   await p.fill('#pf-search', 'AS-'); await p.waitForTimeout(2000);
   await (await p.$('.pcard')).click(); await p.waitForTimeout(1600);
   check('кнопка «Клиенту» есть в карточке', Boolean(await p.$('[data-act=share]')));

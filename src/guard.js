@@ -86,6 +86,10 @@ function retryAfter(ip, username, now = Date.now()) {
 }
 
 function noteFail(ip, username, now = Date.now()) {
+  // Общий потолок смотрит не только на количество попыток, но и на то, сколько
+  // из них мимо: поток чужих — это неудачи, всплеск своих — удачи.
+  сдвинутьОкно(now);
+  windowFails++;
   for (const key of keysFor(ip, username)) {
     const rec = fails.get(key) || { count: 0, last: 0, notified: 0 };
     // Долгая тишина — начинаем счёт заново.
@@ -121,28 +125,40 @@ function noteFail(ip, username, now = Date.now()) {
  * до того как сработают счётчики по логину и адресу.
  *
  * Поэтому есть общий потолок: сколько всего попыток система готова проверять
- * в минуту. Магазин из семи человек к нему не подойдёт и близко. Если поток
- * его превысил, лишние попытки отбиваются сразу, не тратя процессор.
+ * в минуту — 120. Проверка пароля стоит около 50 мс, то есть даже полный поток
+ * съедает лишь десятую часть одного ядра. Сверх потолка попытки отбиваются
+ * сразу, не тратя процессор.
  *
  * Здесь важен размен: во время такого потока в систему нельзя будет войти
  * заново. Зато уже открытые смены на телефонах продолжают работать, и магазин
  * торгует — это лучше, чем сервер, лежащий под нагрузкой целиком.
- */
-/*
- * 120 в минуту. Магазин из семи человек не подойдёт и близко даже если все
- * разом переустановят приложение, а проверка пароля стоит около 50 мс — то
- * есть даже полный поток съедает лишь десятую часть одного ядра. Ставить
- * ниже опасно: любой всплеск (тесты, повторные попытки, новая раздача
- * телефонов) закрывал бы вход своим же.
+ *
+ * Но одного счёта попыток мало, и это важно. Поток по определению состоит из
+ * НЕВЕРНЫХ паролей: подбирающий не знает правильного. А всплеск у своих —
+ * из верных: шесть телефонов разом переустановили приложение, новая раздача
+ * карточек, сотрудники заходят после смены пароля. Если закрывать вход по
+ * одному только количеству, во втором случае система запрёт своих же на
+ * минуту — то есть сделает ровно то, ради чего затевается нападение,
+ * и сделает это бесплатно, без единого нападающего.
+ *
+ * Поэтому потолок срабатывает, только когда совпало и одно, и другое: попыток
+ * много И большинство из них неудачные. Под настоящим потоком это выполняется
+ * всегда (там почти все попытки мимо), а у магазина — никогда.
  */
 const GLOBAL_PER_MINUTE = 120;
+const GLOBAL_FAILS_PER_MINUTE = 60;
 let windowStart = 0;
 let windowCount = 0;
+let windowFails = 0;
+
+function сдвинутьОкно(now) {
+  if (now - windowStart > 60000) { windowStart = now; windowCount = 0; windowFails = 0; }
+}
 
 function globalOverload(now = Date.now()) {
-  if (now - windowStart > 60000) { windowStart = now; windowCount = 0; }
+  сдвинутьОкно(now);
   windowCount++;
-  return windowCount > GLOBAL_PER_MINUTE;
+  return windowCount > GLOBAL_PER_MINUTE && windowFails > GLOBAL_FAILS_PER_MINUTE;
 }
 
 // Вошли успешно — снимаем счётчики и по адресу, и по логину.
@@ -150,11 +166,14 @@ function noteSuccess(ip, username) {
   for (const key of keysFor(ip, username)) fails.delete(key);
 }
 
-function reset() { fails.clear(); lastPrune = 0; windowStart = 0; windowCount = 0; }
+function reset() {
+  fails.clear(); lastPrune = 0;
+  windowStart = 0; windowCount = 0; windowFails = 0;
+}
 
 // Для проверок: сколько ключей сейчас под наблюдением и что по конкретному.
 function size() { return fails.size; }
 function peek(key) { return fails.get(key) || null; }
 
 module.exports = { retryAfter, noteFail, noteSuccess, globalOverload, reset, size, peek,
-  USER_STEPS, IP_STEPS, GLOBAL_PER_MINUTE };
+  USER_STEPS, IP_STEPS, GLOBAL_PER_MINUTE, GLOBAL_FAILS_PER_MINUTE };
