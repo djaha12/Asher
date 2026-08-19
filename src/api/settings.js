@@ -5,9 +5,18 @@ const { ApiError } = require('./util');
 const { changePassword, passwordProblem, destroyUserSessions, countUserSessions } = require('../auth');
 const { PRESETS, LOCALE_KEYS, presetFor } = require('../locale');
 
-// usd_rate — курс доллара для закупки: поставщики часто считают в валюте,
-// а учёт и продажа идут в валюте магазина.
-const SETTING_KEYS = ['store_name', 'store_address', 'store_phone', 'usd_rate', ...LOCALE_KEYS];
+/*
+ * usd_rate — курс доллара для закупки: поставщики часто считают в валюте,
+ * а учёт и продажа идут в валюте магазина.
+ *
+ * gram_price и work_price — для тех, кто считает розницу от грамма:
+ * «вес × цена грамма + работа». Это подсказка калькулятора в карточке
+ * изделия, а не способ хранения цены: в изделии всегда лежит готовая
+ * розничная цена, поэтому смена цены грамма не переписывает задним числом
+ * ни ценники, ни прошлые чеки.
+ */
+const SETTING_KEYS = ['store_name', 'store_address', 'store_phone', 'usd_rate',
+  'gram_price', 'work_price', ...LOCALE_KEYS];
 
 const routes = [
   // --- Общие настройки ---

@@ -225,7 +225,7 @@ window.Pages.sets = (() => {
     });
   }
 
-  async function render(el) {
+  async function render(el, param) {
     pageEl = el;
     el.innerHTML = `
       <div class="hint-box">
@@ -242,6 +242,15 @@ window.Pages.sets = (() => {
     const newBtn = el.querySelector('#sets-new');
     if (newBtn) newBtn.onclick = () => editDialog(null, refresh);
     await refresh();
+    // «#/sets/5» — прокрутить к нужному комплекту: так на него попадают из поиска.
+    if (param) {
+      const card = el.querySelector(`[data-set="${Number(param)}"]`);
+      if (card) {
+        card.scrollIntoView({ block: 'center' });
+        card.style.outline = '2px solid var(--gold)';
+        setTimeout(() => { card.style.outline = ''; }, 2500);
+      }
+    }
   }
 
   return { title: 'Комплекты', render };

@@ -30,6 +30,14 @@ db.exec('PRAGMA busy_timeout = 5000');
 // понижает регистр только у латиницы, поэтому регистрируем свою функцию.
 db.function('nlower', { deterministic: true }, s => (s === null || s === undefined) ? null : String(s).toLowerCase());
 
+/*
+ * Только цифры номера. Телефон записывают как придётся: «+996 700 495-25-73»,
+ * «0700 4952573», «(0700) 495253». Чтобы поиск находил номер в любом виде,
+ * сравниваем голые цифры с обеих сторон.
+ */
+db.function('digits', { deterministic: true },
+  s => (s === null || s === undefined) ? '' : String(s).replace(/\D/g, ''));
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

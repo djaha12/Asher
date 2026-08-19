@@ -40,6 +40,20 @@ window.Pages.settings = (() => {
               <p class="form-hint">Подставляется, когда изделие закупается в долларах.
                 У каждого изделия курс запоминается на момент закупки, поэтому смена курса
                 не меняет себестоимость и прибыль прошлых месяцев.</p>
+
+              <h4 style="margin:18px 0 10px">Цена от грамма</h4>
+              <div class="form-grid">
+                <label class="field"><span>Цена грамма золота 750</span>
+                  <input name="gram_price" type="number" step="1" min="0" value="${ui.esc(s.gram_price || '')}"></label>
+                <label class="field"><span>Работа за грамм</span>
+                  <input name="work_price" type="number" step="1" min="0" value="${ui.esc(s.work_price || '')}"></label>
+              </div>
+              <p class="form-hint">Заполните, если считаете розницу от веса: в карточке изделия
+                появится кнопка «Посчитать от грамма» — вес × цена грамма + работа, и к этому
+                вы добавляете стоимость камня. Оставьте пустыми, если ставите цену каждому
+                изделию отдельно: тогда кнопки просто не будет.
+                <b>Цена изделия хранится готовой суммой</b> — смена цены грамма не переписывает
+                ни ценники, ни прошлые чеки.</p>
               <button type="button" class="btn btn-primary" id="st-save">Сохранить</button>
             </form>
           </div>

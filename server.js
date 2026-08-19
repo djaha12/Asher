@@ -45,7 +45,7 @@ const BODY_LIMIT = 25 * 1024 * 1024; // 25 МБ — с запасом для CSV
 // ---------- Маршруты API ----------
 
 const modules = ['products', 'images', 'customers', 'sales', 'orders', 'finance', 'debts',
-  'stores', 'inventory', 'analytics', 'settings', 'importexport', 'sets'];
+  'stores', 'inventory', 'analytics', 'settings', 'importexport', 'sets', 'search'];
 const routes = [];
 for (const m of modules) {
   for (const r of require(`./src/api/${m}`).routes) {
@@ -299,6 +299,8 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({
         user: result.user,
         store_name: getSetting('store_name'),
+        // Телефон магазина подставляется в сообщение клиенту о изделии.
+        store_phone: getSetting('store_phone'),
         locale: currentLocale(),
       }));
       return;
@@ -343,6 +345,7 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 200, {
         user: { id: session.userId, username: session.username, name: session.name, role: session.role },
         store_name: getSetting('store_name'),
+        store_phone: getSetting('store_phone'),
         currency: getSetting('currency'),
         locale: currentLocale(),
       });

@@ -4,6 +4,8 @@ window.Pages = window.Pages || {};
 window.Pages.products = (() => {
   let cats = [], suppliers = [], stores = [];
   let usdRate = '';   // курс из настроек — подставляется при закупке в валюте
+  // Цена грамма и работа: заполнены — в форме появляется расчёт цены от веса.
+  let gramPrice = 0, workPrice = 0;
   let meta = { metals: [], fineness: [], colors: [], clarities: [] };
 
   /*
@@ -52,6 +54,8 @@ window.Pages.products = (() => {
     ]);
     cats = c; suppliers = s; stores = st;
     usdRate = settings.usd_rate || '';
+    gramPrice = Number(settings.gram_price) || 0;
+    workPrice = Number(settings.work_price) || 0;
     meta = { metals: m.metals || [], fineness: m.fineness || [],
       colors: m.colors || [], clarities: m.clarities || [] };
   }
@@ -200,6 +204,8 @@ window.Pages.products = (() => {
         footer: `
           ${admin ? `<button class="btn btn-danger left" data-act="delete">Удалить</button>` : ''}
           <button class="btn" data-act="label">${ui.icon('tag')} Бирка</button>
+          ${p.status !== 'written_off'
+            ? `<button class="btn" data-act="share">${ui.icon('whatsapp')} Клиенту</button>` : ''}
           ${stores.length > 1 && p.status !== 'sold'
             ? '<button class="btn" data-act="move">→ Переместить</button>' : ''}
           ${p.status === 'in_stock' ? '<button class="btn" data-act="reserve">В резерв</button>' : ''}
@@ -224,6 +230,7 @@ window.Pages.products = (() => {
           if (act === 'edit') { m.close(); openEditor(p, onChange); }
           if (act === 'sell') { m.close(); Pages.sales.newSale(p); }
           if (act === 'label') Pages.labels.printOne(p);
+          if (act === 'share') shareDialog(p);
           if (act === 'move') { m.close(); moveDialog(p, onChange); }
           if (act === 'reserve') { m.close(); reserveDialog(p, onChange); }
           if (act === 'unreserve') {
@@ -425,6 +432,102 @@ window.Pages.products = (() => {
   }
 
   // Перемещение изделия на другую точку — с записью в историю перемещений.
+  /*
+   * Отправить изделие клиенту.
+   *
+   * Клиент спрашивает «а что есть похожее?» — раньше продавец фотографировал
+   * экран и набирал характеристики руками. Здесь готовое сообщение: название,
+   * артикул, металл с пробой, камень, вес, размер, цена и телефон магазина.
+   *
+   * С фотографией разница по устройствам. На телефоне браузер умеет делиться
+   * файлом — тогда снимок уходит вместе с текстом прямо в WhatsApp. На
+   * компьютере такого нет, поэтому там либо копируем текст, либо открываем
+   * переписку с готовым текстом, а фото продавец добавляет сам.
+   */
+  function shareDialog(p) {
+    const lines = [
+      p.name,
+      `Артикул: ${p.sku}`,
+      metalLabel(p) ? `Металл: ${metalLabel(p)}` : '',
+      stoneLabel(p) ? `Бриллиант: ${stoneLabel(p)}` : '',
+      p.gem_summary && !stoneLabel(p) ? `Вставки: ${p.gem_summary}` : '',
+      p.weight ? `Вес: ${ui.num(p.weight)} г` : '',
+      p.size ? `Размер: ${p.size}` : '',
+      `Цена: ${ui.money(p.retail_price)}`,
+      p.status === 'reserved' ? 'Сейчас в резерве — уточните у продавца' : '',
+      '',
+      App.storeName || 'Asher',
+      App.storePhone ? App.storePhone : '',
+    ].filter(Boolean);
+    const text = lines.join('\n');
+    const mainPhoto = (p.images || []).find(i => i.is_main) || (p.images || [])[0];
+
+    const m = ui.modal({
+      title: 'Отправить клиенту',
+      size: 'sm',
+      body: `
+        <div class="share-preview">
+          ${mainPhoto
+            ? `<img src="${ui.esc(ui.photoUrl(mainPhoto.thumb || mainPhoto.file))}" alt="">`
+            : `<div class="gs-thumb-empty" style="width:100%;height:120px">${ui.icon('gem')}</div>`}
+          <pre id="share-text">${ui.esc(text)}</pre>
+        </div>
+        <label class="field rel" style="margin-top:12px"><span>Кому (необязательно)</span>
+          <input type="text" id="share-cust" placeholder="Начните вводить имя клиента…" autocomplete="off"></label>
+        <input type="hidden" id="share-phone">
+        <p class="form-hint" id="share-note">${mainPhoto
+          ? 'На телефоне фото уйдёт вместе с текстом. На компьютере — только текст, фото добавьте сами.'
+          : 'У изделия нет фотографии — уйдёт только описание.'}</p>`,
+      footer: `<button class="btn" data-act="cancel">Закрыть</button>
+        <button class="btn" data-act="copy">Скопировать текст</button>
+        <button class="btn btn-primary" data-act="send">${ui.icon('whatsapp')} В WhatsApp</button>`,
+    });
+
+    // Поиск клиента — тот же, что в кассе: выбрали, подставился телефон.
+    attachCustomerSearch(m.body.querySelector('#share-cust'), c => {
+      m.body.querySelector('#share-phone').value = c.phone || '';
+      const note = m.body.querySelector('#share-note');
+      note.textContent = c.phone
+        ? `Откроется переписка с ${c.name}.`
+        : `У ${c.name} не записан телефон — выберите получателя уже в WhatsApp.`;
+    });
+
+    m.foot.querySelector('[data-act=cancel]').onclick = m.close;
+    m.foot.querySelector('[data-act=copy]').onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+        ui.toast('Текст скопирован — вставьте в переписку');
+      } catch { ui.toast('Скопируйте текст вручную из окна', true); }
+    };
+    m.foot.querySelector('[data-act=send]').onclick = async () => {
+      const phone = m.body.querySelector('#share-phone').value;
+      /*
+       * Сначала пробуем поделиться вместе с фотографией — это работает на
+       * телефоне, а именно там продавец и стоит с клиентом. Если браузер так
+       * не умеет, открываем переписку с текстом.
+       */
+      if (mainPhoto && navigator.canShare) {
+        try {
+          const res = await fetch(ui.photoUrl(mainPhoto.file || mainPhoto.thumb));
+          const blob = await res.blob();
+          const file = new File([blob], `${p.sku}.jpg`, { type: blob.type || 'image/jpeg' });
+          if (navigator.canShare({ files: [file] })) {
+            await navigator.share({ files: [file], text });
+            m.close();
+            return;
+          }
+        } catch (e) {
+          // Отказ пользователя — не ошибка: молча переходим к переписке.
+          if (e && e.name === 'AbortError') return;
+        }
+      }
+      const link = phone ? ui.whatsappLink(phone, text)
+        : 'https://wa.me/?text=' + encodeURIComponent(text);
+      window.open(link, '_blank', 'noopener');
+      m.close();
+    };
+  }
+
   function moveDialog(p, onChange) {
     const targets = stores.filter(s => s.id !== p.store_id);
     const m = ui.modal({
@@ -596,7 +699,10 @@ window.Pages.products = (() => {
         </div>
         <div class="form-grid-3">
           ${admin ? `<label class="field"><span>Закупочная цена</span><input name="purchase_price" type="number" step="0.01" min="0" value="${p.purchase_price || ''}"></label>` : ''}
-          <label class="field"><span>Розничная цена *</span><input name="retail_price" type="number" step="0.01" min="0" required value="${p.retail_price || ''}"></label>
+          <label class="field"><span>Розничная цена *</span>
+            <input name="retail_price" type="number" step="0.01" min="0" required value="${p.retail_price || ''}">
+            ${gramPrice > 0 ? `<button type="button" class="btn btn-sm" id="pf-bygram"
+              style="margin-top:6px">Посчитать от грамма</button>` : ''}</label>
           <label class="field"><span>Поставщик</span><select name="supplier_id"><option value="">—</option>${supOpts}</select></label>
         </div>
         <!-- Закупка в валюте: поставщики часто считают в долларах, а учёт идёт в валюте магазина -->
@@ -671,6 +777,23 @@ window.Pages.products = (() => {
         usdCalc.textContent = 'Укажите цену в валюте и курс — сумма посчитается сама.';
       }
     }
+    /*
+     * Цена от грамма: вес × цена грамма + работа за грамм. Камень и наценку
+     * владелец добавляет сам — их система знать не может, поэтому кнопка
+     * заполняет поле, а не запирает его: посчитанную сумму можно поправить.
+     */
+    const byGram = m.body.querySelector('#pf-bygram');
+    if (byGram) {
+      byGram.addEventListener('click', () => {
+        const weight = Number(form.querySelector('[name=weight]').value) || 0;
+        if (!weight) { ui.toast('Сначала укажите вес изделия', true); return; }
+        const sum = Math.round(weight * (gramPrice + workPrice));
+        form.querySelector('[name=retail_price]').value = sum;
+        ui.toast(`${ui.num(weight)} г × ${ui.money(gramPrice + workPrice)} = ${ui.money(sum)}` +
+          ' — добавьте стоимость камня, если нужно');
+      });
+    }
+
     if (admin) {
       usdCb.addEventListener('change', () => {
         // Курс подставляем из настроек магазина: он там один и всегда под рукой.
@@ -756,7 +879,9 @@ window.Pages.products = (() => {
       openEditor(p, () => { if (Pages._prodRefresh) Pages._prodRefresh(); });
     },
     attachCustomerSearch,
-    async render(el) {
+    // Адрес вида «#/products/123» открывает карточку сразу — так на изделие
+    // попадают из общего поиска и по ссылке, отправленной коллеге.
+    async render(el, param) {
       await loadRefs();
       const meta = await api.get('/api/products/meta');
       el.innerHTML = `
@@ -836,6 +961,7 @@ window.Pages.products = (() => {
       });
       el.querySelector('#pf-add').addEventListener('click', () => openEditor(null, doRefresh));
       await refresh(el);
+      if (param) openDetail(Number(param), () => refresh(el));
     },
   };
 })();

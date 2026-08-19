@@ -78,12 +78,19 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M7 3h10l4 6-9 12L3 9l4-6z"/><path d="M3 9h18M9.5 3 8 9l4 12M14.5 3 16 9l-4 12"/></svg>
           <span id="brand-name-mobile">Asher</span>
         </div>
+        <button id="btn-search-mobile" title="Поиск"></button>
         <button data-theme-icon id="btn-theme-mobile" title="Сменить тему"></button>
         <button id="btn-more" title="Все разделы"></button>
       </div>
 
       <header class="topbar">
         <h1 id="page-title" class="page-title">—</h1>
+        <!-- Одно поле на всю систему: артикул, клиент, телефон, чек, сертификат -->
+        <div class="global-search" id="gs-wrap">
+          <input type="text" id="gs-input" class="input" autocomplete="off"
+            placeholder="Искать везде: артикул, клиент, чек, сертификат…">
+          <div class="gs-results hidden" id="gs-results"></div>
+        </div>
         <div class="topbar-actions">
           <button class="theme-toggle" data-theme-icon id="btn-theme" title="Сменить тему"></button>
           <button class="btn btn-primary" id="btn-quick-sale"></button>

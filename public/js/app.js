@@ -40,6 +40,7 @@ window.App = (() => {
     locale: { currency: 'сом', money_decimals: 0, number_locale: 'ru-RU',
       phone_code: '996', phone_trunk: '0', phone_length: 12 },
     storeName: 'Asher',
+    storePhone: '',
 
     // Совместимость: страницы обращаются к App.currency как к подписи валюты.
     get currency() { return App.locale.currency || ''; },
@@ -194,6 +195,7 @@ window.App = (() => {
       });
       App.user = res.user;
       App.storeName = res.store_name || 'Asher';
+      App.storePhone = res.store_phone || '';
       if (res.locale) App.locale = res.locale;
       document.getElementById('login-password').value = '';
       // Убираем «#login=…» из ссылки, чтобы дальше работали обычные разделы.
@@ -217,6 +219,182 @@ window.App = (() => {
     if (Pages.sales && Pages.sales.newSale) Pages.sales.newSale();
   });
 
+  setupGlobalSearch();
+
+  /*
+   * Общий поиск.
+   *
+   * Раньше поиск был в каждом разделе свой, и продавцу приходилось сначала
+   * вспомнить, где искать. Здесь одно поле: набрал что угодно — увидел всё,
+   * что нашлось, с подписью, что это. Выбор ведёт прямо в карточку.
+   */
+  function setupGlobalSearch() {
+    const wrap = document.getElementById('gs-wrap');
+    const input = document.getElementById('gs-input');
+    const box = document.getElementById('gs-results');
+    const mobileBtn = document.getElementById('btn-search-mobile');
+    if (!wrap || !input || !box) return;
+    if (mobileBtn) mobileBtn.innerHTML = ui.icon('search');
+
+    let items = [];      // плоский список для стрелок
+    let active = -1;
+    let seq = 0;
+
+    const close = () => {
+      box.classList.add('hidden');
+      wrap.classList.remove('gs-mobile-open');
+      active = -1;
+    };
+
+    const go = it => {
+      close();
+      input.value = '';
+      App.go(it.href);
+    };
+
+    const money = v => ui.money(v);
+    const row = (it, i) => `
+      <div class="gs-item" data-i="${i}">
+        ${it.thumb
+          ? `<img class="gs-thumb" src="${ui.esc(ui.photoUrl(it.thumb))}" alt="" loading="lazy">`
+          : `<div class="gs-thumb-empty">${ui.icon(it.icon || 'gem')}</div>`}
+        <div class="gs-main">
+          <div class="gs-line1">${it.line1}</div>
+          <div class="gs-line2">${it.line2}</div>
+        </div>
+        <div class="gs-right">${it.right || ''}</div>
+      </div>`;
+
+    // Из ответа сервера делаем однородные строки: у всех разделов одна форма,
+    // поэтому список читается одинаково, чем бы ни оказалась находка.
+    function flatten(data) {
+      const out = [];
+      for (const g of data.groups || []) {
+        const start = out.length;
+        for (const r of g.items) {
+          if (g.key === 'products') {
+            const stone = [r.carat ? ui.num(r.carat) + ' ct' : '', r.color, r.clarity]
+              .filter(Boolean).join(' · ');
+            out.push({ group: g.title, thumb: r.thumb, icon: 'gem',
+              line1: ui.esc(r.name),
+              line2: `<span class="mono">${ui.esc(r.sku)}</span>` +
+                (stone ? ' · ' + ui.esc(stone) : '') +
+                (r.status !== 'in_stock' ? ' · ' + ui.badge('status', r.status) : ''),
+              right: money(r.retail_price), href: '#/products/' + r.id });
+          } else if (g.key === 'customers') {
+            out.push({ group: g.title, icon: 'users',
+              line1: ui.esc(r.name),
+              line2: ui.esc(r.phone || 'без телефона') +
+                (r.discount > 0 ? ` · скидка ${ui.num(r.discount)}%` : ''),
+              right: r.purchases ? `покупок: ${r.purchases}` : '',
+              href: '#/customers/' + r.id });
+          } else if (g.key === 'sales') {
+            const debt = Math.round((r.total - r.paid) * 100) / 100;
+            out.push({ group: g.title, icon: 'sale',
+              line1: `<span class="mono">${ui.esc(r.number)}</span> · ${ui.esc(r.customer_name || 'без клиента')}`,
+              line2: ui.dt(r.created_at) + ` · позиций: ${r.items_count}` +
+                (debt > 0.009 ? ` · <span class="crit">долг ${money(debt)}</span>` : ''),
+              right: money(r.total), href: '#/sales/' + r.id });
+          } else if (g.key === 'orders') {
+            out.push({ group: g.title, icon: 'wrench',
+              line1: `<span class="mono">${ui.esc(r.number)}</span> · ${ui.esc(r.customer_name || '—')}`,
+              line2: ui.badge('order', r.status) + (r.due_date ? ' · до ' + ui.dateOnly(r.due_date) : ''),
+              right: money(r.final_price > 0 ? r.final_price : r.estimate),
+              href: '#/orders/' + r.id });
+          } else {
+            out.push({ group: g.title, icon: 'gift',
+              line1: ui.esc(r.name),
+              line2: `<span class="mono">${ui.esc(r.sku)}</span> · изделий: ${r.items_count}`,
+              right: money(r.price), href: '#/sets/' + r.id });
+          }
+        }
+        if (g.more) out[start].moreAfterGroup = g.title;
+      }
+      return out;
+    }
+
+    function draw(data) {
+      items = flatten(data);
+      if (!items.length) {
+        box.innerHTML = `<div class="gs-empty">Ничего не нашлось по запросу «${ui.esc(data.query)}».</div>`;
+        box.classList.remove('hidden');
+        return;
+      }
+      let html = '';
+      let group = '';
+      items.forEach((it, i) => {
+        if (it.group !== group) { group = it.group; html += `<div class="gs-group-title">${ui.esc(group)}</div>`; }
+        html += row(it, i);
+      });
+      const more = (data.groups || []).filter(g => g.more).map(g => g.title.toLowerCase());
+      if (more.length) {
+        html += `<div class="gs-more">Показано по пять — уточните запрос, чтобы сузить: ${ui.esc(more.join(', '))}.</div>`;
+      }
+      html += '<div class="gs-hint">Стрелки — выбор, Enter — открыть, Esc — закрыть.</div>';
+      box.innerHTML = html;
+      box.classList.remove('hidden');
+      box.querySelectorAll('.gs-item').forEach(el => {
+        el.addEventListener('mousedown', e => { e.preventDefault(); go(items[Number(el.dataset.i)]); });
+      });
+      active = -1;
+    }
+
+    const search = ui.debounce(async () => {
+      const q = input.value.trim();
+      if (q.length < 2) { close(); return; }
+      const my = ++seq;
+      try {
+        const data = await api.get('/api/search?q=' + encodeURIComponent(q));
+        if (my !== seq) return;     // ответ устарел — уже идёт новый запрос
+        draw(data);
+      } catch { close(); }
+    }, 220);
+
+    input.addEventListener('input', search);
+    input.addEventListener('focus', () => { if (input.value.trim().length >= 2) search(); });
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { close(); input.blur(); return; }
+      if (!items.length || box.classList.contains('hidden')) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        active = e.key === 'ArrowDown'
+          ? (active + 1) % items.length
+          : (active - 1 + items.length) % items.length;
+        box.querySelectorAll('.gs-item').forEach((el, i) => el.classList.toggle('active', i === active));
+        const el = box.querySelector('.gs-item.active');
+        if (el) el.scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        go(items[active >= 0 ? active : 0]);
+      }
+    });
+    /*
+     * Клик мимо закрывает список, но не мешает ни выбрать строку (mousedown
+     * выше), ни открыть поиск на телефоне. Проверяем именно contains: клик
+     * попадает в значок внутри кнопки, а не в саму кнопку.
+     */
+    document.addEventListener('click', e => {
+      if (wrap.contains(e.target)) return;
+      if (mobileBtn && mobileBtn.contains(e.target)) return;
+      close();
+    });
+    if (mobileBtn) {
+      mobileBtn.addEventListener('click', () => {
+        wrap.classList.add('gs-mobile-open');
+        input.focus();
+      });
+    }
+    // На компьютере поиск открывается с клавиатуры — руки не уходят с клавиш.
+    document.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        wrap.classList.add('gs-mobile-open');
+        input.focus();
+        input.select();
+      }
+    });
+  }
+
   window.addEventListener('hashchange', route);
 
   // ---------- Загрузка ----------
@@ -225,6 +403,7 @@ window.App = (() => {
       const me = await api.get('/api/me');
       App.user = me.user;
       App.storeName = me.store_name || 'Asher';
+      App.storePhone = me.store_phone || '';
       if (me.locale) App.locale = me.locale;
       App.showApp();
     } catch {

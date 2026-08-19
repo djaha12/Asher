@@ -739,8 +739,18 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 
   .modal-overlay { padding: 0; align-items: flex-end; backdrop-filter: none; }
   .modal, .modal.modal-lg, .modal.modal-sm { width: 100%; border-radius: 18px 18px 0 0; max-height: 94vh; overflow-y: auto; }
-  .modal-foot { position: sticky; bottom: 0; background: var(--surface); border-top: 1px solid var(--line); }
-  .modal-foot .btn { flex: 1; }
+  /*
+   * Кнопки карточки на телефоне переносятся по строкам. Без переноса они
+   * сжимались в одну строку и уезжали за край экрана: до «Продать» и
+   * «Клиенту» продавец просто не мог дотянуться.
+   */
+  .modal-foot {
+    position: sticky; bottom: 0; background: var(--surface);
+    border-top: 1px solid var(--line); flex-wrap: wrap;
+  }
+  .modal-foot .btn { flex: 1 1 calc(50% - 5px); min-width: 0; }
+  .modal-foot .btn-primary { flex-basis: 100%; }
+  .modal-foot .left { margin-right: 0; }
 
   .toolbar { gap: 8px; }
   .toolbar .search { flex: 1 1 100%; max-width: none; }
@@ -853,3 +863,65 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 
 /* Характеристика бриллианта на бирке — выделяем, это главное в товаре */
 .jlabel .jl-stone { font-weight: 600; letter-spacing: .02em; }
+
+/* ============ Общий поиск в шапке ============ */
+/* Одно поле на всю систему. В шапке компьютера оно живёт постоянно,
+   на телефоне открывается кнопкой и занимает весь экран: набирать
+   длинный артикул в узком поле у прилавка неудобно. */
+
+.global-search { position: relative; flex: 1; max-width: 520px; margin: 0 8px; }
+.global-search .input { width: 100%; }
+.gs-results {
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 40;
+  background: var(--surface); border: 1px solid var(--line-strong);
+  border-radius: var(--radius); box-shadow: 0 18px 40px rgba(0,0,0,.18);
+  max-height: min(70vh, 560px); overflow-y: auto; padding: 6px;
+}
+.gs-group-title {
+  font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--ink-dim); padding: 10px 10px 5px; font-weight: 600;
+}
+.gs-item {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border-radius: var(--radius-sm); cursor: pointer;
+}
+.gs-item:hover, .gs-item.active { background: var(--surface-2); }
+.gs-item .gs-main { flex: 1; min-width: 0; }
+.gs-item .gs-line1 { font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gs-item .gs-line2 { font-size: 12.5px; color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gs-item .gs-right { text-align: right; font-size: 13px; white-space: nowrap; }
+.gs-thumb { width: 34px; height: 34px; border-radius: 7px; object-fit: cover; flex: none; }
+.gs-thumb-empty {
+  width: 34px; height: 34px; border-radius: 7px; flex: none; display: grid; place-items: center;
+  background: var(--surface-2); color: var(--ink-dim);
+}
+.gs-thumb-empty svg { width: 18px; height: 18px; }
+.gs-empty { padding: 16px 12px; color: var(--ink-dim); }
+.gs-more { padding: 4px 10px 8px; font-size: 12.5px; color: var(--ink-dim); }
+.gs-hint { padding: 8px 10px; font-size: 12px; color: var(--ink-dim); border-top: 1px solid var(--line); margin-top: 4px; }
+
+@media (max-width: 900px) {
+  /* На телефоне поиск раскрывается поверх всего: узкое поле в шапке
+     не даёт ни набрать, ни прочитать найденное. */
+  .global-search { display: none; }
+  .global-search.gs-mobile-open {
+    display: block; position: fixed; inset: 0; z-index: 60; margin: 0;
+    max-width: none; background: var(--bg); padding: 12px;
+  }
+  .global-search.gs-mobile-open .input { font-size: 16px; padding: 14px; }
+  .global-search.gs-mobile-open .gs-results {
+    position: static; max-height: calc(100vh - 90px); box-shadow: none;
+    border: none; margin-top: 8px;
+  }
+}
+
+/* Предпросмотр сообщения клиенту: фото и текст так, как их увидит получатель. */
+.share-preview {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  overflow: hidden; background: var(--surface-2);
+}
+.share-preview img { width: 100%; max-height: 220px; object-fit: cover; display: block; }
+.share-preview pre {
+  margin: 0; padding: 12px 14px; white-space: pre-wrap; word-break: break-word;
+  font-family: var(--font); font-size: 14px; line-height: 1.55;
+}
