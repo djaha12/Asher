@@ -19,7 +19,24 @@ window.Pages.dashboard = {
     // Разбивка склада по металлам — показываем три самых весомых.
     const metals = (d.stock.by_metal || []).filter(m => m.weight > 0).slice(0, 3);
 
+    /*
+     * Тревоги — самым первым, до денег.
+     *
+     * Это единственное место, где владелец узнает, что копии перестали
+     * делаться или что кто-то просится войти. Ниже по странице он бы это
+     * пролистал: там цифры, за которыми он и приходит.
+     */
+    const тревоги = (d['тревоги'] || []).map(т => `
+      <div class="alert-row ${т['уровень'] === 'плохо' ? 'alert-bad' : 'alert-warn'}">
+        <div class="alert-ico">${т['уровень'] === 'плохо' ? '!' : '?'}</div>
+        <div>
+          <div class="alert-what">${ui.esc(т['что'])}</div>
+          <div class="alert-why">${ui.esc(т['почему'])}. ${ui.esc(т['делать'])}</div>
+        </div>
+      </div>`).join('');
+
     el.innerHTML = `
+      ${тревоги ? `<div class="alert-box">${тревоги}</div>` : ''}
       <div class="grid grid-4">
         <div class="big-stat accent-good">
           <div class="bs-label">Продали сегодня</div>

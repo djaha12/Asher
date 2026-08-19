@@ -195,18 +195,77 @@ function tick() {
 
 // ---------- Резервные копии ----------
 
+/*
+ * Сколько свободного места на диске, в мегабайтах. null — узнать не удалось.
+ *
+ * Нужно до того, как копия не сделается: закончившееся место — самая частая
+ * причина, по которой копии тихо прекращаются, и единственная, которую видно
+ * заранее.
+ */
+function свободноМб() {
+  try {
+    const s = fs.statfsSync(BACKUP_DIR);
+    return Math.floor((s.bavail * s.bsize) / (1024 * 1024));
+  } catch { return null; }
+}
+
+/*
+ * Сбой копии обязан быть заметен.
+ *
+ * Раньше здесь была одна строка в чёрное окно — то есть в никуда: владелец
+ * туда не смотрит, а на сервере это вообще уходит в системный журнал. Копии
+ * могли не делаться месяцами, и выяснилось бы это в тот единственный день,
+ * когда копия понадобилась.
+ *
+ * Теперь сбой запоминается в базе (её видит страница «Безопасность» и Главная)
+ * и попадает в журнал действий. В журнал — только при СМЕНЕ состояния, иначе
+ * ежечасная проверка забила бы его тысячами одинаковых строк и спрятала за
+ * собой работу продавцов.
+ */
+function отметитьСбойКопии(причина) {
+  const было = getSetting('backup_error') || '';
+  setSetting('backup_error', причина);
+  setSetting('backup_error_at', nowIso());
+  if (было !== причина) {
+    audit(null, 'backup_failed', 'settings', null, `Резервная копия не создана: ${причина}`);
+  }
+  console.error('Резервная копия не создана:', причина);
+}
+
+function отметитьУспехКопии() {
+  setSetting('last_backup', nowIso());
+  if (getSetting('backup_error')) {
+    audit(null, 'backup', 'settings', null, 'Резервные копии снова делаются');
+    setSetting('backup_error', '');
+    setSetting('backup_error_at', '');
+  }
+}
+
 function maybeBackup() {
   const last = Date.parse(getSetting('last_backup') || '') || 0;
   if (Date.now() - last < BACKUP_EVERY_MS) return;
   try {
     fs.mkdirSync(BACKUP_DIR, { recursive: true });
+
+    /*
+     * Проверяем место ДО снимка. Иначе VACUUM INTO начнёт писать, упрётся
+     * в конец диска и оставит обрезанный файл, который выглядит как копия,
+     * но копией не является, — а это хуже, чем честное отсутствие копии.
+     */
+    const свободно = свободноМб();
+    const нужно = Math.ceil(размерБазыМб() * 1.3) + 50;
+    if (свободно !== null && свободно < нужно) {
+      отметитьСбойКопии(`на диске свободно ${свободно} МБ, а нужно около ${нужно} МБ`);
+      return;
+    }
+
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
     const target = path.join(BACKUP_DIR, `asher-${stamp}.db`);
     if (!fs.existsSync(target)) {
       // VACUUM INTO даёт целостный снимок даже во время работы.
       db.exec(`VACUUM INTO '${target.replace(/'/g, "''")}'`);
     }
-    setSetting('last_backup', nowIso());
+    отметитьУспехКопии();
 
     const old = fs.readdirSync(BACKUP_DIR)
       .filter(f => /^asher-.*\.db$/.test(f))
@@ -214,8 +273,16 @@ function maybeBackup() {
       .slice(0, -BACKUPS_KEEP);
     for (const f of old) fs.rmSync(path.join(BACKUP_DIR, f), { force: true });
   } catch (e) {
-    console.error('Резервная копия не создана:', e.message);
+    отметитьСбойКопии(e.message);
   }
+}
+
+function размерБазыМб() {
+  try {
+    const p = db.prepare('PRAGMA database_list').all().find(r => r.name === 'main');
+    if (!p || !p.file) return 0;
+    return fs.statSync(p.file).size / (1024 * 1024);
+  } catch { return 0; }
 }
 
 /*
@@ -264,12 +331,33 @@ function status() {
   };
 }
 
+/*
+ * Подсобные папки создаём «мягко»: не смогли — работаем дальше.
+ *
+ * Раньше это была обычная строка без всякой защиты, и от неё зависел запуск
+ * всей системы. Стоило диску отвалиться или папке стать недоступной — сервер
+ * падал на старте, и магазин не мог не то что снять копию, а вообще торговать.
+ * Это ровно наоборот тому, что нужно: обмен с 1С и резервные копии важны,
+ * но касса важнее. Пусть отвалится вспомогательное, а торговля продолжится —
+ * о беде владелец узнает из тревоги на Главной.
+ */
+function завестиПапку(куда, зачем) {
+  try {
+    fs.mkdirSync(куда, { recursive: true });
+    return true;
+  } catch (e) {
+    console.error(`Не удалось создать папку (${зачем}): ${куда} — ${e.message}`);
+    if (зачем === 'резервные копии') отметитьСбойКопии(`папка для копий недоступна: ${e.message}`);
+    return false;
+  }
+}
+
 function start() {
-  fs.mkdirSync(SYNC_DIR, { recursive: true });
-  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  const естьОбмен = завестиПапку(SYNC_DIR, 'обмен с 1С');
+  завестиПапку(BACKUP_DIR, 'резервные копии');
   // Памятка прямо в папке — чтобы через полгода не вспоминать, зачем она.
   const readme = path.join(SYNC_DIR, 'ПРОЧТИ-МЕНЯ.txt');
-  if (!fs.existsSync(readme)) {
+  if (естьОбмен && !fs.existsSync(readme)) {
     fs.writeFileSync(readme, [
       'Папка автообмена с 1С.',
       '',
@@ -283,9 +371,17 @@ function start() {
       'Проданные и списанные изделия не изменяются никогда.',
     ].join('\r\n'), 'utf8');
   }
-  maybeBackup();
-  setInterval(tick, POLL_MS).unref();
-  setInterval(maybeBackup, 3600 * 1000).unref();
+  /*
+   * Ни одна фоновая работа не должна ронять систему. Обмен с 1С читает чужие
+   * файлы, копии пишут на диск — и то, и другое ломается по причинам, к самой
+   * торговле отношения не имеющим.
+   */
+  const безопасно = (что, имя) => () => {
+    try { что(); } catch (e) { console.error(`Фоновая работа «${имя}» сорвалась:`, e.message); }
+  };
+  безопасно(maybeBackup, 'резервная копия')();
+  setInterval(безопасно(tick, 'обмен с 1С'), POLL_MS).unref();
+  setInterval(безопасно(maybeBackup, 'резервная копия'), 3600 * 1000).unref();
 }
 
-module.exports = { start, status, makeBackupNow, SYNC_DIR, BACKUP_DIR };
+module.exports = { start, status, makeBackupNow, свободноМб, SYNC_DIR, BACKUP_DIR };
