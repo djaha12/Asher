@@ -75,8 +75,14 @@ async function main() {
   const createRow = await findEntry('create', e => e.entity === 'product' && e.details.includes(sku));
   check('в журнале: создание изделия с артикулом', Boolean(createRow), createRow && createRow.details);
 
-  console.log('\n=== Продавец правит цену ===');
-  await seller.put('/api/products/' + pid, { retail_price: 195000 });
+  console.log('\n=== Продавец правит карточку ===');
+  /*
+   * Цену продавец не правит — и это проверяется отдельно, в наборе про скидки.
+   * Здесь важно другое: то, что ему МОЖНО, должно попадать в журнал так же,
+   * как и всё остальное. Иначе владелец не увидит, кто переписал описание
+   * изделия перед продажей.
+   */
+  await seller.put('/api/products/' + pid, { description: 'потёртость на ободке', size: '17' });
   const updRow = await findEntry('update', e => e.entity === 'product' && e.details.includes(sku));
   check('в журнале: изменение изделия', Boolean(updRow), updRow && updRow.details);
 
@@ -103,7 +109,7 @@ async function main() {
   const saleRow = await findEntry('sale', e => e.entity_id === sale.data.id);
   check('в журнале: продажа продавцом', Boolean(saleRow), saleRow && saleRow.details);
   check('в продаже видна сумма и долг',
-    Boolean(saleRow) && /195[\s\u00a0]?000/.test(saleRow.details) && /долг/i.test(saleRow.details),
+    Boolean(saleRow) && /180[\s\u00a0]?000/.test(saleRow.details) && /долг/i.test(saleRow.details),
     saleRow && saleRow.details);
 
   console.log('\n=== Продавец принимает оплату долга ===');
@@ -128,14 +134,24 @@ async function main() {
   const exRow = await findEntry('exchange');
   check('в журнале: обмен продавцом', Boolean(exRow), exRow && exRow.details);
 
-  console.log('\n=== Продавец списывает брак ===');
+  console.log('\n=== Владелец списывает брак ===');
+  /*
+   * Списывает владелец, а не продавец: изделие уходит со склада, и решение
+   * это не продавцовское. Продавец, попробовавший списать сам, получает отказ —
+   * это проверяется в наборе про скидки. Здесь важно, что списание владельца
+   * попадает в журнал отдельной строкой и с причиной: через месяц «куда делось
+   * кольцо за 70 тысяч» должно иметь письменный ответ.
+   */
   const broken = await admin.post('/api/products', {
     sku: `AUD-${stamp}-B`, name: 'Кольцо с браком', retail_price: 70000,
   });
-  await seller.put('/api/products/' + broken.data.id, {
+  await admin.put('/api/products/' + broken.data.id, {
     status: 'written_off', write_off_reason: 'скол камня при примерке',
   });
-  const offRow = await findEntry('status', e => e.details.includes(`AUD-${stamp}-B`));
+  // Ищем без отбора по продавцу: списывал владелец.
+  const offRow = ((await admin.get(
+    `/api/audit?action=status&from=${encodeURIComponent(since)}&limit=200`)).data.items || [])
+    .find(e => e.details.includes(`AUD-${stamp}-B`));
   check('в журнале: списание отдельной строкой', Boolean(offRow), offRow && offRow.details);
   check('в списании записана причина',
     Boolean(offRow) && /скол камня/.test(offRow.details), offRow && offRow.details);

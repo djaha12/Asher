@@ -39,19 +39,25 @@ function последняя() {
 function движение(с) {
   const от = с || '0000';
 
+  /*
+   * in_till = 1 — «эта запись двигала деньги в ящике». Способа оплаты мало:
+   * при обмене клиент рассчитывается старым изделием, строка в платежах
+   * законная, а живых денег не приходило. Без этого условия каждый обмен
+   * вечером превращался в недостачу на цену зачтённого изделия.
+   */
   const отКлиентов = db.prepare(
     `SELECT COALESCE(SUM(amount), 0) AS s FROM payments
-      WHERE method = 'cash' AND created_at > ?`
+      WHERE method = 'cash' AND in_till = 1 AND created_at > ?`
   ).get(от).s;
 
   const продажи = db.prepare(
     `SELECT COALESCE(SUM(amount), 0) AS s FROM payments
-      WHERE method = 'cash' AND amount > 0 AND created_at > ?`
+      WHERE method = 'cash' AND in_till = 1 AND amount > 0 AND created_at > ?`
   ).get(от).s;
 
   const возвраты = db.prepare(
     `SELECT COALESCE(SUM(-amount), 0) AS s FROM payments
-      WHERE method = 'cash' AND amount < 0 AND created_at > ?`
+      WHERE method = 'cash' AND in_till = 1 AND amount < 0 AND created_at > ?`
   ).get(от).s;
 
   // Ручная касса: только то, что не привязано ни к чеку, ни к заказу.

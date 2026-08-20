@@ -61,6 +61,80 @@ function stripPurchaseInput(body, role) {
   return out;
 }
 
+/*
+ * Поля, которые продавец не правит.
+ *
+ * Это не про недоверие, а про то, что без такого списка все остальные
+ * ограничения — пустые слова. Потолок скидки считает процент от цены
+ * по ценнику; пока продавец может сам поставить этому ценнику любое число,
+ * потолок обходится ОДНИМ запросом: поставить кольцу за 214 500 цену 1 000
+ * и продать без всякой скидки. Ровно так же обходится и запрет списывать
+ * недостачу при инвентаризации — достаточно открыть карточку и поменять
+ * статус на «списано».
+ *
+ * Продавцу остаётся всё, что нужно у прилавка: фотографии, размер, описание,
+ * заметки, расположение. Цена, списание, точка, поставщик и чьё это изделие —
+ * решения владельца.
+ *
+ * Статуса в этом списке нет, и это не упущение: резерв за клиентом продавец
+ * ставит и снимает сам, это его ежедневная работа. Для статуса правило своё —
+ * ниже.
+ */
+const OWNER_ONLY_FIELDS = ['retail_price', 'write_off_reason',
+  'store_id', 'supplier_id', 'ownership', 'sku'];
+
+// Переходы статуса, которые продавцу разрешены: только витрина ↔ резерв.
+// «Списано» и «продано» сюда не входят: первое уводит изделие со склада
+// решением продавца, второе ставится и снимается только чеком.
+const ПРОДАВЦУ_МОЖНО = new Set(['in_stock', 'reserved']);
+
+function stripOwnerFields(body, role, existing) {
+  if (role === 'admin') return body;
+  /*
+   * Правила касаются ПРАВКИ уже заведённой карточки, а не заведения новой.
+   *
+   * Опасно не «продавец назвал цену», а «продавец переписал цену изделия,
+   * которое уже лежит на витрине»: именно так обходится потолок скидки.
+   * Когда продавец принимает новый товар и заводит карточку, красть не у чего —
+   * изделия до этой минуты в системе не было. Запретить и это значило бы,
+   * что вечером, когда владельца нет, принятый товар просто некуда положить.
+   */
+  if (!existing) return body;
+  const out = { ...body };
+
+  if (out.status !== undefined && existing && out.status !== existing.status) {
+    if (!ПРОДАВЦУ_МОЖНО.has(out.status) || !ПРОДАВЦУ_МОЖНО.has(existing.status)) {
+      throw new ApiError(403,
+        'Списание и возврат изделия на витрину оформляет владелец. ' +
+        'Продавцу доступны резерв и снятие резерва.');
+    }
+  }
+
+  for (const f of OWNER_ONLY_FIELDS) {
+    /*
+     * Молча выкидываем только то, что и так не меняется: форма продавца
+     * присылает поля целиком, и ругаться на неизменившуюся цену значило бы
+     * сделать карточку нередактируемой вовсе. А вот попытку изменить —
+     * называем вслух, иначе продавец будет думать, что сохранил.
+     */
+    if (out[f] === undefined) continue;
+    const было = existing ? existing[f] : undefined;
+    const стало = out[f];
+    const одинаково = было === стало
+      || (typeof было === 'number' && Number(стало) === было)
+      || (было === null && (стало === null || стало === ''));
+    if (!одинаково) {
+      if (f === 'retail_price') {
+        throw new ApiError(403,
+          'Цену изделия меняет владелец. Если нужно продать дешевле — это скидка в кассе.');
+      }
+      throw new ApiError(403, 'Это поле карточки изделия меняет владелец.');
+    }
+    delete out[f];
+  }
+  return out;
+}
+
 function rowToProduct(r) {
   if (!r) return null;
   let gems = [];
@@ -260,7 +334,15 @@ const routes = [
         carat_desc: 'p.carat DESC, p.retail_price DESC',
         carat_asc: 'p.carat, p.retail_price',
       };
-      const order = SORTS[query.sort] || SORTS.new;
+      /*
+       * Спрашиваем именно СВОЙ ключ, а не просто «есть ли такое свойство».
+       * У любого объекта в JavaScript есть унаследованные свойства вроде
+       * constructor и toString, и SORTS['constructor'] возвращает не сортировку,
+       * а функцию — она подставлялась в SQL и роняла каталог с «Внутренней
+       * ошибкой». Красть этим ничего нельзя, но любой сотрудник мог случайно
+       * (или нарочно) сделать каталог неоткрывающимся.
+       */
+      const order = Object.hasOwn(SORTS, String(query.sort)) ? SORTS[query.sort] : SORTS.new;
       const limit = Math.min(Number(query.limit) || 500, 2000);
       const offset = Number(query.offset) || 0;
       const rows = db.prepare(
@@ -384,7 +466,8 @@ const routes = [
   {
     method: 'POST', path: '/api/products',
     handler: ({ body, session }) => {
-      const data = validateProduct(stripPurchaseInput(body, session.role));
+      const data = validateProduct(
+        stripOwnerFields(stripPurchaseInput(body, session.role), session.role, null));
       const dup = db.prepare('SELECT id FROM products WHERE sku = ?').get(data.sku);
       if (dup) throw new ApiError(400, `Артикул «${data.sku}» уже существует`);
       // Артикул сканируется одним кодом и в кассе, и в инвентаризации,
@@ -414,7 +497,9 @@ const routes = [
       const id = Number(params.id);
       const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
       if (!existing) throw new ApiError(404, 'Изделие не найдено');
-      const data = validateProduct(stripPurchaseInput(body, session.role), { partial: true, existing });
+      const data = validateProduct(
+        stripOwnerFields(stripPurchaseInput(body, session.role), session.role, existing),
+        { partial: true, existing });
       if (data.sku && data.sku !== existing.sku) {
         const dup = db.prepare('SELECT id FROM products WHERE sku = ? AND id != ?').get(data.sku, id);
         if (dup) throw new ApiError(400, `Артикул «${data.sku}» уже существует`);

@@ -379,10 +379,18 @@ const routes = [
         // Оплата поставщику — это движение денег, но не расход периода:
         // стоимость товара попадёт в прибыль как себестоимость при продаже.
         if (type === 'payment') {
+          /*
+           * Наличными или нет — по способу оплаты. Раньше колонку не заполняли
+           * вовсе, и значение по умолчанию делало наличным любой платёж,
+           * включая банковский перевод. Для ювелирки это самая крупная
+           * регулярная сумма: сверка кассы каждый раз показывала огромный
+           * излишек в ящике, которого там никогда не было.
+           */
           db.prepare(
-            `INSERT INTO finance_ops (type, category, amount, note, user_id, created_at)
-             VALUES ('expense', 'Оплата поставщику', ?, ?, ?, ?)`
-          ).run(amount, `${supplier.name}${body.doc_number ? ` (${body.doc_number})` : ''}`, session.userId, ts);
+            `INSERT INTO finance_ops (type, category, amount, note, cash, user_id, created_at)
+             VALUES ('expense', 'Оплата поставщику', ?, ?, ?, ?, ?)`
+          ).run(amount, `${supplier.name}${body.doc_number ? ` (${body.doc_number})` : ''}`,
+            method === 'cash' || method === '' ? 1 : 0, session.userId, ts);
         }
         audit(session.userId, type, 'supplier', supplierId, `${supplier.name}: ${money(amount)}`);
         return { id: Number(info.lastInsertRowid) };

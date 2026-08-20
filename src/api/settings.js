@@ -241,8 +241,8 @@ const routes = [
      * и узнал бы об этом в худший момент.
      */
     method: 'GET', path: '/api/backup/download', admin: true, raw: true,
-    handler: ({ res, session }) => {
-      const { makeZip, listFiles } = require('../zip');
+    handler: async ({ res, session }) => {
+      const { streamZip, listFiles } = require('../zip');
       const { MEDIA_DIR } = require('../db');
 
       const snapshot = require('../sync').makeBackupNow();
@@ -271,16 +271,17 @@ const routes = [
           '  4. Запустите СТАРТ.\r\n', 'utf8'),
       });
 
-      const zip = makeZip(entries);
       const name = 'asher-' + new Date().toISOString().slice(0, 10) + '.zip';
       audit(session.userId, 'backup', 'settings', null,
         `Скачана резервная копия (${name}, файлов: ${entries.length})`);
-      res.writeHead(200, {
-        'Content-Type': 'application/zip',
-        'Content-Disposition': `attachment; filename="${name}"`,
-        'Content-Length': zip.length,
-      });
-      res.end(zip);
+      /*
+       * Отдаём потоком, а не собираем в памяти. Замер на 330 МБ фотографий:
+       * прежняя сборка занимала в пике 733 МБ, вдвое больше самого архива,
+       * и на сервере с гигабайтом памяти копия однажды просто перестала бы
+       * скачиваться. Заодно магазин больше не замирает: раньше продавец ждал
+       * ответа пять секунд на обычном экране, пока владелец качал копию.
+       */
+      await streamZip(entries, res, { filename: name });
     },
   },
 

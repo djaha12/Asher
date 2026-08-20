@@ -267,6 +267,42 @@ async function main() {
     }
     fs.rmSync(dir, { recursive: true, force: true });
   }
+  /*
+   * Копия отдаётся потоком, а не собирается в памяти.
+   *
+   * Замер на 330 МБ фотографий: прежняя сборка держала в пике 733 МБ — вдвое
+   * больше самого архива. На сервере с гигабайтом памяти копия однажды просто
+   * перестала бы скачиваться, причём ровно тогда, когда стала бы ценной.
+   * И вторая беда: пока копия собиралась, магазин стоял — продавец ждал
+   * ответа пять секунд на обычном экране каталога.
+   *
+   * Размер архива здесь маленький, поэтому проверяем не память (в наборе
+   * её не измерить), а два признака, которые из потоковой отдачи следуют:
+   * размер объявлен заранее и система в это время отвечает другим.
+   */
+  check('размер копии объявлен заранее',
+    Number(backup.headers.get('content-length')) === buf.length,
+    `${backup.headers.get('content-length')} против ${buf.length}`);
+  {
+    const t = Date.now();
+    const [копия, каталог] = await Promise.all([
+      fetch(BASE + '/api/backup/download', { headers: { Cookie: admin.cookie } })
+        .then(r => r.arrayBuffer()),
+      (async () => {
+        // Ждём, пока копия точно начнёт собираться, и только потом стучимся.
+        await new Promise(r => setTimeout(r, 30));
+        const н = Date.now();
+        const о = await fetch(BASE + '/api/products?limit=20', { headers: { Cookie: admin.cookie } });
+        await о.arrayBuffer();
+        return Date.now() - н;
+      })(),
+    ]);
+    check('во время скачивания копии система отвечает другим',
+      каталог < 3000, `каталог ответил за ${каталог} мс`);
+    check('и копия при этом скачалась целиком', копия.byteLength > 100000, копия.byteLength);
+    if (Date.now() - t > 60000) check('копия собирается за разумное время', false, 'дольше минуты');
+  }
+
   const dl = await admin.get('/api/audit?action=backup&limit=3');
   check('скачивание копии отмечено в журнале', (dl.data.items || []).length > 0);
 

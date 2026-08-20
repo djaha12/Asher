@@ -612,11 +612,224 @@ window.Pages.products = (() => {
     };
   }
 
+  /*
+   * Быстрое заведение клиента прямо из поиска.
+   *
+   * Раньше при промахе поиск писал «Не найдено» и на этом всё. А продать
+   * в рассрочку без клиента система не даёт — значит при каждом новом
+   * покупателе с рассрочкой продавец закрывал набранный чек, уходил в раздел
+   * «Клиенты», заводил человека, возвращался и набирал чек заново. При живом
+   * покупателе у прилавка.
+   *
+   * Спрашиваем только имя и телефон: остальное — размер кольца, день рождения,
+   * предпочтения — дозаполняется потом, когда есть время. Требовать это
+   * в момент продажи значит получить в базе «Ааа» и «000».
+   */
+  function newCustomerDialog(набрано, onDone) {
+    /*
+     * Искать клиента начинают по-разному: кто-то набирает имя, кто-то номер.
+     * Что именно набрали, решаем по строгому признаку — только цифры и знаки
+     * телефонной записи, и цифр хотя бы пять. Просто «есть цифра» не годится:
+     * имя с цифрой встречается (второй Асан в базе — «Асан 2»), и такое имя
+     * молча уехало бы в поле телефона, а обязательное имя осталось пустым.
+     */
+    const этоТелефон = /^[\d\s()+-]+$/.test(набрано)
+      && набрано.replace(/\D/g, '').length >= 5;
+    const телефон = этоТелефон ? набрано : '';
+    const имя = этоТелефон ? '' : набрано;
+    const m = ui.modal({
+      title: 'Новый клиент',
+      size: 'sm',
+      body: `<form id="nc-form">
+        <label class="field"><span>Имя *</span>
+          <input name="name" required value="${ui.esc(имя)}" placeholder="Айгуль Осмонова"></label>
+        <label class="field"><span>Телефон</span>
+          <input name="phone" value="${ui.esc(телефон)}" placeholder="0700 495 253"></label>
+        <p class="form-hint">Остальное — размер кольца, день рождения, заметки —
+          можно дозаполнить потом в разделе «Клиенты». Сейчас важно не задерживать
+          человека у прилавка.</p>
+      </form>`,
+      footer: `<button class="btn" data-act="cancel">Отмена</button>
+        <button class="btn btn-primary" data-act="ok">Завести и выбрать</button>`,
+    });
+    const form = m.body.querySelector('#nc-form');
+    setTimeout(() => form.querySelector(имя ? '[name=phone]' : '[name=name]').focus(), 50);
+    m.foot.querySelector('[data-act=cancel]').onclick = m.close;
+    m.foot.querySelector('[data-act=ok]').onclick = async () => {
+      if (!form.reportValidity()) return;
+      const v = ui.formValues(form);
+      try {
+        const { id } = await api.post('/api/customers', { name: v.name.trim(), phone: v.phone.trim() });
+        ui.toast('Клиент заведён');
+        m.close();
+        onDone({ id, name: v.name.trim(), phone: v.phone.trim(), discount: 0 });
+      } catch (e) { ui.toastErr(e); }
+    };
+  }
+
+  /*
+   * ---------- Приёмка от поставщика ----------
+   *
+   * Одна накладная — один экран. Пришло двадцать изделий: вбиваете их строками,
+   * система ставит их на склад и сама записывает долг перед поставщиком ровно
+   * на сумму принятого. Раньше это были два разных действия, между которыми
+   * не было связи: двадцать карточек по одной, а потом долг — руками, общей
+   * суммой, сложенной в уме.
+   */
+  function receiptDialog(onDone) {
+    let строк = 0;
+    const строка = () => `
+      <tr data-row>
+        <td><input class="input" name="sku" placeholder="AS-00123" style="min-width:110px"></td>
+        <td><input class="input" name="name" placeholder="Кольцо с бриллиантом" style="min-width:160px"></td>
+        <td><input class="input" name="metal" placeholder="Белое золото" style="min-width:110px"></td>
+        <td><input class="input" name="fineness" placeholder="750" style="width:64px"></td>
+        <td><input class="input" name="weight" type="number" step="0.01" min="0" placeholder="4.2" style="width:76px"></td>
+        <td><input class="input" name="purchase_price" type="number" step="0.01" min="0" placeholder="закупка" style="width:110px"></td>
+        <td><input class="input" name="retail_price" type="number" step="1" min="0" placeholder="продажа" style="width:110px"></td>
+        <td><button type="button" class="btn btn-sm btn-danger" data-del>×</button></td>
+      </tr>`;
+
+    const m = ui.modal({
+      title: 'Приёмка товара от поставщика',
+      size: 'lg',
+      body: `
+        <form id="rc-form">
+          <div class="form-grid">
+            <label class="field"><span>Поставщик *</span>
+              <select name="supplier_id" id="rc-supplier"><option value="">— выберите —</option></select></label>
+            <label class="field"><span>Точка продаж</span>
+              <select name="store_id" id="rc-store"></select></label>
+          </div>
+          <div class="form-grid-3" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 12px">
+            <label class="field"><span>Номер накладной</span><input name="doc_number" placeholder="№ 415"></label>
+            <label class="field"><span>Дата накладной</span><input name="doc_date" type="date"></label>
+            <label class="field"><span>Оплатить до</span><input name="due_date" type="date"></label>
+          </div>
+          <label class="row-tight" style="cursor:pointer;margin:2px 0 10px">
+            <input type="checkbox" name="consignment" style="width:18px;height:18px;cursor:pointer">
+            Товар на реализации — платим только за проданное</label>
+          <p class="form-hint" style="margin-top:-4px">Тогда долг перед поставщиком сейчас
+            не появится: система запишет его сама в момент продажи каждого изделия.</p>
+        </form>
+        <div class="table-wrap" style="max-height:44vh;overflow:auto">
+          <table class="tbl"><thead><tr>
+            <th>Артикул *</th><th>Наименование *</th><th>Металл</th><th>Проба</th>
+            <th>Вес, г</th><th>Закупка *</th><th>Цена продажи *</th><th></th>
+          </tr></thead><tbody id="rc-rows"></tbody></table>
+        </div>
+        <div class="row-tight" style="margin-top:10px;gap:10px;flex-wrap:wrap">
+          <button type="button" class="btn btn-sm" id="rc-more">+ Ещё строка</button>
+          <button type="button" class="btn btn-sm" id="rc-more10">+ 10 строк</button>
+          <label class="row-tight" style="gap:6px">Наценка
+            <input class="input" id="rc-markup" type="number" min="0" step="5" placeholder="%" style="width:80px">
+            <button type="button" class="btn btn-sm" id="rc-apply-markup">проставить цены</button>
+          </label>
+        </div>
+        <div id="rc-total" class="pos-total grand" style="margin-top:10px"></div>`,
+      footer: `<button class="btn" data-act="cancel">Отмена</button>
+        <button class="btn btn-primary" data-act="ok">Принять на склад</button>`,
+    });
+
+    const тело = m.body.querySelector('#rc-rows');
+    const итогEl = m.body.querySelector('#rc-total');
+    const форма = m.body.querySelector('#rc-form');
+
+    const собрать = () => [...тело.querySelectorAll('[data-row]')].map(tr => {
+      const о = {};
+      for (const el of tr.querySelectorAll('[name]')) о[el.name] = el.value.trim();
+      return о;
+    }).filter(о => о.sku || о.name || о.purchase_price || о.retail_price);
+
+    function пересчитать() {
+      const строки = собрать();
+      const закупка = строки.reduce((s, о) => s + (Number(о.purchase_price) || 0), 0);
+      const продажа = строки.reduce((s, о) => s + (Number(о.retail_price) || 0), 0);
+      итогEl.innerHTML = строки.length
+        ? `<span>Изделий: ${строки.length}</span>
+           <span class="money">закупка ${ui.money(закупка)} · продажа ${ui.money(продажа)}</span>`
+        : '<span class="muted">Добавьте хотя бы одну строку</span>';
+    }
+
+    function добавить(сколько = 1) {
+      for (let i = 0; i < сколько; i++) { тело.insertAdjacentHTML('beforeend', строка()); строк++; }
+      пересчитать();
+    }
+
+    m.body.querySelector('#rc-more').onclick = () => добавить(1);
+    m.body.querySelector('#rc-more10').onclick = () => добавить(10);
+    тело.addEventListener('input', пересчитать);
+    тело.addEventListener('click', e => {
+      if (!e.target.dataset || e.target.dataset.del === undefined) return;
+      e.target.closest('[data-row]').remove();
+      пересчитать();
+    });
+    // Последняя строка заполнена — сразу подставляем следующую, чтобы
+    // не тянуться мышкой к кнопке после каждого изделия.
+    тело.addEventListener('input', e => {
+      const tr = e.target.closest('[data-row]');
+      if (tr && tr === тело.lastElementChild && e.target.value.trim()) добавить(1);
+    });
+
+    m.body.querySelector('#rc-apply-markup').onclick = () => {
+      const н = Number(m.body.querySelector('#rc-markup').value) || 0;
+      if (!(н > 0)) { ui.toast('Укажите наценку в процентах', true); return; }
+      for (const tr of тело.querySelectorAll('[data-row]')) {
+        const з = Number(tr.querySelector('[name=purchase_price]').value) || 0;
+        if (з > 0) tr.querySelector('[name=retail_price]').value = Math.round(з * (1 + н / 100));
+      }
+      пересчитать();
+    };
+
+    (async () => {
+      const [пост, точки] = await Promise.all([
+        api.get('/api/suppliers').then(r => r.items).catch(() => []),
+        api.get('/api/stores').then(r => r.items).catch(() => []),
+      ]);
+      m.body.querySelector('#rc-supplier').innerHTML = '<option value="">— выберите —</option>'
+        + пост.map(s => `<option value="${s.id}">${ui.esc(s.name)}</option>`).join('');
+      m.body.querySelector('#rc-store').innerHTML =
+        точки.map(s => `<option value="${s.id}"${s.is_default ? ' selected' : ''}>${ui.esc(s.name)}</option>`).join('');
+      форма.querySelector('[name=doc_date]').value = new Date().toISOString().slice(0, 10);
+      добавить(5);
+    })();
+
+    m.foot.querySelector('[data-act=cancel]').onclick = m.close;
+    const кнопка = m.foot.querySelector('[data-act=ok]');
+    кнопка.onclick = async () => {
+      const v = ui.formValues(форма);
+      if (!v.supplier_id) { ui.toast('Выберите поставщика', true); return; }
+      const строки = собрать();
+      if (!строки.length) { ui.toast('Добавьте хотя бы одно изделие', true); return; }
+      кнопка.disabled = true;
+      try {
+        const r = await api.post('/api/receipts', {
+          supplier_id: v.supplier_id,
+          store_id: v.store_id || null,
+          doc_number: v.doc_number,
+          doc_date: v.doc_date,
+          due_date: v.due_date,
+          ownership: v.consignment ? 'consignment' : 'own',
+          items: строки,
+        });
+        ui.toast(r.consignment
+          ? `Принято на реализацию: изделий ${r.items_count}`
+          : `Принято: изделий ${r.items_count} на ${ui.money(r.amount)}, долг записан`);
+        m.close(); onDone && onDone();
+      } catch (e) { ui.toastErr(e); кнопка.disabled = false; }
+    };
+  }
+
   // общий поисковый дропдаун клиентов (используется и в POS)
   function attachCustomerSearch(input, onPick) {
     const wrap = input.closest('.rel');
     let seq = 0;
     const clear = () => wrap.querySelectorAll('.search-results').forEach(b => b.remove());
+    const завести = запрос => newCustomerDialog(запрос, c => {
+      onPick(c);
+      input.value = c.name;
+      clear();
+    });
     const search = ui.debounce(async () => {
       const my = ++seq;
       const q = input.value.trim();
@@ -627,16 +840,29 @@ window.Pages.products = (() => {
       clear();
       const box = document.createElement('div');
       box.className = 'search-results';
+      /*
+       * Кнопка «завести» есть всегда, а не только при пустом поиске: полных
+       * тёзок в базе двое из десяти, и «Осмонова» в списке — не повод считать,
+       * что это та самая Осмонова.
+       */
       box.innerHTML = items.slice(0, 8).map((c, i) => `
         <div class="sr-item" data-i="${i}">
           <span>${ui.esc(c.name)}</span><span class="sr-sub">${ui.esc(c.phone || '')}</span>
-        </div>`).join('') || '<div class="sr-item muted">Не найдено</div>';
+        </div>`).join('')
+        + `<div class="sr-item" data-new="1" style="border-top:1px solid var(--line)">
+             <span class="strong">+ Завести клиента${items.length ? '' : ` «${ui.esc(q)}»`}</span>
+             <span class="sr-sub">${items.length ? 'если это не он' : 'ничего не нашлось'}</span>
+           </div>`;
       box.querySelectorAll('.sr-item[data-i]').forEach(el => {
         el.addEventListener('mousedown', () => {
           onPick(items[Number(el.dataset.i)]);
           input.value = items[Number(el.dataset.i)].name;
           clear();
         });
+      });
+      box.querySelector('[data-new]').addEventListener('mousedown', () => {
+        clear();
+        завести(q);
       });
       wrap.appendChild(box);
     });
@@ -909,6 +1135,7 @@ window.Pages.products = (() => {
           <div class="spacer"></div>
           <button class="btn" id="pf-view" title="Плитки или таблица">${view === 'grid' ? '☰ Списком' : '▦ Плитками'}</button>
           ${App.isAdmin() ? '<a class="btn" href="/api/export/products" download>Экспорт CSV</a>' : ''}
+          ${App.isAdmin() ? '<button class="btn" id="pf-receipt">📦 Приёмка от поставщика</button>' : ''}
           <button class="btn btn-primary" id="pf-add">${ui.icon('plus')} Добавить изделие</button>
         </div>
         <div class="chip-row" style="margin-bottom:14px" id="pf-chips">
@@ -960,6 +1187,8 @@ window.Pages.products = (() => {
         doRefresh();
       });
       el.querySelector('#pf-add').addEventListener('click', () => openEditor(null, doRefresh));
+      const приёмка = el.querySelector('#pf-receipt');
+      if (приёмка) приёмка.addEventListener('click', () => receiptDialog(doRefresh));
       await refresh(el);
       if (param) openDetail(Number(param), () => refresh(el));
     },
