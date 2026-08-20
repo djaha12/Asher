@@ -1,5 +1,5 @@
 'use strict';
-const { db, nowIso, round2, audit } = require('../db');
+const { db, nowIso, round2, audit, getSetting } = require('../db');
 const { ApiError } = require('./util');
 
 const FIELDS = ['name', 'phone', 'email', 'birthday', 'anniversary', 'discount',
@@ -13,7 +13,14 @@ function isValidDate(s) {
   return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
 }
 
-function validateCustomer(body, { partial = false } = {}) {
+/*
+ * Личная скидка клиента поднимает предел скидки в кассе — иначе продавцу
+ * пришлось бы звать владельца при каждой продаже постоянному покупателю.
+ * Отсюда следует обратное: сам продавец не может назначить личную скидку
+ * выше общего предела. Иначе потолок в кассе обходился бы за десять секунд —
+ * завести клиента «Иван» со скидкой 90% и продать ему.
+ */
+function validateCustomer(body, { partial = false, role = 'admin' } = {}) {
   const out = {};
   if (!partial || body.name !== undefined) {
     out.name = String(body.name || '').trim();
@@ -30,6 +37,14 @@ function validateCustomer(body, { partial = false } = {}) {
   if (body.discount !== undefined) {
     out.discount = round2(body.discount);
     if (out.discount < 0 || out.discount > 100) throw new ApiError(400, 'Скидка должна быть от 0 до 100%');
+    if (role !== 'admin') {
+      const предел = Number(getSetting('max_discount_percent'));
+      const потолок = Number.isFinite(предел) && предел >= 0 && предел <= 100 ? предел : 15;
+      if (out.discount > потолок) {
+        throw new ApiError(400,
+          `Личную скидку больше ${потолок}% назначает владелец.`);
+      }
+    }
   }
   return out;
 }
@@ -125,7 +140,7 @@ const routes = [
   {
     method: 'POST', path: '/api/customers',
     handler: ({ body, session }) => {
-      const data = validateCustomer(body);
+      const data = validateCustomer(body, { role: session.role });
       const fields = FIELDS.filter(f => data[f] !== undefined);
       const info = db.prepare(
         `INSERT INTO customers (${fields.join(',')}, created_at) VALUES (${fields.map(() => '?').join(',')}, ?)`
@@ -140,7 +155,7 @@ const routes = [
       const id = Number(params.id);
       const existing = db.prepare('SELECT * FROM customers WHERE id = ?').get(id);
       if (!existing) throw new ApiError(404, 'Клиент не найден');
-      const data = validateCustomer(body, { partial: true });
+      const data = validateCustomer(body, { partial: true, role: session.role });
       const fields = FIELDS.filter(f => data[f] !== undefined);
       if (!fields.length) return { ok: true };
       db.prepare(`UPDATE customers SET ${fields.map(f => `${f} = ?`).join(', ')} WHERE id = ?`)

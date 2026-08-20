@@ -6,6 +6,64 @@ const DEFAULT_EXPENSE_CATS = ['Закупка товара', 'Оплата по�
   'Коммунальные услуги', 'Реклама', 'Охрана', 'Банковские услуги', 'Прочие расходы'];
 const DEFAULT_INCOME_CATS = ['Продажа', 'Погашение долга', 'Оплата заказа', 'Прочие доходы'];
 
+
+/*
+ * ---------- Постоянные расходы ----------
+ *
+ * Аренда и зарплата — главные расходы магазина, и они одинаковые из месяца
+ * в месяц. Именно поэтому про них забывают: сумма известна, срок известен,
+ * а напомнить некому. Забытый расход не безобиден — он завышает прибыль
+ * в отчёте, и владелец весь месяц считает, что заработал больше.
+ *
+ * Система их НЕ создаёт сама, и это решение осознанное. Сумма почти всегда
+ * чуть другая: премия, неполный месяц, выросла аренда. Записать за владельца
+ * деньги, которых он не подтверждал, значит положить в отчёт операцию,
+ * которой не было. Поэтому система напоминает и подставляет сумму,
+ * а нажимает человек.
+ */
+
+// Записан ли уже расход этой категории (и этому сотруднику) в текущем месяце.
+function записанВЭтомМесяце(правило, месяц) {
+  const строка = db.prepare(
+    `SELECT COUNT(*) AS c FROM finance_ops
+      WHERE type = 'expense' AND category = ?
+        AND strftime('%Y-%m', created_at) = ?
+        AND (? IS NULL OR employee_id = ?)`
+  ).get(правило.category, месяц, правило.employee_id, правило.employee_id);
+  return строка.c > 0;
+}
+
+/*
+ * Что из постоянного ещё не записано в этом месяце.
+ *
+ * Напоминаем только когда срок ПОДОШЁЛ: аренда первого числа не должна
+ * гореть красным двадцать девять дней до него. Иначе напоминание примелькается
+ * и перестанет работать — а это единственное, ради чего оно есть.
+ */
+function неЗаписаны(сегодня = new Date()) {
+  const месяц = сегодня.toISOString().slice(0, 7);
+  const день = сегодня.getDate();
+  const правила = db.prepare(
+    `SELECT r.*, u.name AS employee_name FROM regular_expenses r
+      LEFT JOIN users u ON u.id = r.employee_id
+      WHERE r.active = 1 ORDER BY r.day_of_month, r.category`
+  ).all();
+  return правила
+    .filter(п => день >= п.day_of_month)
+    .filter(п => !записанВЭтомМесяце(п, месяц))
+    .map(п => ({
+      id: п.id,
+      category: п.category,
+      amount: round2(п.amount),
+      day_of_month: п.day_of_month,
+      employee_id: п.employee_id,
+      employee_name: п.employee_name,
+      cash: п.cash,
+      note: п.note,
+      подпись: п.employee_name ? `${п.category} — ${п.employee_name}` : п.category,
+    }));
+}
+
 const routes = [
   {
     method: 'GET', path: '/api/finance', admin: true,
@@ -18,9 +76,11 @@ const routes = [
       if (query.category) { cond.push('f.category = ?'); args.push(query.category); }
       const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
       const rows = db.prepare(
-        `SELECT f.*, u.name AS user_name, s.number AS sale_number, o.number AS order_number
+        `SELECT f.*, u.name AS user_name, e.name AS employee_name,
+                s.number AS sale_number, o.number AS order_number
          FROM finance_ops f
          LEFT JOIN users u ON u.id = f.user_id
+         LEFT JOIN users e ON e.id = f.employee_id
          LEFT JOIN sales s ON s.id = f.sale_id
          LEFT JOIN service_orders o ON o.id = f.order_id
          ${where} ORDER BY f.created_at DESC LIMIT 1000`
@@ -52,9 +112,21 @@ const routes = [
       if (!category) throw new ApiError(400, 'Укажите категорию');
       const amount = round2(body.amount);
       if (!(amount > 0)) throw new ApiError(400, 'Сумма должна быть больше нуля');
+      /*
+       * Наличными или нет. По умолчанию да — большинство расходов магазина
+       * оплачивается из ящика. Но аренда или зарплата переводом денег оттуда
+       * не забирают, и если считать их наличными, сверка кассы каждый месяц
+       * показывала бы недостачу, которой не было.
+       */
+      const наличными = body.cash === undefined ? 1 : (body.cash ? 1 : 0);
+      // Кому платили — для зарплаты. Иначе строка «Зарплата 210 000» не отвечает
+      // на вопрос «а Анне заплатили?», который возникает каждый месяц.
+      const сотрудник = body.employee_id ? Number(body.employee_id) : null;
       const info = db.prepare(
-        `INSERT INTO finance_ops (type, category, amount, note, user_id, created_at) VALUES (?,?,?,?,?,?)`
-      ).run(type, category, amount, String(body.note || ''), session.userId, nowIso());
+        `INSERT INTO finance_ops (type, category, amount, note, cash, employee_id, user_id, created_at)
+         VALUES (?,?,?,?,?,?,?,?)`
+      ).run(type, category, amount, String(body.note || ''), наличными, сотрудник,
+        session.userId, nowIso());
       audit(session.userId, 'create', 'finance', Number(info.lastInsertRowid),
         `${type === 'income' ? 'Приход' : 'Расход'} ${category}: ${amount}`);
       return { id: Number(info.lastInsertRowid) };
@@ -71,6 +143,79 @@ const routes = [
       }
       db.prepare('DELETE FROM finance_ops WHERE id = ?').run(id);
       audit(session.userId, 'delete', 'finance', id, `${op.category}: ${op.amount}`);
+      return { ok: true };
+    },
+  },
+  {
+    /*
+     * Постоянные расходы: список правил и то, что из них ещё не оплачено.
+     * Отдаём вместе — на экране это один раздел, и два запроса тут ни к чему.
+     */
+    method: 'GET', path: '/api/finance/regular', admin: true,
+    handler: () => {
+      const items = db.prepare(
+        `SELECT r.*, u.name AS employee_name FROM regular_expenses r
+          LEFT JOIN users u ON u.id = r.employee_id
+          ORDER BY r.active DESC, r.day_of_month, r.category`
+      ).all();
+      return { items, ждут: неЗаписаны() };
+    },
+  },
+  {
+    method: 'POST', path: '/api/finance/regular', admin: true,
+    handler: ({ body, session }) => {
+      const category = String(body.category || '').trim();
+      if (!category) throw new ApiError(400, 'Укажите, за что расход');
+      const amount = round2(body.amount);
+      if (!(amount > 0)) throw new ApiError(400, 'Сумма должна быть больше нуля');
+      const день = Math.min(Math.max(Number(body.day_of_month) || 1, 1), 28);
+      const info = db.prepare(
+        `INSERT INTO regular_expenses
+           (category, amount, day_of_month, employee_id, cash, note, active, created_at)
+         VALUES (?,?,?,?,?,?,1,?)`
+      ).run(category, amount, день,
+        body.employee_id ? Number(body.employee_id) : null,
+        body.cash === undefined ? 1 : (body.cash ? 1 : 0),
+        String(body.note || ''), nowIso());
+      audit(session.userId, 'create', 'finance', Number(info.lastInsertRowid),
+        `Постоянный расход: ${category}, ${amount}, ${день}-го числа`);
+      return { id: Number(info.lastInsertRowid) };
+    },
+  },
+  {
+    method: 'PUT', path: '/api/finance/regular/:id', admin: true,
+    handler: ({ params, body, session }) => {
+      const п = db.prepare('SELECT * FROM regular_expenses WHERE id = ?').get(Number(params.id));
+      if (!п) throw new ApiError(404, 'Не найдено');
+      const amount = body.amount === undefined ? п.amount : round2(body.amount);
+      if (!(amount > 0)) throw new ApiError(400, 'Сумма должна быть больше нуля');
+      const день = body.day_of_month === undefined ? п.day_of_month
+        : Math.min(Math.max(Number(body.day_of_month) || 1, 1), 28);
+      const активен = body.active === undefined ? п.active : (body.active ? 1 : 0);
+      db.prepare(
+        `UPDATE regular_expenses SET category = ?, amount = ?, day_of_month = ?,
+           employee_id = ?, cash = ?, note = ?, active = ? WHERE id = ?`
+      ).run(String(body.category ?? п.category).trim() || п.category, amount, день,
+        body.employee_id === undefined ? п.employee_id
+          : (body.employee_id ? Number(body.employee_id) : null),
+        body.cash === undefined ? п.cash : (body.cash ? 1 : 0),
+        body.note === undefined ? п.note : String(body.note), активен, п.id);
+      audit(session.userId, 'update', 'finance', п.id, `Постоянный расход: ${п.category}`);
+      return { ok: true };
+    },
+  },
+  {
+    method: 'DELETE', path: '/api/finance/regular/:id', admin: true,
+    handler: ({ params, session }) => {
+      const п = db.prepare('SELECT * FROM regular_expenses WHERE id = ?').get(Number(params.id));
+      if (!п) throw new ApiError(404, 'Не найдено');
+      /*
+       * Удаляем само правило, но НЕ трогаем уже записанные расходы: они —
+       * история денег магазина, и переписывать её из-за того, что перестали
+       * снимать помещение, нельзя.
+       */
+      db.prepare('DELETE FROM regular_expenses WHERE id = ?').run(п.id);
+      audit(session.userId, 'delete', 'finance', п.id, `Убран постоянный расход: ${п.category}`);
       return { ok: true };
     },
   },
@@ -143,4 +288,4 @@ const routes = [
   },
 ];
 
-module.exports = { routes };
+module.exports = { routes, неЗаписаны };

@@ -14,9 +14,49 @@ const { PRESETS, LOCALE_KEYS, presetFor } = require('../locale');
  * изделия, а не способ хранения цены: в изделии всегда лежит готовая
  * розничная цена, поэтому смена цены грамма не переписывает задним числом
  * ни ценники, ни прошлые чеки.
+ *
+ * max_discount_percent — потолок скидки для продавца. Отдаётся и продавцу
+ * тоже: касса должна показать предел ещё до того, как он упрётся в отказ.
  */
 const SETTING_KEYS = ['store_name', 'store_address', 'store_phone', 'usd_rate',
-  'gram_price', 'work_price', ...LOCALE_KEYS];
+  'gram_price', 'work_price', 'max_discount_percent', ...LOCALE_KEYS];
+
+/*
+ * Состояние резервных копий — то, что владелец должен узнать САМ, не заходя
+ * специально проверять.
+ *
+ * Копии — единственное, что стоит между магазином и потерей всего. При этом
+ * ломаются они тихо: закончилось место, сменились права на папку, отвалился
+ * диск. Раньше о сбое знала только строка в чёрном окне, куда никто не смотрит.
+ * Теперь состояние считается здесь и показывается и на «Безопасности»,
+ * и на Главной.
+ */
+function состояниеКопий() {
+  const когда = getSetting('last_backup') || '';
+  const ошибка = getSetting('backup_error') || '';
+  const мс = Date.parse(когда) || 0;
+  const часовНазад = мс ? Math.floor((Date.now() - мс) / 3600000) : null;
+  /*
+   * Копия делается раз в сутки. Тревожимся после 30 часов, а не после 24:
+   * запас нужен на то, что система ночью не работала, а проверка идёт раз в час.
+   * Иначе владелец каждое утро видел бы ложную тревогу и перестал бы её замечать.
+   */
+  const устарела = мс === 0 || часовНазад >= 30;
+
+  let свободноМб = null;
+  try { свободноМб = require('../sync').свободноМб(); } catch { /* не смогли — не беда */ }
+  const малоМеста = свободноМб !== null && свободноМб < 500;
+
+  return {
+    last_backup: когда,
+    backup_hours_ago: часовНазад,
+    backup_stale: устарела,
+    backup_error: ошибка,
+    backup_error_at: getSetting('backup_error_at') || '',
+    disk_free_mb: свободноМб,
+    disk_low: малоМеста,
+  };
+}
 
 const routes = [
   // --- Общие настройки ---
@@ -47,17 +87,40 @@ const routes = [
           if (body[k] === undefined) setSetting(k, String(preset[k]));
         }
       }
+      /*
+       * Потолок скидки проверяем отдельно: пустое поле или «много» превратились
+       * бы в ноль, а ноль здесь означает «скидки запрещены совсем». Продавцы
+       * узнали бы об этом утром у прилавка, а не в момент правки настроек.
+       */
+      if (body.max_discount_percent !== undefined) {
+        const сырое = String(body.max_discount_percent).trim();
+        const п = Number(сырое);
+        // Пустое поле особо: Number('') — это ноль, а ноль здесь значит
+        // «скидки запрещены совсем». Стёртое поле и запрет скидок — разные
+        // намерения, и угадывать за владельца мы не будем.
+        if (сырое === '' || !Number.isFinite(п) || п < 0 || п > 100) {
+          throw new ApiError(400,
+            'Предел скидки — число от 0 до 100. Если продавцам скидки не разрешены, поставьте 0.');
+        }
+        body.max_discount_percent = Math.round(п * 10) / 10;
+      }
       // Курс влияет на себестоимость всего, что закупят дальше, — его смена
       // должна оставлять в журнале конкретные цифры, а не общую фразу.
       const rateBefore = getSetting('usd_rate');
+      const пределБыл = getSetting('max_discount_percent');
       for (const k of SETTING_KEYS) {
         if (body[k] !== undefined) setSetting(k, String(body[k]));
       }
       const rateAfter = getSetting('usd_rate');
-      audit(session.userId, 'update', 'settings', null,
-        rateAfter !== rateBefore
-          ? `Курс доллара: ${rateBefore || '—'} → ${rateAfter}`
+      const пределСтал = getSetting('max_discount_percent');
+      // Поднятый потолок скидок — то, о чём владелец должен вспомнить сам
+      // через полгода, глядя в журнал: цифры, а не «изменены настройки».
+      const что = rateAfter !== rateBefore
+        ? `Курс доллара: ${rateBefore || '—'} → ${rateAfter}`
+        : (пределСтал !== пределБыл
+          ? `Предел скидки продавца: ${пределБыл || '—'}% → ${пределСтал}%`
           : 'Изменены настройки магазина');
+      audit(session.userId, 'update', 'settings', null, что);
       return { ok: true };
     },
   },
@@ -116,6 +179,7 @@ const routes = [
         devices: db.prepare('SELECT COUNT(*) AS c FROM sessions WHERE expires_at >= ?').get(nowIso()).c,
         last_backup: getSetting('last_backup') || '',
         pending_devices: db.prepare('SELECT COUNT(*) AS c FROM devices WHERE approved = 0').get().c,
+        ...состояниеКопий(),
       };
     },
   },
@@ -470,4 +534,4 @@ const routes = [
   },
 ];
 
-module.exports = { routes };
+module.exports = { routes, состояниеКопий };

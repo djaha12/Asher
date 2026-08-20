@@ -1,7 +1,49 @@
 'use strict';
-const { db, nowIso, round2, money, audit, nextNumber, transaction } = require('../db');
+const { db, nowIso, round2, money, audit, nextNumber, transaction, getSetting } = require('../db');
 const { ApiError } = require('./util');
 const { recordConsignmentSale, revokeConsignmentSale } = require('./debts');
+
+/*
+ * ---------- Потолок скидки ----------
+ *
+ * До этого скидка ограничивалась только ценой изделия: продавец мог поставить
+ * скидку ровно в цену и отдать кольцо за ноль, и система бы не возразила.
+ * Так же выглядит и обычная опечатка — вместо 5 000 набрали 50 000 на изделии
+ * за 52 000. Замечает это владелец в лучшем случае вечером, в отчёте.
+ *
+ * Как устроено:
+ *  - у продавца скидка не может превысить предел из настроек (по умолчанию 15%);
+ *  - личная скидка клиента поднимает предел для этого чека: её ставит владелец,
+ *    значит он её и разрешил. Продавец не может выдать личную скидку выше
+ *    общего предела — это проверяется там, где правят карточку клиента;
+ *  - комплект продаётся по цене, которую назначил владелец, и его раскладка
+ *    может быть глубже предела. Поэтому скидку по комплекту пересчитываем
+ *    здесь заново и сверяем: иначе достаточно было бы прислать любой номер
+ *    комплекта и любую скидку;
+ *  - владелец не ограничен ничем, но каждая его скидка сверх предела попадает
+ *    в журнал отдельной строкой.
+ *
+ * Проверки «не ниже закупочной» для продавца сознательно НЕТ. Продавец
+ * закупочную не видит — это отдельная гарантия системы. Отказ «эта скидка
+ * уводит ниже закупочной» её нарушает: подбирая скидку, закупочную можно
+ * вычислить с точностью до сома. Крайний случай — продажу за бесценок —
+ * закрывает потолок в процентах, а тонкую настройку владелец делает ценами,
+ * которые видит только он.
+ */
+function пределСкидки() {
+  const п = Number(getSetting('max_discount_percent'));
+  return Number.isFinite(п) && п >= 0 && п <= 100 ? п : 15;
+}
+
+// Скидка на изделие в составе комплекта — та, что следует из цены комплекта.
+// Возвращает null, если изделие к этому комплекту не относится.
+function скидкаПоКомплекту(setId, productId) {
+  const комплект = db.prepare('SELECT * FROM product_sets WHERE id = ?').get(setId);
+  if (!комплект) return null;
+  const { setPayload } = require('./sets');
+  const позиция = (setPayload(комплект).items || []).find(и => и.id === productId);
+  return позиция ? round2(позиция.sale_discount || 0) : null;
+}
 
 function saleDetail(id, role = 'admin') {
   const s = db.prepare(
@@ -55,6 +97,16 @@ function createSaleTx(body, session, opts = {}) {
     if (!customer) throw new ApiError(400, 'Клиент не найден');
   }
 
+  /*
+   * Предел скидки на этот чек. Личная скидка клиента поднимает его: её
+   * назначил владелец в карточке клиента, и требовать его же согласия
+   * при каждой продаже такому клиенту было бы издевательством над кассой.
+   */
+  const общийПредел = пределСкидки();
+  const личныйПроцент = customer ? round2(customer.discount || 0) : 0;
+  const пределПроцентов = Math.max(общийПредел, личныйПроцент);
+  const сверхПредела = [];   // строки для журнала: владелец дал больше обычного
+
   let subtotal = 0, discountItems = 0, costTotal = 0;
   const prepared = [];
   const seen = new Set();
@@ -72,12 +124,29 @@ function createSaleTx(body, session, opts = {}) {
     const price = round2(p.retail_price);
     const discount = round2(it.discount || 0);
     if (discount < 0 || discount > price) throw new ApiError(400, `Недопустимая скидка на «${p.name}»`);
-    subtotal = round2(subtotal + price);
-    discountItems = round2(discountItems + discount);
-    costTotal = round2(costTotal + p.purchase_price);
     // Комплект в чеке — только подпись позиции: цена и скидка уже разложены
     // по изделиям, поэтому на расчёты эта колонка не влияет.
     const setId = it.set_id ? Number(it.set_id) : null;
+
+    const процент = price > 0 ? round2(discount * 100 / price) : 0;
+    if (процент > пределПроцентов + 0.01) {
+      // Копейка запаса — от округления процентов, а не поблажка.
+      const поКомплекту = setId ? скидкаПоКомплекту(setId, p.id) : null;
+      const этоЦенаКомплекта = поКомплекту !== null && discount <= поКомплекту + 0.01;
+      if (session.role !== 'admin' && !этоЦенаКомплекта) {
+        throw new ApiError(400,
+          `Скидка на «${p.name}» — ${процент}%, а продавцу разрешено до ${пределПроцентов}%. ` +
+          'Такую скидку проводит владелец: он может оформить продажу сам или ' +
+          'поднять предел в Настройках.');
+      }
+      if (!этоЦенаКомплекта) {
+        сверхПредела.push(`«${p.name}» ${процент}% (${money(discount)})`);
+      }
+    }
+
+    subtotal = round2(subtotal + price);
+    discountItems = round2(discountItems + discount);
+    costTotal = round2(costTotal + p.purchase_price);
     prepared.push({ product: p, price, discount, final: round2(price - discount), setId });
   }
 
@@ -150,6 +219,18 @@ function createSaleTx(body, session, opts = {}) {
 
   audit(session.userId, 'sale', 'sale', saleId,
     `${number} на ${money(total)}${debt > 0 ? `, в долг ${money(debt)}` : ''}`);
+  /*
+   * Скидка сверх обычного предела — отдельной строкой в журнале.
+   *
+   * Сюда попадают только продажи владельца: продавца до этого места не
+   * пустили. Строка нужна не ради недоверия, а ради памяти: через полгода
+   * при разборе «почему в марте прибыль просела» видно, что скидку дали
+   * тогда-то, на что и какую.
+   */
+  if (сверхПредела.length) {
+    audit(session.userId, 'discount', 'sale', saleId,
+      `${number}: скидка сверх предела ${пределПроцентов}% — ${сверхПредела.join(', ')}`);
+  }
   return { saleId, number, total, paid, debt };
 }
 

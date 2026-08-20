@@ -91,6 +91,62 @@ CREATE TABLE IF NOT EXISTS devices (
 );
 CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id, approved);
 
+/*
+ * Сверка кассы.
+ *
+ * Шесть продавцов принимают наличные, а сверить деньги в ящике с тем, что
+ * в системе, до сих пор было нечем. Расхождение владелец заметил бы, только
+ * когда оно накопится, — и уже не понял бы, откуда оно взялось. Это самая
+ * частая дыра в рознице, и она чаще не про воровство, а про обычные ошибки
+ * со сдачей.
+ *
+ * Каждая сверка — это точка отсчёта для следующей: «в ящике было столько-то»,
+ * дальше считаем движение денег от неё. Поэтому храним и пересчитанное, и
+ * ожидавшееся: разницу нельзя вычислить задним числом, если не помнить обе
+ * цифры на тот момент.
+ */
+CREATE TABLE IF NOT EXISTS cash_counts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  store_id INTEGER REFERENCES stores(id) ON DELETE SET NULL,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  opening REAL NOT NULL DEFAULT 0,      -- сколько было в ящике на прошлой сверке
+  movement REAL NOT NULL DEFAULT 0,     -- пришло минус ушло с тех пор
+  expected REAL NOT NULL DEFAULT 0,     -- сколько должно быть
+  counted REAL NOT NULL DEFAULT 0,      -- сколько пересчитали руками
+  difference REAL NOT NULL DEFAULT 0,   -- counted - expected
+  since_at TEXT NOT NULL DEFAULT '',    -- с какого момента считали движение
+  note TEXT DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cash_counts_created ON cash_counts(created_at);
+
+/*
+ * Постоянные расходы: аренда, зарплата, коммунальные, охрана.
+ *
+ * Они одинаковые из месяца в месяц, и именно поэтому про них забывают: сумма
+ * известна, дата известна, никто не напоминает. А забытый расход — это не
+ * «потом впишем»: он молча завышает прибыль в отчёте, и владелец весь месяц
+ * думает, что заработал больше, чем на самом деле.
+ *
+ * Система их НЕ создаёт сама. Сумма почти всегда чуть другая — премия,
+ * неполный месяц, выросла аренда, — и записывать за владельца деньги, которых
+ * он не подтверждал, нельзя: в отчёте появятся операции, которых не было.
+ * Поэтому система только напоминает и подставляет сумму, а решает человек.
+ */
+CREATE TABLE IF NOT EXISTS regular_expenses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  category TEXT NOT NULL,
+  amount REAL NOT NULL DEFAULT 0,
+  day_of_month INTEGER NOT NULL DEFAULT 1,
+  -- Для зарплаты: кому именно. Одна строка «Зарплата 210 000» не отвечает
+  -- на вопрос «а Анне заплатили?», а он возникает каждый месяц.
+  employee_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  cash INTEGER NOT NULL DEFAULT 1,
+  note TEXT DEFAULT '',
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS categories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
@@ -254,6 +310,10 @@ CREATE TABLE IF NOT EXISTS finance_ops (
   sale_id INTEGER REFERENCES sales(id) ON DELETE SET NULL,
   order_id INTEGER REFERENCES service_orders(id) ON DELETE SET NULL,
   user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  -- Наличными или нет. Нужно для сверки кассы: аренда, уплаченная переводом,
+  -- денег из ящика не забирает, и вычитать её оттуда — значит каждый месяц
+  -- показывать недостачу, которой не было.
+  cash INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_finance_created ON finance_ops(created_at);
@@ -377,6 +437,13 @@ function addColumn(table, column, definition) {
 }
 
 function migrate() {
+  // Наличная ли операция — для сверки кассы. У всех прежних записей ставим 1:
+  // до появления сверки касса и была единственным способом платить.
+  addColumn('finance_ops', 'cash', 'INTEGER NOT NULL DEFAULT 1');
+  // Кому платили — для зарплаты. Без этого «Зарплата 210 000» не отвечает
+  // на вопрос «а Анне заплатили?».
+  addColumn('finance_ops', 'employee_id', 'INTEGER REFERENCES users(id) ON DELETE SET NULL');
+
   addColumn('products', 'store_id', 'INTEGER REFERENCES stores(id) ON DELETE SET NULL');
   addColumn('products', 'ownership', `TEXT NOT NULL DEFAULT 'own'`);
   addColumn('sales', 'paid', 'REAL NOT NULL DEFAULT 0');
@@ -564,6 +631,20 @@ function ensureDefaults() {
   // первом запуске. Значение ориентировочное, владелец правит его руками.
   if (!getSetting('usd_rate')) setSetting('usd_rate', '89');
   if (!getSetting('bonus_percent')) setSetting('bonus_percent', '3');
+
+  /*
+   * Потолок скидки для продавца.
+   *
+   * Без него продавец мог поставить скидку в размере всей цены и продать
+   * кольцо за ноль — система бы не возразила. Это не выдумка про воровство:
+   * так же выглядит опечатка, когда в поле скидки вместо 5 000 набирают
+   * 50 000, а изделие стоит 52 000.
+   *
+   * Значение по умолчанию щедрое: в ювелирной рознице 15% — это много,
+   * и в обычный день продавец в него не упрётся. Владелец меняет его
+   * в Настройках, а сам ограничением не связан.
+   */
+  if (!getSetting('max_discount_percent')) setSetting('max_discount_percent', '15');
 
   // Локаль: при первом запуске подставляем набор страны по умолчанию.
   // Дальше владелец может сменить страну или отдельные поля в Настройках.

@@ -1,6 +1,6 @@
 require('./устройство');   // проверки называют себя устройством, как настоящее приложение
 const ВЫВОД = require('node:path').join(__dirname, '.вывод');
-const { chromium } = require('./браузер');
+const { chromium, снимок } = require('./браузер');
 const BASE = process.env.BASE || 'http://127.0.0.1:3122';
 const OUT = ВЫВОД + '/shots-roles';
 require('fs').mkdirSync(OUT, { recursive: true });
@@ -49,7 +49,7 @@ const BAD_WORDS = /Закупочн|Закупка в валюте|Наценк�
     const bad = text.match(BAD_WORDS);
     check(`${title}: без внутренних цифр`, !bad, bad && text.split('\n')
       .filter(l => BAD_WORDS.test(l)).slice(0, 3).join(' / '));
-    await p.screenshot({ path: `${OUT}/продавец-${key}.png` });
+    await снимок(p, { path: `${OUT}/продавец-${key}.png` });
   }
 
   // Каталог: карточка и форма редактирования
@@ -62,7 +62,7 @@ const BAD_WORDS = /Закупочн|Закупка в валюте|Наценк�
   // «закупка» может встретиться в самом названии изделия — ловим только ярлыки
   check('в таблице каталога нет внутренних цифр', !BAD_WORDS.test(rowText),
     rowText.split('\n').filter(l => BAD_WORDS.test(l)).slice(0, 2).join(' / '));
-  await p.screenshot({ path: `${OUT}/продавец-каталог-таблица.png`, fullPage: true });
+  await снимок(p, { path: `${OUT}/продавец-каталог-таблица.png`, fullPage: true });
   await p.click('#pf-view'); await p.waitForTimeout(1400);   // обратно на плитки
 
   const card = await p.$('.pcard');
@@ -72,7 +72,7 @@ const BAD_WORDS = /Закупочн|Закупка в валюте|Наценк�
     check('карточка изделия: без закупочной и наценки', !BAD_WORDS.test(body),
       body.split('\n').filter(l => BAD_WORDS.test(l)).join(' / '));
     check('карточка изделия: розничная цена видна', /сом|⃀|\d/.test(body));
-    await p.screenshot({ path: `${OUT}/продавец-карточка.png`, fullPage: true });
+    await снимок(p, { path: `${OUT}/продавец-карточка.png`, fullPage: true });
     await p.keyboard.press('Escape'); await p.waitForTimeout(500);
   }
 
@@ -87,7 +87,7 @@ const BAD_WORDS = /Закупочн|Закупка в валюте|Наценк�
     const ftext = await p.$eval('.modal-body', el => el.innerText);
     check('форма: без слова «Закупочная»', !BAD_WORDS.test(ftext),
       ftext.split('\n').filter(l => BAD_WORDS.test(l)).join(' / '));
-    await p.screenshot({ path: `${OUT}/продавец-форма-изделия.png`, fullPage: true });
+    await снимок(p, { path: `${OUT}/продавец-форма-изделия.png`, fullPage: true });
 
     // Продавец правит настоящее изделие — закупочная не должна пропасть
     await p.keyboard.press('Escape'); await p.waitForTimeout(400);
@@ -95,7 +95,7 @@ const BAD_WORDS = /Закупочн|Закупка в валюте|Наценк�
 
   // Продажа из кассы продавцом — основная работа, она обязана идти без запинок
   await p.goto(`${BASE}/#/sales`); await p.waitForTimeout(1800);
-  await p.screenshot({ path: `${OUT}/продавец-касса.png`, fullPage: true });
+  await снимок(p, { path: `${OUT}/продавец-касса.png`, fullPage: true });
 
   // Сравним с админом: у него всё внутреннее на месте
   const p2 = await (await b.newContext({ viewport: { width: 1500, height: 980 }, deviceScaleFactor: 2 })).newPage();
@@ -115,7 +115,7 @@ const BAD_WORDS = /Закупочн|Закупка в валюте|Наценк�
   await add2.click(); await p2.waitForTimeout(900);
   check('у администратора поле закупочной осталось', await p2.isVisible('[name=purchase_price]'));
   check('у администратора валютная закупка осталась', await p2.isVisible('#pf-usd'));
-  await p2.screenshot({ path: `${OUT}/админ-форма-изделия.png`, fullPage: true });
+  await снимок(p2, { path: `${OUT}/админ-форма-изделия.png`, fullPage: true });
 
   check('в браузере нет ошибок', errs.length === 0, errs.slice(0, 3).join(' | '));
   console.log(`\nИтого: ${ok} ok, ${fail} fail`);

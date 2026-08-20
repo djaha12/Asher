@@ -410,13 +410,50 @@ window.Pages.sales = (() => {
     }).catch(ui.toastErr);
   }
 
+  /*
+   * ---------- Потолок скидки ----------
+   *
+   * Касса обязана показать предел ЗАРАНЕЕ. Отказ в момент «Оформить продажу»,
+   * когда клиент уже достал деньги, — худший момент из возможных: продавец
+   * при клиенте выясняет, что так нельзя, и заново набирает чек.
+   *
+   * Настоящая проверка всё равно на сервере: здесь мы только не даём набрать
+   * заведомо невозможное. Предел спрашиваем при каждом открытии кассы —
+   * владелец мог поменять его минуту назад со своего компьютера.
+   */
+  async function пределИзНастроек() {
+    try {
+      const s = await api.get('/api/settings');
+      const n = Number(s.max_discount_percent);
+      return Number.isFinite(n) && n >= 0 && n <= 100 ? n : 15;
+    } catch { return 15; }
+  }
+
   // ---------- Новая продажа (POS) ----------
-  function newSale(initialProduct, initialCustomer, initialSet) {
+  async function newSale(initialProduct, initialCustomer, initialSet) {
+    const ПРЕДЕЛ = App.isAdmin() ? 100 : await пределИзНастроек();
     const state = {
       items: [],          // {product, discount}
       customer: null,
       payment: 'cash',
     };
+
+    /*
+     * Сколько сом скидки можно поставить на эту позицию.
+     *
+     * Владелец не ограничен. У продавца потолок поднимает личная скидка
+     * клиента — её назначил владелец. Изделия из комплекта не трогаем вовсе:
+     * там скидка вытекает из цены комплекта, которую назначил тот же владелец,
+     * и сервер сверяет её со своей раскладкой.
+     */
+    function максСкидка(it) {
+      const цена = Number(it.product.retail_price) || 0;
+      if (App.isAdmin() || it.setId) return цена;
+      const личная = state.customer ? Number(state.customer.discount) || 0 : 0;
+      return Math.round(цена * Math.max(ПРЕДЕЛ, личная)) / 100;
+    }
+    const пределЧека = () => Math.max(ПРЕДЕЛ,
+      state.customer ? Number(state.customer.discount) || 0 : 0);
 
     const m = ui.modal({
       title: 'Новая продажа',
@@ -445,7 +482,9 @@ window.Pages.sales = (() => {
           </div>
         </div>
         <div class="form-grid">
-          <label class="field"><span>Скидка на чек, %</span><input type="number" id="pos-disc-pct" min="0" max="100" step="0.5" placeholder="0"></label>
+          <label class="field"><span>Скидка на чек, %</span>
+            <input type="number" id="pos-disc-pct" min="0" max="100" step="0.5" placeholder="0">
+            <span class="form-hint" id="pos-disc-hint"></span></label>
           <label class="field"><span>Комментарий</span><input type="text" id="pos-note"></label>
         </div>
 
@@ -483,20 +522,43 @@ window.Pages.sales = (() => {
     }
 
     function renderItems() {
+      // Предел мог измениться после того, как скидку уже поставили: выбрали
+      // клиента с личной скидкой, а потом убрали его. Подрезаем каждый раз,
+      // чтобы на экране не осталось суммы, которую сервер не примет.
+      for (const it of state.items) it.discount = Math.min(it.discount, максСкидка(it));
+
       if (!state.items.length) {
         itemsEl.innerHTML = '<div class="empty" style="padding:22px"><p>Добавьте изделия через поиск выше</p></div>';
       } else {
-        itemsEl.innerHTML = state.items.map((it, i) => `
+        itemsEl.innerHTML = state.items.map((it, i) => {
+          const макс = максСкидка(it);
+          const упёрся = !App.isAdmin() && !it.setId && it.discount >= макс - 0.009 && макс > 0;
+          // Продажа ниже закупочной — забота владельца: продавец закупочную
+          // не видит, и говорить ему о ней здесь нельзя. Поле приходит только
+          // в ответах администратору, поэтому строка сама собой не покажется.
+          const убыток = it.product.purchase_price !== undefined
+            && it.product.retail_price - it.discount < it.product.purchase_price;
+          return `
           <div class="pos-item">
             <div>
               <div class="pi-name">${ui.esc(it.product.name)}</div>
-              <div class="pi-sub">${ui.esc(it.product.sku)}${it.product.metal ? ' · ' + ui.esc(it.product.metal) : ''}${it.product.status === 'reserved' ? ' · <b>из резерва</b>' : ''}</div>
+              <div class="pi-sub">${ui.esc(it.product.sku)}${it.product.metal ? ' · ' + ui.esc(it.product.metal) : ''}${it.product.status === 'reserved' ? ' · <b>из резерва</b>' : ''}${
+                убыток ? ' · <b class="crit">ниже закупочной</b>' : ''}${
+                упёрся ? ' · <span class="warn">предел скидки</span>' : ''}</div>
             </div>
             <div class="num money">${ui.money(it.product.retail_price)}</div>
-            <input type="number" class="input" data-i="${i}" min="0" max="${it.product.retail_price}" step="1" value="${it.discount || ''}" placeholder="скидка">
+            <input type="number" class="input" data-i="${i}" min="0" max="${макс}" step="1" value="${it.discount || ''}" placeholder="скидка">
             <button class="btn btn-sm btn-danger" data-del="${i}">×</button>
-          </div>`).join('');
+          </div>`;
+        }).join('');
       }
+      const подсказка = m.body.querySelector('#pos-disc-hint');
+      if (подсказка) {
+        подсказка.innerHTML = App.isAdmin()
+          ? ''
+          : `Больше ${пределЧека()}% проводит владелец`;
+      }
+      discPctInput.max = App.isAdmin() ? 100 : пределЧека();
       const { subtotal, discount, total } = calc();
       // Долг: сколько остаётся за клиентом после того, что он платит сейчас.
       const partial = partialCb.checked;
@@ -528,7 +590,12 @@ window.Pages.sales = (() => {
       const i = e.target.dataset.i;
       if (i === undefined) return;
       const it = state.items[Number(i)];
-      it.discount = Math.min(Math.max(Number(e.target.value) || 0, 0), it.product.retail_price);
+      const набрано = Math.max(Number(e.target.value) || 0, 0);
+      const макс = максСкидка(it);
+      if (набрано > макс + 0.009 && !App.isAdmin()) {
+        ui.toast(`Скидка больше ${пределЧека()}% — её проводит владелец`, true);
+      }
+      it.discount = Math.min(набрано, макс);
       renderItems();
       // вернуть фокус в поле скидки после перерисовки
       const el2 = itemsEl.querySelector(`input[data-i="${i}"]`);
@@ -540,8 +607,17 @@ window.Pages.sales = (() => {
     });
 
     function applyPctDiscount() {
-      const pct = Math.min(Math.max(Number(discPctInput.value) || 0, 0), 100);
+      const потолок = App.isAdmin() ? 100 : пределЧека();
+      const набрано = Math.max(Number(discPctInput.value) || 0, 0);
+      const pct = Math.min(набрано, потолок);
+      if (набрано > потолок) {
+        discPctInput.value = pct;
+        ui.toast(`Скидка на чек больше ${потолок}% — её проводит владелец`, true);
+      }
       for (const it of state.items) {
+        // Комплект пришёл со своей раскладкой от владельца — процент на чек
+        // её не перебивает: иначе цена комплекта развалилась бы по копейкам.
+        if (it.setId) continue;
         it.discount = Math.round(it.product.retail_price * pct) / 100;
       }
       renderItems();
