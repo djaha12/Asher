@@ -34,7 +34,8 @@ window.Pages.finance = (() => {
     tbl.innerHTML = ui.table([
       { title: 'Дата', render: r => `<span class="dim">${ui.dt(r.created_at)}</span>` },
       { title: 'Тип', render: r => r.type === 'income' ? '<span class="badge badge-good">Приход</span>' : '<span class="badge badge-crit">Расход</span>' },
-      { title: 'Категория', render: r => `<span class="strong">${ui.esc(r.category)}</span>` },
+      { title: 'Категория', render: r => `<span class="strong">${ui.esc(r.category)}</span>${
+        r.employee_name ? ` <span class="dim">— ${ui.esc(r.employee_name)}</span>` : ''}` },
       { title: 'Описание', render: r => `<span class="dim">${ui.esc(r.note || '')}${r.sale_number ? ` <a href="#/sales/${r.sale_id}">${ui.esc(r.sale_number)}</a>` : ''}${r.order_number ? ' ' + ui.esc(r.order_number) : ''}</span>` },
       { title: 'Сотрудник', render: r => `<span class="dim">${ui.esc(r.user_name || '—')}</span>` },
       { title: 'Сумма', cls: 'num strong', render: r => (r.type === 'income' ? '+' : '−') + ui.money(r.amount) },
@@ -51,20 +52,41 @@ window.Pages.finance = (() => {
     });
   }
 
-  async function opDialog(type, onChange) {
+  // Категории, для которых имеет смысл спрашивать «кому платили».
+  const ЛИЧНЫЕ_КАТЕГОРИИ = ['Зарплата', 'Аванс', 'Премия'];
+  const личная = c => ЛИЧНЫЕ_КАТЕГОРИИ.some(x => String(c || '').toLowerCase().includes(x.toLowerCase()));
+
+  /*
+   * Окно операции. Третьим доводом принимает заготовку — так «Записать»
+   * у постоянного расхода открывает то же самое окно с уже подставленной
+   * категорией, суммой и сотрудником. Владельцу остаётся сверить сумму
+   * и нажать одну кнопку, а операция при этом всё равно создаётся его руками.
+   */
+  async function opDialog(type, onChange, заготовка = {}) {
     const cats = await api.get('/api/finance/categories');
     const list = type === 'income' ? cats.income : cats.expense;
+    const сотрудники = type === 'expense'
+      ? await api.get('/api/users').then(r => r.items.filter(u => u.active)).catch(() => [])
+      : [];
+    const наличными = заготовка.cash === undefined ? true : !!заготовка.cash;
     const m = ui.modal({
       title: type === 'income' ? 'Новый приход' : 'Новый расход',
       size: 'sm',
       body: `<form id="op-form">
         <label class="field"><span>Категория *</span>
-          <input name="category" list="op-cats" required placeholder="Выберите или введите свою">
+          <input name="category" list="op-cats" required placeholder="Выберите или введите свою"
+            value="${ui.esc(заготовка.category || '')}">
           <datalist id="op-cats">${list.filter(c => !['Продажа', 'Оплата заказа', 'Возврат покупателю'].includes(c)).map(c => `<option>${ui.esc(c)}</option>`).join('')}</datalist></label>
-        <label class="field"><span>Сумма *</span><input name="amount" type="number" min="0.01" step="0.01" required></label>
-        <label class="field"><span>Описание</span><input name="note"></label>
+        <label class="field"><span>Сумма *</span><input name="amount" type="number" min="0.01" step="0.01" required
+          value="${заготовка.amount != null ? заготовка.amount : ''}"></label>
+        <label class="field hidden" id="op-emp-wrap"><span>Кому</span>
+          <select name="employee_id" class="input">
+            <option value="">— не указан —</option>
+            ${сотрудники.map(u => `<option value="${u.id}"${Number(заготовка.employee_id) === u.id ? ' selected' : ''}>${ui.esc(u.name)}</option>`).join('')}
+          </select></label>
+        <label class="field"><span>Описание</span><input name="note" value="${ui.esc(заготовка.note || '')}"></label>
         <label class="row-tight" style="cursor:pointer;margin-bottom:8px">
-          <input type="checkbox" name="cash" checked
+          <input type="checkbox" name="cash"${наличными ? ' checked' : ''}
             style="width:18px;height:18px;cursor:pointer"> Наличными, из кассы</label>
         <p class="form-hint">Снимите галочку, если платили переводом или картой:
           тогда эта сумма не будет вычитаться при сверке кассы. Иначе сверка
@@ -74,6 +96,16 @@ window.Pages.finance = (() => {
         <button class="btn btn-primary" data-act="ok">Записать</button>`,
     });
     const form = m.body.querySelector('#op-form');
+    const катПоле = form.querySelector('[name=category]');
+    const комуБлок = form.querySelector('#op-emp-wrap');
+    // Поле «кому» появляется только для зарплатных категорий: в строке
+    // «Зарплата 210 000» непонятно, заплатили ли Анне, а в остальных расходах
+    // этот вопрос не возникает и лишнее поле только мешает.
+    const показатьКому = () => комуБлок.classList.toggle(
+      'hidden', !(сотрудники.length && личная(катПоле.value)));
+    катПоле.addEventListener('input', показатьКому);
+    катПоле.addEventListener('change', показатьКому);
+    показатьКому();
     m.foot.querySelector('[data-act=cancel]').onclick = m.close;
     m.foot.querySelector('[data-act=ok]').onclick = async () => {
       if (!form.reportValidity()) return;
@@ -82,11 +114,158 @@ window.Pages.finance = (() => {
         await api.post('/api/finance', {
           type, category: v.category, amount: v.amount, note: v.note,
           cash: m.body.querySelector('[name=cash]').checked,
+          employee_id: комуБлок.classList.contains('hidden') ? null : (v.employee_id || null),
         });
         ui.toast('Операция записана');
         m.close(); onChange && onChange();
       } catch (e) { ui.toastErr(e); }
     };
+  }
+
+  /*
+   * ---------- Постоянные расходы ----------
+   *
+   * Аренда и зарплата — самые крупные расходы магазина и самые забываемые:
+   * сумма из месяца в месяц одна и та же, платятся они мимо кассы, и в отчёт
+   * попадают, только если кто-то вспомнил их вписать. Не вписали — прибыль
+   * в отчёте выше настоящей ровно на эту сумму.
+   *
+   * Раздел не платит за владельца и не записывает расход сам: сумма почти
+   * каждый месяц немного другая. Он держит список того, что платится
+   * регулярно, и в нужное число напоминает — здесь и на Главной.
+   */
+  async function regDialog(правило, onChange) {
+    const cats = await api.get('/api/finance/categories');
+    const сотрудники = await api.get('/api/users').then(r => r.items.filter(u => u.active)).catch(() => []);
+    const п = правило || {};
+    const m = ui.modal({
+      title: правило ? 'Постоянный расход' : 'Новый постоянный расход',
+      size: 'sm',
+      body: `<form id="reg-form">
+        <label class="field"><span>За что *</span>
+          <input name="category" list="reg-cats" required placeholder="Аренда, Зарплата…"
+            value="${ui.esc(п.category || '')}">
+          <datalist id="reg-cats">${cats.expense.map(c => `<option>${ui.esc(c)}</option>`).join('')}</datalist></label>
+        <label class="field"><span>Обычная сумма *</span>
+          <input name="amount" type="number" min="0.01" step="0.01" required value="${п.amount != null ? п.amount : ''}"></label>
+        <label class="field"><span>Какого числа платится *</span>
+          <input name="day_of_month" type="number" min="1" max="28" required value="${п.day_of_month || 1}"></label>
+        <p class="form-hint">До этого числа система молчит, после — напомнит,
+          если расход ещё не записан. Больше 28 поставить нельзя: в феврале
+          такого числа не бывает, и напоминание не сработало бы вовсе.</p>
+        <label class="field"><span>Кому (для зарплаты)</span>
+          <select name="employee_id" class="input">
+            <option value="">— не указан —</option>
+            ${сотрудники.map(u => `<option value="${u.id}"${п.employee_id === u.id ? ' selected' : ''}>${ui.esc(u.name)}</option>`).join('')}
+          </select></label>
+        <p class="form-hint">Укажите сотрудника — и на каждого будет своё
+          напоминание. Иначе одна запись «Зарплата» закроет их все разом.</p>
+        <label class="field"><span>Заметка</span><input name="note" value="${ui.esc(п.note || '')}"></label>
+        <label class="row-tight" style="cursor:pointer">
+          <input type="checkbox" name="cash"${(п.id ? п.cash : 0) ? ' checked' : ''}
+            style="width:18px;height:18px;cursor:pointer"> Платится наличными из кассы</label>
+      </form>`,
+      footer: `<button class="btn" data-act="cancel">Отмена</button>
+        <button class="btn btn-primary" data-act="ok">Сохранить</button>`,
+    });
+    const form = m.body.querySelector('#reg-form');
+    m.foot.querySelector('[data-act=cancel]').onclick = m.close;
+    m.foot.querySelector('[data-act=ok]').onclick = async () => {
+      if (!form.reportValidity()) return;
+      const v = ui.formValues(form);
+      const данные = {
+        category: v.category, amount: v.amount, day_of_month: v.day_of_month,
+        employee_id: v.employee_id || null, note: v.note,
+        cash: form.querySelector('[name=cash]').checked,
+      };
+      try {
+        if (п.id) await api.put('/api/finance/regular/' + п.id, данные);
+        else await api.post('/api/finance/regular', данные);
+        ui.toast('Сохранено');
+        m.close(); onChange && onChange();
+      } catch (e) { ui.toastErr(e); }
+    };
+  }
+
+  async function renderRegular(box) {
+    const { items, ждут } = await api.get('/api/finance/regular');
+    if (!box.isConnected) return;
+    const ждётLi = new Map(ждут.map(ж => [ж.id, ж]));
+    const активные = items.filter(i => i.active);
+    const вМесяц = активные.reduce((s, i) => s + i.amount, 0);
+
+    /*
+     * Всё содержимое — внутри одной обёртки, и обработчик висит на ней,
+     * а не на box: раздел перерисовывает сам себя после каждого действия,
+     * и обработчик на переживающем перерисовку box накопился бы в несколько
+     * штук — одно нажатие «Записать» открывало бы два окна подряд.
+     */
+    box.innerHTML = '<div id="reg-wrap"></div>';
+    const wrap = box.querySelector('#reg-wrap');
+    wrap.innerHTML = `
+      <div class="toolbar">
+        <div class="spacer"></div>
+        <button class="btn btn-primary" id="reg-add">+ Постоянный расход</button>
+      </div>
+      ${ждут.length ? `<div class="card" style="border-color:var(--crit)">
+        <h3 class="card-title" style="color:var(--crit)">Ещё не записано в этом месяце</h3>
+        <div class="list">${ждут.map(ж => `
+          <div class="row-tight" style="justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)">
+            <div><span class="strong">${ui.esc(ж.подпись)}</span>
+              <span class="dim"> · обычно ${ui.money(ж.amount)} · ${ж.day_of_month}-го</span></div>
+            <button class="btn btn-sm btn-primary" data-pay="${ж.id}">Записать</button>
+          </div>`).join('')}</div>
+        <p class="muted" style="margin:10px 0 0;font-size:12.5px">Пока эти расходы не записаны,
+          прибыль в отчёте выше настоящей. Сумму перед записью можно поправить.</p>
+      </div>` : (активные.length ? `<div class="card">
+        <p class="good" style="margin:0">Всё постоянное за этот месяц записано.</p></div>` : '')}
+      <div class="card">
+        <h3 class="card-title">Что платится каждый месяц${активные.length
+          ? ` · ${ui.money(вМесяц)} в месяц` : ''}</h3>
+        <div id="reg-table"></div>
+        <p class="muted" style="margin:10px 0 0;font-size:12.5px">Система ничего не платит
+          и не записывает сама — только напоминает в нужное число.</p>
+      </div>`;
+
+    wrap.querySelector('#reg-table').innerHTML = ui.table([
+      { title: 'За что', render: r => `<span class="strong${r.active ? '' : ' dim'}">${ui.esc(r.category)}</span>${
+        r.employee_name ? ` <span class="dim">— ${ui.esc(r.employee_name)}</span>` : ''}` },
+      { title: 'Сумма', cls: 'num', render: r => ui.money(r.amount) },
+      { title: 'Число', cls: 'num', render: r => r.day_of_month },
+      { title: 'Откуда', render: r => r.cash ? 'наличные' : '<span class="dim">перевод</span>' },
+      { title: 'В этом месяце', render: r => !r.active ? '<span class="dim">не платится</span>'
+        : (ждётLi.has(r.id) ? '<span class="crit">не записан</span>' : '<span class="good">записан</span>') },
+      { title: 'Заметка', render: r => `<span class="dim">${ui.esc(r.note || '')}</span>` },
+      { title: '', render: r => `<button class="btn btn-sm" data-edit="${r.id}">Изменить</button>
+        <button class="btn btn-sm" data-toggle="${r.id}">${r.active ? 'Приостановить' : 'Вернуть'}</button>
+        <button class="btn btn-sm btn-danger" data-del="${r.id}">×</button>` },
+    ], items, { empty: 'Пока ничего не добавлено. Начните с аренды и зарплат.' });
+
+    const обновить = () => renderRegular(box);
+    wrap.querySelector('#reg-add').onclick = () => regDialog(null, обновить);
+    wrap.addEventListener('click', async e => {
+      const d = e.target.dataset;
+      if (!d) return;
+      const прав = id => items.find(i => i.id === Number(id));
+      if (d.pay) {
+        const ж = ждётLi.get(Number(d.pay));
+        if (ж) opDialog('expense', обновить, ж);
+      } else if (d.edit) {
+        regDialog(прав(d.edit), обновить);
+      } else if (d.toggle) {
+        const п = прав(d.toggle);
+        try { await api.put('/api/finance/regular/' + п.id, { active: !п.active }); обновить(); }
+        catch (err) { ui.toastErr(err); }
+      } else if (d.del) {
+        const п = прав(d.del);
+        if (await ui.confirmDialog(
+          `Убрать «${п.category}» из постоянных расходов? Уже записанные расходы останутся — удаляется только напоминание.`,
+          { danger: true, okLabel: 'Убрать' })) {
+          try { await api.del('/api/finance/regular/' + п.id); обновить(); }
+          catch (err) { ui.toastErr(err); }
+        }
+      }
+    });
   }
 
   async function renderPnl(box, year) {
@@ -209,6 +388,7 @@ window.Pages.finance = (() => {
         <div class="tabs">
           <button class="tab active" data-tab="ops">Операции</button>
           <button class="tab" data-tab="pnl">Прибыли и убытки (P&L)</button>
+          <button class="tab" data-tab="regular">Постоянные расходы</button>
           <button class="tab" data-tab="cash">Сверка кассы</button>
         </div>
         <div id="fin-toolbar" class="toolbar">
@@ -240,6 +420,7 @@ window.Pages.finance = (() => {
         body.innerHTML = '<div class="empty"><p>Загрузка…</p></div>';
         try {
           if (tab === 'ops') await renderOps(body);
+          else if (tab === 'regular') await renderRegular(body);
           else if (tab === 'cash') await renderCash(body);
           else await renderPnl(body, el.querySelector('#ff-year').value);
         } catch (e) { body.innerHTML = `<div class="empty"><p>${ui.esc(e.message)}</p></div>`; }

@@ -120,6 +120,33 @@ CREATE TABLE IF NOT EXISTS cash_counts (
 );
 CREATE INDEX IF NOT EXISTS idx_cash_counts_created ON cash_counts(created_at);
 
+/*
+ * Постоянные расходы: аренда, зарплата, коммунальные, охрана.
+ *
+ * Они одинаковые из месяца в месяц, и именно поэтому про них забывают: сумма
+ * известна, дата известна, никто не напоминает. А забытый расход — это не
+ * «потом впишем»: он молча завышает прибыль в отчёте, и владелец весь месяц
+ * думает, что заработал больше, чем на самом деле.
+ *
+ * Система их НЕ создаёт сама. Сумма почти всегда чуть другая — премия,
+ * неполный месяц, выросла аренда, — и записывать за владельца деньги, которых
+ * он не подтверждал, нельзя: в отчёте появятся операции, которых не было.
+ * Поэтому система только напоминает и подставляет сумму, а решает человек.
+ */
+CREATE TABLE IF NOT EXISTS regular_expenses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  category TEXT NOT NULL,
+  amount REAL NOT NULL DEFAULT 0,
+  day_of_month INTEGER NOT NULL DEFAULT 1,
+  -- Для зарплаты: кому именно. Одна строка «Зарплата 210 000» не отвечает
+  -- на вопрос «а Анне заплатили?», а он возникает каждый месяц.
+  employee_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  cash INTEGER NOT NULL DEFAULT 1,
+  note TEXT DEFAULT '',
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS categories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
@@ -413,6 +440,9 @@ function migrate() {
   // Наличная ли операция — для сверки кассы. У всех прежних записей ставим 1:
   // до появления сверки касса и была единственным способом платить.
   addColumn('finance_ops', 'cash', 'INTEGER NOT NULL DEFAULT 1');
+  // Кому платили — для зарплаты. Без этого «Зарплата 210 000» не отвечает
+  // на вопрос «а Анне заплатили?».
+  addColumn('finance_ops', 'employee_id', 'INTEGER REFERENCES users(id) ON DELETE SET NULL');
 
   addColumn('products', 'store_id', 'INTEGER REFERENCES stores(id) ON DELETE SET NULL');
   addColumn('products', 'ownership', `TEXT NOT NULL DEFAULT 'own'`);
