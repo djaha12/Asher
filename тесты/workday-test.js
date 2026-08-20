@@ -137,12 +137,30 @@ const check = (name, cond, extra) => {
   // а больше него касса и не примет.
   const owed = Number(await page.inputValue('[name=amount]'));
   check('в оплате подставлен весь остаток долга', owed > 0, owed);
+
+  /*
+   * Общий долг ДО оплаты. Раньше здесь искали сумму платежа в тексте страницы
+   * и считали, что её отсутствие означает «долг закрыт». На демо-данных
+   * с дюжиной должников та же сумма попадалась у кого-нибудь ещё, и проверка
+   * падала не по делу. Смотрим на цифру, которая обязана измениться ровно
+   * на внесённое.
+   */
+  const общийДолг = async () => {
+    const t = (await page.textContent('#d-body')).replace(/\s+/g, ' ');
+    const m = /Всего должны нам\s*([\d\s\u00a0\u202f]+)/.exec(t);
+    return m ? Number(m[1].replace(/[^\d]/g, '')) : NaN;
+  };
+  const долгДо = await общийДолг();
   await page.click('[data-act=ok]');
   await page.waitForTimeout(1200);
   check('диалог оплаты закрылся', !(await page.$('.modal-overlay [name=amount]')));
-  const debtsAfter = (await page.textContent('#d-body')).replace(/\s+/g, ' ');
-  check('долг по документу закрыт',
-    !debtsAfter.includes(ui_money(owed)) || /Долгов нет/.test(debtsAfter), debtsAfter.slice(0, 160));
+  await page.goto(BASE + '/#/debts');
+  await page.waitForTimeout(1200);
+  const долгПосле = await общийДолг();
+  check('долг уменьшился ровно на внесённое',
+    Number.isFinite(долгДо) && Number.isFinite(долгПосле)
+      && Math.abs((долгДо - долгПосле) - owed) <= 1,
+    `было ${долгДо}, стало ${долгПосле}, внесли ${owed}`);
 
   console.log('\n=== Обмен проданного изделия ===');
   await page.goto(BASE + '/#/sales');
@@ -158,8 +176,19 @@ const check = (name, cond, extra) => {
   check('диалог обмена открылся', Boolean(await page.$('#ex-search')));
   await page.fill('#ex-search', 'Кольцо');
   await page.waitForTimeout(800);
-  const exHit = await page.$('.search-results .sr-item[data-i]');
-  check('замена найдена', Boolean(exHit));
+  /*
+   * Берём не первое попавшееся, а первое СВОБОДНОЕ изделие: демо-данные
+   * раскладывают резервы случайно, и первым в выдаче регулярно оказывалось
+   * кольцо, отложенное за другим клиентом. Система такой обмен справедливо
+   * не проводит, а набор падал так, будто сломался обмен.
+   */
+  const exHits = await page.$$('.search-results .sr-item[data-i]');
+  let exHit = null;
+  for (const h of exHits) {
+    const t = await h.textContent();
+    if (!/резерв/i.test(t)) { exHit = h; break; }
+  }
+  check('замена найдена', Boolean(exHit), `вариантов ${exHits.length}, все в резерве`);
   await exHit.dispatchEvent('mousedown');
   await page.waitForTimeout(500);
   const exSummary = (await page.textContent('#ex-summary')).replace(/\s+/g, ' ');

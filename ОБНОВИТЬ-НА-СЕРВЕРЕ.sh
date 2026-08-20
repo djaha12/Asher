@@ -17,108 +17,113 @@
 
 set -euo pipefail
 
+# Имена переменных и функций здесь латиницей не по привычке, а по необходимости:
+# bash кириллические имена не принимает вовсе — «СЛУЖБА=asher» он читает как
+# попытку запустить команду с таким названием и падает с «command not found».
+# Весь текст, который видит человек, при этом по-русски.
+
 APP_DIR="${1:-/home/asher/app}"
 APP_USER=asher
-СЛУЖБА=asher
+SERVICE=asher
 
-скажи() { printf '\n\033[1m%s\033[0m\n' "$1"; }
-умри() { printf '\n\033[31m%s\033[0m\n\n' "$1" >&2; exit 1; }
+say() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+die() { printf '\n\033[31m%s\033[0m\n\n' "$1" >&2; exit 1; }
 
-[ "$(id -u)" = 0 ] || умри "Запускать от root: sudo bash $0"
-[ -f "$APP_DIR/server.js" ] || умри "В папке $APP_DIR нет системы.
+[ "$(id -u)" = 0 ] || die "Запускать от root: sudo bash $0"
+[ -f "$APP_DIR/server.js" ] || die "В папке $APP_DIR нет системы.
   Если она лежит в другом месте, укажите его: bash $0 /путь/к/папке"
 
 cd "$APP_DIR"
 
 # ---------------------------------------------------------------------------
-скажи "1/5. Проверяю, что систему есть чем обновлять"
+say "1/5. Проверяю, что систему есть чем обновлять"
 
 if [ ! -d .git ]; then
-  умри "Система стоит не из git — обновить этой командой нельзя.
+  die "Система стоит не из git — обновить этой командой нельзя.
   Так бывает, когда папку привезли архивом. Обновляйте так же: скачайте
   свежий архив, распакуйте поверх (папку data НЕ трогайте) и выполните:
-      chown -R $APP_USER:$APP_USER $APP_DIR && systemctl restart $СЛУЖБА"
+      chown -R $APP_USER:$APP_USER $APP_DIR && systemctl restart $SERVICE"
 fi
 
-БЫЛО="$(sudo -u "$APP_USER" git rev-parse HEAD)"
-ВЕТКА="$(sudo -u "$APP_USER" git rev-parse --abbrev-ref HEAD)"
-echo "   сейчас стоит: ${БЫЛО:0:8} (ветка $ВЕТКА)"
+WAS="$(sudo -u "$APP_USER" git rev-parse HEAD)"
+BRANCH="$(sudo -u "$APP_USER" git rev-parse --abbrev-ref HEAD)"
+echo "   сейчас стоит: ${WAS:0:8} (ветка $BRANCH)"
 
 # Правки прямо на сервере — редкость, но если они есть, обновление их снесёт.
 if ! sudo -u "$APP_USER" git diff --quiet || ! sudo -u "$APP_USER" git diff --cached --quiet; then
-  умри "В папке системы есть несохранённые правки — обновление их сотрёт.
+  die "В папке системы есть несохранённые правки — обновление их сотрёт.
   Если правки не нужны:  sudo -u $APP_USER git -C $APP_DIR checkout -- .
   и запустите обновление заново."
 fi
 
 export GIT_TERMINAL_PROMPT=0
 export GIT_ASKPASS=/bin/true
-if ! sudo -u "$APP_USER" git fetch --quiet origin "$ВЕТКА" 2>/tmp/asher-fetch.err; then
+if ! sudo -u "$APP_USER" git fetch --quiet origin "$BRANCH" 2>/tmp/asher-fetch.err; then
   cat /tmp/asher-fetch.err >&2
-  умри "Не удалось связаться с GitHub. Проверьте интернет на сервере
+  die "Не удалось связаться с GitHub. Проверьте интернет на сервере
   и что репозиторий доступен."
 fi
 
-СТАНЕТ="$(sudo -u "$APP_USER" git rev-parse "origin/$ВЕТКА")"
-if [ "$БЫЛО" = "$СТАНЕТ" ]; then
-  скажи "Обновлять нечего — стоит самая свежая версия."
+WILL="$(sudo -u "$APP_USER" git rev-parse "origin/$BRANCH")"
+if [ "$WAS" = "$WILL" ]; then
+  say "Обновлять нечего — стоит самая свежая версия."
   exit 0
 fi
-echo "   появилось нового: $(sudo -u "$APP_USER" git rev-list --count "$БЫЛО..$СТАНЕТ") изменений"
+echo "   появилось нового: $(sudo -u "$APP_USER" git rev-list --count "$WAS..$WILL") изменений"
 
 # ---------------------------------------------------------------------------
-скажи "2/5. Снимаю резервную копию — до всего остального"
+say "2/5. Снимаю резервную копию — до всего остального"
 
 # Копия делается ЧУЖИМИ руками (кнопкой в системе) не каждый день, а обновление
 # — тот момент, когда она нужнее всего. Делаем сами и не полагаемся на удачу.
-КОПИЯ="$APP_DIR/РЕЗЕРВНЫЕ-КОПИИ/перед-обновлением-$(date +%Y-%m-%d-%H-%M).db"
+BACKUP="$APP_DIR/РЕЗЕРВНЫЕ-КОПИИ/перед-обновлением-$(date +%Y-%m-%d-%H-%M).db"
 mkdir -p "$APP_DIR/РЕЗЕРВНЫЕ-КОПИИ"
 if sudo -u "$APP_USER" node -e "
   const { DatabaseSync } = require('node:sqlite');
   const db = new DatabaseSync(process.argv[1], { readOnly: true });
   db.exec(\"VACUUM INTO '\" + process.argv[2].replace(/'/g, \"''\") + \"'\");
-" "$APP_DIR/data/asher.db" "$КОПИЯ" 2>/dev/null; then
-  echo "   копия: $КОПИЯ ($(du -h "$КОПИЯ" | cut -f1))"
+" "$APP_DIR/data/asher.db" "$BACKUP" 2>/dev/null; then
+  echo "   копия: $BACKUP ($(du -h "$BACKUP" | cut -f1))"
 else
-  умри "Не удалось снять резервную копию — обновление отменено.
+  die "Не удалось снять резервную копию — обновление отменено.
   Обновляться без копии нельзя. Посмотрите, есть ли место на диске: df -h"
 fi
 
 # ---------------------------------------------------------------------------
-скажи "3/5. Забираю свежую версию"
-sudo -u "$APP_USER" git checkout --quiet -B "$ВЕТКА" "origin/$ВЕТКА"
-echo "   стало: ${СТАНЕТ:0:8}"
+say "3/5. Забираю свежую версию"
+sudo -u "$APP_USER" git checkout --quiet -B "$BRANCH" "origin/$BRANCH"
+echo "   стало: ${WILL:0:8}"
 
 # ---------------------------------------------------------------------------
-скажи "4/5. Перезапускаю систему"
-systemctl restart "$СЛУЖБА"
+say "4/5. Перезапускаю систему"
+systemctl restart "$SERVICE"
 
 # ---------------------------------------------------------------------------
-скажи "5/5. Проверяю, что система работает"
+say "5/5. Проверяю, что система работает"
 
-ПОРТ="$(grep -o 'Environment=PORT=[0-9]*' /etc/systemd/system/$СЛУЖБА.service 2>/dev/null | grep -o '[0-9]*' || echo 3000)"
-ЖИВА=""
+PORT="$(grep -o 'Environment=PORT=[0-9]*' /etc/systemd/system/$SERVICE.service 2>/dev/null | grep -o '[0-9]*' || echo 3000)"
+ALIVE=""
 for i in $(seq 1 20); do
-  if curl -fsS --max-time 3 "http://127.0.0.1:$ПОРТ/api/ping" 2>/dev/null | grep -q asher; then
-    ЖИВА=1; break
+  if curl -fsS --max-time 3 "http://127.0.0.1:$PORT/api/ping" 2>/dev/null | grep -q asher; then
+    ALIVE=1; break
   fi
   sleep 1
 done
 
-if [ -z "$ЖИВА" ]; then
+if [ -z "$ALIVE" ]; then
   printf '\n\033[31mНовая версия не запустилась. Возвращаю прежнюю.\033[0m\n'
-  sudo -u "$APP_USER" git checkout --quiet -B "$ВЕТКА" "$БЫЛО"
-  systemctl restart "$СЛУЖБА"
+  sudo -u "$APP_USER" git checkout --quiet -B "$BRANCH" "$WAS"
+  systemctl restart "$SERVICE"
   sleep 3
-  if curl -fsS --max-time 3 "http://127.0.0.1:$ПОРТ/api/ping" 2>/dev/null | grep -q asher; then
-    умри "Откат прошёл: работает прежняя версия ${БЫЛО:0:8}, магазин может торговать.
+  if curl -fsS --max-time 3 "http://127.0.0.1:$PORT/api/ping" 2>/dev/null | grep -q asher; then
+    die "Откат прошёл: работает прежняя версия ${WAS:0:8}, магазин может торговать.
   Обновление не состоялось — причина в журнале:
-      journalctl -u $СЛУЖБА -n 50"
+      journalctl -u $SERVICE -n 50"
   fi
-  умри "Не поднялась ни новая версия, ни прежняя. Это уже серьёзно.
-  Смотрите:  journalctl -u $СЛУЖБА -n 50
+  die "Не поднялась ни новая версия, ни прежняя. Это уже серьёзно.
+  Смотрите:  journalctl -u $SERVICE -n 50
   База цела, копия перед обновлением здесь:
-      $КОПИЯ"
+      $BACKUP"
 fi
 
 cat <<ГОТОВО
@@ -127,9 +132,9 @@ cat <<ГОТОВО
    Обновлено. Система работает.
   ======================================================================
 
-   было:  ${БЫЛО:0:8}
-   стало: ${СТАНЕТ:0:8}
-   копия перед обновлением: $КОПИЯ
+   было:  ${WAS:0:8}
+   стало: ${WILL:0:8}
+   копия перед обновлением: $BACKUP
 
    Продавцам ничего делать не нужно — у них обновится само.
 
