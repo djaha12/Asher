@@ -63,6 +63,12 @@ window.Pages.finance = (() => {
           <datalist id="op-cats">${list.filter(c => !['Продажа', 'Оплата заказа', 'Возврат покупателю'].includes(c)).map(c => `<option>${ui.esc(c)}</option>`).join('')}</datalist></label>
         <label class="field"><span>Сумма *</span><input name="amount" type="number" min="0.01" step="0.01" required></label>
         <label class="field"><span>Описание</span><input name="note"></label>
+        <label class="row-tight" style="cursor:pointer;margin-bottom:8px">
+          <input type="checkbox" name="cash" checked
+            style="width:18px;height:18px;cursor:pointer"> Наличными, из кассы</label>
+        <p class="form-hint">Снимите галочку, если платили переводом или картой:
+          тогда эта сумма не будет вычитаться при сверке кассы. Иначе сверка
+          показала бы недостачу на ровном месте.</p>
       </form>`,
       footer: `<button class="btn" data-act="cancel">Отмена</button>
         <button class="btn btn-primary" data-act="ok">Записать</button>`,
@@ -73,7 +79,10 @@ window.Pages.finance = (() => {
       if (!form.reportValidity()) return;
       const v = ui.formValues(form);
       try {
-        await api.post('/api/finance', { type, category: v.category, amount: v.amount, note: v.note });
+        await api.post('/api/finance', {
+          type, category: v.category, amount: v.amount, note: v.note,
+          cash: m.body.querySelector('[name=cash]').checked,
+        });
         ui.toast('Операция записана');
         m.close(); onChange && onChange();
       } catch (e) { ui.toastErr(e); }
@@ -131,6 +140,67 @@ window.Pages.finance = (() => {
     }
   }
 
+  /*
+   * История сверок кассы.
+   *
+   * Владелец смотрит сюда не за суммами — суммы он и так знает, — а за одним
+   * столбцом: расхождение. Поэтому расхождение выделено цветом и стоит
+   * последним, где взгляд останавливается, а недостача и излишек названы
+   * словами: «−300» само по себе ничего не говорит человеку, который не
+   * держит в голове, что тут от чего отнимали.
+   */
+  async function renderCash(box) {
+    const { items } = await api.get('/api/cash/counts?limit=100');
+    if (!box.isConnected) return;
+
+    if (!items.length) {
+      box.innerHTML = `<div class="card empty">
+        <p>Сверок ещё не было.</p>
+        <p class="muted">Вечером продавец пересчитывает деньги в ящике и вводит сумму —
+        кнопка «Сверить кассу» на Главной. Система сама посчитает, сколько должно быть,
+        и покажет разницу.</p></div>`;
+      return;
+    }
+
+    const сходится = items.filter(i => Math.abs(i.difference) < 0.01).length;
+    const недостачи = items.filter(i => i.difference < -0.01);
+    const сумма = недостачи.reduce((s, i) => s + i.difference, 0);
+
+    box.innerHTML = `
+      <div class="grid grid-4" style="margin-bottom:16px">
+        <div class="big-stat"><div class="bs-label">Сверок сделано</div>
+          <div class="bs-value">${items.length}</div></div>
+        <div class="big-stat accent-good"><div class="bs-label">Сошлось точно</div>
+          <div class="bs-value">${сходится}</div>
+          <div class="bs-sub">из ${items.length}</div></div>
+        <div class="big-stat ${недостачи.length ? 'accent-crit' : ''}">
+          <div class="bs-label">Недостач</div>
+          <div class="bs-value">${недостачи.length}</div>
+          <div class="bs-sub">${недостачи.length ? 'всего ' + ui.money(Math.abs(сумма)) : 'ни одной'}</div></div>
+        <div class="big-stat"><div class="bs-label">Последняя сверка</div>
+          <div class="bs-value" style="font-size:19px">${ui.dt(items[0].created_at)}</div>
+          <div class="bs-sub">${ui.esc(items[0].user_name || '—')}</div></div>
+      </div>
+      <div class="card">
+        <h3 class="card-title">Все сверки</h3>
+        <div id="cash-table"></div>
+      </div>`;
+
+    box.querySelector('#cash-table').innerHTML = ui.table([
+      { title: 'Когда', render: r => ui.dt(r.created_at) },
+      { title: 'Кто считал', render: r => ui.esc(r.user_name || '—') },
+      { title: 'Должно быть', cls: 'num', render: r => ui.money(r.expected) },
+      { title: 'В ящике', cls: 'num', render: r => ui.money(r.counted) },
+      { title: 'Расхождение', cls: 'num', render: r => {
+        if (Math.abs(r.difference) < 0.01) return '<span class="good">сошлось</span>';
+        return r.difference < 0
+          ? `<span class="crit">недостача ${ui.money(-r.difference)}</span>`
+          : `<span class="warn">излишек ${ui.money(r.difference)}</span>`;
+      } },
+      { title: 'Заметка', render: r => ui.esc(r.note || '') },
+    ], items, { empty: 'Сверок ещё не было' });
+  }
+
   return {
     title: 'Финансы',
     async render(el) {
@@ -139,6 +209,7 @@ window.Pages.finance = (() => {
         <div class="tabs">
           <button class="tab active" data-tab="ops">Операции</button>
           <button class="tab" data-tab="pnl">Прибыли и убытки (P&L)</button>
+          <button class="tab" data-tab="cash">Сверка кассы</button>
         </div>
         <div id="fin-toolbar" class="toolbar">
           <select class="input" id="ff-period">
@@ -169,6 +240,7 @@ window.Pages.finance = (() => {
         body.innerHTML = '<div class="empty"><p>Загрузка…</p></div>';
         try {
           if (tab === 'ops') await renderOps(body);
+          else if (tab === 'cash') await renderCash(body);
           else await renderPnl(body, el.querySelector('#ff-year').value);
         } catch (e) { body.innerHTML = `<div class="empty"><p>${ui.esc(e.message)}</p></div>`; }
       };

@@ -91,6 +91,35 @@ CREATE TABLE IF NOT EXISTS devices (
 );
 CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id, approved);
 
+/*
+ * Сверка кассы.
+ *
+ * Шесть продавцов принимают наличные, а сверить деньги в ящике с тем, что
+ * в системе, до сих пор было нечем. Расхождение владелец заметил бы, только
+ * когда оно накопится, — и уже не понял бы, откуда оно взялось. Это самая
+ * частая дыра в рознице, и она чаще не про воровство, а про обычные ошибки
+ * со сдачей.
+ *
+ * Каждая сверка — это точка отсчёта для следующей: «в ящике было столько-то»,
+ * дальше считаем движение денег от неё. Поэтому храним и пересчитанное, и
+ * ожидавшееся: разницу нельзя вычислить задним числом, если не помнить обе
+ * цифры на тот момент.
+ */
+CREATE TABLE IF NOT EXISTS cash_counts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  store_id INTEGER REFERENCES stores(id) ON DELETE SET NULL,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  opening REAL NOT NULL DEFAULT 0,      -- сколько было в ящике на прошлой сверке
+  movement REAL NOT NULL DEFAULT 0,     -- пришло минус ушло с тех пор
+  expected REAL NOT NULL DEFAULT 0,     -- сколько должно быть
+  counted REAL NOT NULL DEFAULT 0,      -- сколько пересчитали руками
+  difference REAL NOT NULL DEFAULT 0,   -- counted - expected
+  since_at TEXT NOT NULL DEFAULT '',    -- с какого момента считали движение
+  note TEXT DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cash_counts_created ON cash_counts(created_at);
+
 CREATE TABLE IF NOT EXISTS categories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
@@ -254,6 +283,10 @@ CREATE TABLE IF NOT EXISTS finance_ops (
   sale_id INTEGER REFERENCES sales(id) ON DELETE SET NULL,
   order_id INTEGER REFERENCES service_orders(id) ON DELETE SET NULL,
   user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  -- Наличными или нет. Нужно для сверки кассы: аренда, уплаченная переводом,
+  -- денег из ящика не забирает, и вычитать её оттуда — значит каждый месяц
+  -- показывать недостачу, которой не было.
+  cash INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_finance_created ON finance_ops(created_at);
@@ -377,6 +410,10 @@ function addColumn(table, column, definition) {
 }
 
 function migrate() {
+  // Наличная ли операция — для сверки кассы. У всех прежних записей ставим 1:
+  // до появления сверки касса и была единственным способом платить.
+  addColumn('finance_ops', 'cash', 'INTEGER NOT NULL DEFAULT 1');
+
   addColumn('products', 'store_id', 'INTEGER REFERENCES stores(id) ON DELETE SET NULL');
   addColumn('products', 'ownership', `TEXT NOT NULL DEFAULT 'own'`);
   addColumn('sales', 'paid', 'REAL NOT NULL DEFAULT 0');

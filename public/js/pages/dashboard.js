@@ -107,6 +107,7 @@ window.Pages.dashboard = {
               <button class="btn" id="qa-product">${ui.icon('gem')} Добавить изделие</button>
               <button class="btn" id="qa-customer">${ui.icon('users')} Новый клиент</button>
               <button class="btn" id="qa-order">${ui.icon('wrench')} Принять заказ / ремонт</button>
+              <button class="btn" id="qa-cash">${ui.icon('wallet')} Сверить кассу</button>
             </div>
           </div>
 
@@ -198,5 +199,107 @@ window.Pages.dashboard = {
     on('qa-product', () => { App.go('#/products'); setTimeout(() => Pages.products.openEditor(), 100); });
     on('qa-customer', () => { App.go('#/customers'); setTimeout(() => Pages.customers.openEditor(), 100); });
     on('qa-order', () => { App.go('#/orders'); setTimeout(() => Pages.orders.openEditor(), 100); });
+    on('qa-cash', () => сверкаКассы());
   },
 };
+
+/*
+ * Сверка кассы: вечером продавец пересчитывает ящик и вводит сумму.
+ *
+ * Порядок в окне важен и сделан намеренно: СНАЧАЛА система показывает, сколько
+ * должно быть, и из чего это сложилось, и только потом просит ввести
+ * пересчитанное. Наоборот было бы нечестно — человек подгонял бы свою цифру
+ * под ожидаемую, и сверка перестала бы что-либо значить.
+ */
+async function сверкаКассы() {
+  let о;
+  try { о = await api.get('/api/cash/expected'); }
+  catch (e) { ui.toastErr(e); return; }
+
+  const дв = о['движение'];
+  const строка = (подпись, сумма, знак) => `
+    <div class="row" style="padding:7px 0;border-bottom:1px solid var(--line)">
+      <div class="grow muted">${подпись}</div>
+      <div class="num">${знак || ''}${ui.money(Math.abs(сумма))}</div>
+    </div>`;
+
+  const m = ui.modal({
+    title: 'Сверка кассы',
+    size: 'sm',
+    body: `
+      ${о['первая'] ? `<div class="hint-box">
+        <b>Это первая сверка — сравнивать пока не с чем.</b><br>
+        Система не знает, сколько денег лежало в ящике до неё. Просто пересчитайте
+        и запишите — это станет началом отсчёта. Со следующего раза она уже будет
+        говорить, сколько должно быть, и показывать расхождение.</div>` : `
+      <div class="card" style="margin:0 0 14px">
+        ${строка('Было в ящике на прошлой сверке', о['остаток'])}
+        ${строка('Приняли от клиентов наличными', дв['продажи'], '+')}
+        ${дв['возвраты'] ? строка('Вернули покупателям', дв['возвраты'], '−') : ''}
+        ${дв['приход'] ? строка('Прочий приход наличными', дв['приход'], '+') : ''}
+        ${дв['расход'] ? строка('Расходы наличными', дв['расход'], '−') : ''}
+        <div class="row" style="padding:10px 0 0;font-weight:600;font-size:17px">
+          <div class="grow">Должно быть в ящике</div>
+          <div class="num">${ui.money(о['ожидается'])}</div>
+        </div>
+      </div>`}
+      <label class="field"><span>Сколько денег в ящике на самом деле</span>
+        <input type="number" step="0.01" min="0" id="cc-counted" inputmode="decimal"
+               placeholder="Пересчитайте и введите"></label>
+      <label class="field"><span>Заметка (необязательно)</span>
+        <input type="text" id="cc-note" placeholder="Например: сдачу брали из своих"></label>
+      <div id="cc-result"></div>`,
+    footer: `<button class="btn" data-act="cancel">Отмена</button>
+             <button class="btn btn-primary" id="cc-save">Записать</button>`,
+  });
+
+  const поле = m.body.querySelector('#cc-counted');
+  setTimeout(() => поле.focus(), 60);
+
+  m.foot.querySelector('#cc-save').onclick = async () => {
+    const сумма = поле.value.trim();
+    if (сумма === '') { ui.toast('Введите, сколько денег в ящике'); поле.focus(); return; }
+    try {
+      const r = await api.post('/api/cash/count', {
+        counted: Number(сумма),
+        note: m.body.querySelector('#cc-note').value.trim(),
+      });
+      m.close();
+      /*
+       * Результат показываем отдельным окном, а не всплывающей подписью:
+       * расхождение в кассе — это то, что человек должен прочитать и понять,
+       * а не заметить краем глаза, пока оно исчезает.
+       */
+      const первая = r['первая'];
+      const плохо = r['разница'] < 0;
+      const ровно = r['разница'] === 0;
+      ui.modal({
+        title: первая ? 'Начало отсчёта' : ровно ? 'Касса сошлась' : плохо ? 'Недостача' : 'Излишек',
+        size: 'sm',
+        body: `
+          <div class="alert-row ${ровно ? 'alert-warn' : классТревоги(плохо)}"
+               style="${ровно ? 'background:var(--good-soft);border-color:var(--good)' : ''}">
+            <div class="alert-ico" style="${ровно ? 'background:var(--good)' : ''}">${ровно ? '✓' : '!'}</div>
+            <div>
+              <div class="alert-what" style="${ровно ? 'color:var(--good)' : ''}">
+                ${первая ? `Записано: ${ui.money(r['пересчитано'])}`
+                  : ровно ? 'Всё до копейки' : `Разница ${ui.money(Math.abs(r['разница']))}`}</div>
+              <div class="alert-why">
+                ${первая
+                  ? 'Это начало отсчёта. Со следующей сверки система будет сама считать, сколько должно быть в ящике, и показывать расхождение.'
+                  : `В ящике ${ui.money(r['пересчитано'])}, ожидалось ${ui.money(r['ожидалось'])}.
+                     ${ровно ? 'Так и должно быть.'
+                       : плохо ? 'Денег меньше, чем должно. Проверьте: не забыли ли записать расход, всё ли пробили.'
+                         : 'Денег больше, чем должно. Обычно это непробитая продажа или сдача, которую не отдали.'}`}
+              </div>
+            </div>
+          </div>
+          <p class="form-hint">Запись сохранена и видна владельцу в Финансах и в журнале действий.
+            Исправить её нельзя — если ошиблись, сделайте сверку заново.</p>`,
+        footer: '<button class="btn btn-primary" data-act="cancel">Понятно</button>',
+      });
+    } catch (e) { ui.toastErr(e); }
+  };
+}
+
+function классТревоги(плохо) { return плохо ? 'alert-bad' : 'alert-warn'; }

@@ -52,9 +52,17 @@ const routes = [
       if (!category) throw new ApiError(400, 'Укажите категорию');
       const amount = round2(body.amount);
       if (!(amount > 0)) throw new ApiError(400, 'Сумма должна быть больше нуля');
+      /*
+       * Наличными или нет. По умолчанию да — большинство расходов магазина
+       * оплачивается из ящика. Но аренда или зарплата переводом денег оттуда
+       * не забирают, и если считать их наличными, сверка кассы каждый месяц
+       * показывала бы недостачу, которой не было.
+       */
+      const наличными = body.cash === undefined ? 1 : (body.cash ? 1 : 0);
       const info = db.prepare(
-        `INSERT INTO finance_ops (type, category, amount, note, user_id, created_at) VALUES (?,?,?,?,?,?)`
-      ).run(type, category, amount, String(body.note || ''), session.userId, nowIso());
+        `INSERT INTO finance_ops (type, category, amount, note, cash, user_id, created_at)
+         VALUES (?,?,?,?,?,?,?)`
+      ).run(type, category, amount, String(body.note || ''), наличными, session.userId, nowIso());
       audit(session.userId, 'create', 'finance', Number(info.lastInsertRowid),
         `${type === 'income' ? 'Приход' : 'Расход'} ${category}: ${amount}`);
       return { id: Number(info.lastInsertRowid) };
