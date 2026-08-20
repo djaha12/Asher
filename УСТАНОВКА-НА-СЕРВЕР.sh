@@ -18,7 +18,12 @@ set -euo pipefail
 
 DOMAIN="${1:-}"
 REPO="${2:-https://github.com/djaha12/Asher.git}"
-BRANCH="${3:-claude/jewelry-crm-app-sqicde}"
+# Ветка, с которой живёт магазин. По умолчанию — основная ветка репозитория:
+# её git выбирает сам при клоне. Это важно, а не мелочь: рабочие ветки несут
+# незаконченное, а на сервере магазина должно быть только то, что слито
+# в основу и прогнано проверками целиком. Свою ветку можно передать третьим
+# доводом, если очень нужно.
+BRANCH="${3:-}"
 APP_DIR=/home/asher/app
 APP_USER=asher
 
@@ -122,10 +127,17 @@ if [ -f "$APP_DIR/server.js" ] && [ ! -d "$APP_DIR/.git" ]; then
   echo "   нашёл готовую папку $APP_DIR — беру её"
   chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 elif [ -d "$APP_DIR/.git" ]; then
-  sudo -u "$APP_USER" git -C "$APP_DIR" fetch --quiet origin "$BRANCH"
-  sudo -u "$APP_USER" git -C "$APP_DIR" checkout --quiet -B "$BRANCH" "origin/$BRANCH"
+  # Ветку не назвали — обновляем ту, на которой сервер уже стоит.
+  # (Имена переменных здесь латиницей не для красоты: кириллические имена
+  # bash не принимает вовсе — «syntax error» на ровном месте.)
+  branch_now="${BRANCH:-$(sudo -u "$APP_USER" git -C "$APP_DIR" rev-parse --abbrev-ref HEAD)}"
+  sudo -u "$APP_USER" git -C "$APP_DIR" fetch --quiet origin "$branch_now"
+  sudo -u "$APP_USER" git -C "$APP_DIR" checkout --quiet -B "$branch_now" "origin/$branch_now"
 else
-  if ! sudo -u "$APP_USER" GIT_TERMINAL_PROMPT=0 git clone --quiet --branch "$BRANCH" "$REPO" "$APP_DIR" 2>/tmp/asher-clone.err; then
+  # Без --branch git берёт основную ветку репозитория — то, что нужно магазину.
+  clone_cmd=(git clone --quiet)
+  [ -n "$BRANCH" ] && clone_cmd+=(--branch "$BRANCH")
+  if ! sudo -u "$APP_USER" GIT_TERMINAL_PROMPT=0 "${clone_cmd[@]}" "$REPO" "$APP_DIR" 2>/tmp/asher-clone.err; then
     echo
     cat /tmp/asher-clone.err >&2
     die "Не удалось скачать систему с GitHub.
