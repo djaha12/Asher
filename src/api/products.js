@@ -334,7 +334,15 @@ const routes = [
         carat_desc: 'p.carat DESC, p.retail_price DESC',
         carat_asc: 'p.carat, p.retail_price',
       };
-      const order = SORTS[query.sort] || SORTS.new;
+      /*
+       * Спрашиваем именно СВОЙ ключ, а не просто «есть ли такое свойство».
+       * У любого объекта в JavaScript есть унаследованные свойства вроде
+       * constructor и toString, и SORTS['constructor'] возвращает не сортировку,
+       * а функцию — она подставлялась в SQL и роняла каталог с «Внутренней
+       * ошибкой». Красть этим ничего нельзя, но любой сотрудник мог случайно
+       * (или нарочно) сделать каталог неоткрывающимся.
+       */
+      const order = Object.hasOwn(SORTS, String(query.sort)) ? SORTS[query.sort] : SORTS.new;
       const limit = Math.min(Number(query.limit) || 500, 2000);
       const offset = Number(query.offset) || 0;
       const rows = db.prepare(

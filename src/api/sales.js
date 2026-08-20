@@ -210,11 +210,31 @@ function createSaleTx(body, session, opts = {}) {
       `INSERT INTO finance_ops (type, category, amount, note, sale_id, user_id, created_at)
        VALUES ('income', 'Продажа', ?, ?, ?, ?, ?)`
     ).run(paid, `Чек ${number}`, saleId, session.userId, createdAt);
-    db.prepare(
-      `INSERT INTO payments (customer_id, sale_id, amount, method, note, user_id, created_at)
-       VALUES (?,?,?,?,?,?,?)`
-    ).run(customerId, saleId, paid, payment === 'installment' ? 'cash' : payment,
-      opts.paymentNote || (debt > 0 ? 'Первый взнос' : 'Оплата чека'), session.userId, createdAt);
+    /*
+     * Платёж разделяем на зачёт и живые деньги.
+     *
+     * При обмене клиент рассчитывается старым изделием. Для истории платежей
+     * это одна законная строка — человек действительно заплатил, — но в ящик
+     * из неё не легло ни сома. Пока обе части шли одной наличной строкой,
+     * сверка кассы вечером показывала недостачу ровно на цену зачтённого
+     * изделия, и продавца обвиняли в воровстве за честно оформленный обмен.
+     */
+    const зачёт = round2(Math.min(opts.зачёт || 0, paid));
+    const живыми = round2(paid - зачёт);
+    const способ = payment === 'installment' ? 'cash' : payment;
+    const вставить = db.prepare(
+      `INSERT INTO payments (customer_id, sale_id, amount, method, note, in_till, user_id, created_at)
+       VALUES (?,?,?,?,?,?,?,?)`
+    );
+    const подпись = opts.paymentNote || (debt > 0 ? 'Первый взнос' : 'Оплата чека');
+    if (зачёт > 0) {
+      вставить.run(customerId, saleId, зачёт, способ,
+        opts.зачётПодпись || 'Зачёт по обмену', 0, session.userId, createdAt);
+    }
+    if (живыми > 0 || зачёт === 0) {
+      вставить.run(customerId, saleId, живыми, способ, подпись,
+        способ === 'cash' ? 1 : 0, session.userId, createdAt);
+    }
   }
 
   audit(session.userId, 'sale', 'sale', saleId,
@@ -279,10 +299,19 @@ function returnItemsTx(saleId, itemIds, session, { holdCash = false } = {}) {
         `INSERT INTO finance_ops (type, category, amount, note, sale_id, user_id, created_at)
          VALUES ('expense', 'Возврат покупателю', ?, ?, ?, ?, ?)`
       ).run(cashRefund, `Возврат по чеку ${sale.number}`, saleId, session.userId, ts);
+      /*
+       * Возвращаем тем же способом, каким платили. Раньше здесь стояло жёсткое
+       * «наличными», и возврат по чеку, оплаченному картой, вычитал деньги
+       * из ящика, которых там не было: вечером сверка показывала недостачу
+       * на всю сумму чека. Деньги при возврате по карте уходят обратно
+       * на карту, ящика они не касаются.
+       */
+      const способВозврата = sale.payment_method === 'installment' ? 'cash' : sale.payment_method;
       db.prepare(
-        `INSERT INTO payments (customer_id, sale_id, amount, method, note, user_id, created_at)
-         VALUES (?,?,?,?,?,?,?)`
-      ).run(sale.customer_id, saleId, -cashRefund, 'cash', `Возврат по чеку ${sale.number}`,
+        `INSERT INTO payments (customer_id, sale_id, amount, method, note, in_till, user_id, created_at)
+         VALUES (?,?,?,?,?,?,?,?)`
+      ).run(sale.customer_id, saleId, -cashRefund, способВозврата,
+        `Возврат по чеку ${sale.number}`, способВозврата === 'cash' ? 1 : 0,
         session.userId, ts);
     }
   }
@@ -410,7 +439,13 @@ const routes = [
           store_id: ret.sale.store_id,
           note: String(body.note || '') || `Обмен по чеку ${ret.sale.number}`,
         }, session, {
-          paymentNote: `Обмен: зачёт ${creditApplied}` + (extraPaid > 0 ? ` + доплата ${extraPaid}` : ''),
+          paymentNote: `Обмен по чеку ${ret.sale.number}: доплата`,
+          /*
+           * Сколько из оплаты — зачёт старого изделия. Эти деньги в ящик
+           * не приходили, и сверка кассы обязана про это знать.
+           */
+          зачёт: creditApplied,
+          зачётПодпись: `Обмен по чеку ${ret.sale.number}: зачёт изделия`,
         });
 
         // Кассовые движения обмена — только реальные деньги.
@@ -422,11 +457,15 @@ const routes = [
             `INSERT INTO finance_ops (type, category, amount, note, sale_id, user_id, created_at)
              VALUES ('expense', 'Возврат покупателю', ?, ?, ?, ?, ?)`
           ).run(cashBack, `Обмен по чеку ${ret.sale.number}: разница на руки`, oldId, session.userId, ret.ts);
+          // Разницу возвращаем тем же способом, каким платили: по карточному
+          // чеку она уходит обратно на карту и ящика не касается.
+          const способРазницы = ret.sale.payment_method === 'installment'
+            ? 'cash' : ret.sale.payment_method;
           db.prepare(
-            `INSERT INTO payments (customer_id, sale_id, amount, method, note, user_id, created_at)
-             VALUES (?,?,?,?,?,?,?)`
-          ).run(ret.sale.customer_id, oldId, -cashBack, 'cash',
-            `Обмен: возврат разницы`, session.userId, ret.ts);
+            `INSERT INTO payments (customer_id, sale_id, amount, method, note, in_till, user_id, created_at)
+             VALUES (?,?,?,?,?,?,?,?)`
+          ).run(ret.sale.customer_id, oldId, -cashBack, способРазницы,
+            `Обмен: возврат разницы`, способРазницы === 'cash' ? 1 : 0, session.userId, ret.ts);
         }
         if (creditApplied > 0) {
           // Приход по новому чеку записан на «зачёт + доплата», но живых денег

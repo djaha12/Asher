@@ -18,11 +18,29 @@ function orderDetail(id) {
   return { ...o, payments };
 }
 
-function addPayment(orderId, amount, note, userId) {
+/*
+ * Оплата по заказу.
+ *
+ * Кроме записи в финансовых операциях обязательно пишем строку в платежи.
+ * Без неё сверка кассы про эти деньги не знала вовсе: предоплата за ремонт
+ * ложилась в ящик, а система её не видела — и вечером получалась «недостача»
+ * ровно на принятую предоплату. При этом те же деньги, принятые через раздел
+ * «Долги», в сверку попадали: одни и те же деньги были видны или не видны
+ * в зависимости от того, какую кнопку нажал продавец.
+ */
+function addPayment(orderId, amount, note, userId, method = 'cash') {
+  const ts = nowIso();
+  const способ = ['cash', 'card', 'transfer'].includes(method) ? method : 'cash';
+  const заказ = db.prepare('SELECT customer_id FROM service_orders WHERE id = ?').get(orderId);
   db.prepare(
-    `INSERT INTO finance_ops (type, category, amount, note, order_id, user_id, created_at)
-     VALUES ('income', 'Оплата заказа', ?, ?, ?, ?, ?)`
-  ).run(amount, note, orderId, userId, nowIso());
+    `INSERT INTO finance_ops (type, category, amount, note, order_id, cash, user_id, created_at)
+     VALUES ('income', 'Оплата заказа', ?, ?, ?, ?, ?, ?)`
+  ).run(amount, note, orderId, способ === 'cash' ? 1 : 0, userId, ts);
+  db.prepare(
+    `INSERT INTO payments (customer_id, order_id, amount, method, note, in_till, user_id, created_at)
+     VALUES (?,?,?,?,?,?,?,?)`
+  ).run(заказ ? заказ.customer_id : null, orderId, amount, способ, note,
+    способ === 'cash' ? 1 : 0, userId, ts);
   db.prepare('UPDATE service_orders SET paid = round(paid + ?, 2) WHERE id = ?').run(amount, orderId);
 }
 
@@ -75,7 +93,9 @@ const routes = [
         ).run(number, type, customerId, session.userId, description, estimate, prepayment,
           String(body.due_date || ''), nowIso(), String(body.note || ''));
         const id = Number(info.lastInsertRowid);
-        if (prepayment > 0) addPayment(id, prepayment, `Предоплата по заказу ${number}`, session.userId);
+        if (prepayment > 0) {
+          addPayment(id, prepayment, `Предоплата по заказу ${number}`, session.userId, body.method);
+        }
         audit(session.userId, 'create', 'order', id, `${number} (${type})`);
         return orderDetail(id);
       });
@@ -142,12 +162,43 @@ const routes = [
       return transaction(() => {
         db.prepare('UPDATE service_orders SET status = ?, delivered_at = ? WHERE id = ?')
           .run(status, status === 'delivered' ? nowIso() : o.delivered_at, id);
-        // при отмене возвращаем клиенту всё оплаченное — фиксируем расход
-        if (status === 'cancelled' && o.paid > 0) {
+        /*
+         * При отмене возвращаем клиенту всё оплаченное.
+         *
+         * Условие «ещё не был отменён» — не перестраховка: переход
+         * «отменён → отменён» верхняя проверка пропускает, а paid не обнулялся,
+         * и каждое повторное нажатие записывало возврат заново. Через интерфейс
+         * кнопка после отмены прячется, но два планшета с открытой карточкой
+         * заказа — обычное дело в магазине с шестью продавцами.
+         */
+        if (status === 'cancelled' && o.status !== 'cancelled' && o.paid > 0) {
+          const ts = nowIso();
+          /*
+           * Способ берём из того, как за заказ действительно платили: своего
+           * поля у заказа нет, а вернуть на карту деньги, принятые наличными
+           * (и наоборот), значит соврать сверке кассы. Если платежей почему-то
+           * нет — считаем наличными, это обычный случай у прилавка.
+           */
+          const последний = db.prepare(
+            `SELECT method FROM payments WHERE order_id = ? AND amount > 0
+              ORDER BY id DESC LIMIT 1`
+          ).get(id);
+          const способ = последний && ['card', 'transfer'].includes(последний.method)
+            ? последний.method : 'cash';
           db.prepare(
-            `INSERT INTO finance_ops (type, category, amount, note, order_id, user_id, created_at)
-             VALUES ('expense', 'Возврат покупателю', ?, ?, ?, ?, ?)`
-          ).run(o.paid, `Возврат оплаты по отменённому заказу ${o.number}`, id, session.userId, nowIso());
+            `INSERT INTO finance_ops (type, category, amount, note, order_id, cash, user_id, created_at)
+             VALUES ('expense', 'Возврат покупателю', ?, ?, ?, ?, ?, ?)`
+          ).run(o.paid, `Возврат оплаты по отменённому заказу ${o.number}`, id,
+            способ === 'cash' ? 1 : 0, session.userId, ts);
+          // Деньги ушли из ящика — сверка кассы должна это увидеть.
+          db.prepare(
+            `INSERT INTO payments (customer_id, order_id, amount, method, note, in_till, user_id, created_at)
+             VALUES (?,?,?,?,?,?,?,?)`
+          ).run(o.customer_id, id, -o.paid, способ,
+            `Возврат по отменённому заказу ${o.number}`, способ === 'cash' ? 1 : 0,
+            session.userId, ts);
+          // Деньги отданы — за заказом больше ничего не числится.
+          db.prepare('UPDATE service_orders SET paid = 0 WHERE id = ?').run(id);
         }
         audit(session.userId, 'status', 'order', id, `${o.number}: ${o.status} → ${status}`);
         return orderDetail(id);
@@ -164,7 +215,7 @@ const routes = [
       if (!o) throw new ApiError(404, 'Заказ не найден');
       if (o.status === 'cancelled') throw new ApiError(400, 'Заказ отменён');
       return transaction(() => {
-        addPayment(id, amount, `Оплата по заказу ${o.number}`, session.userId);
+        addPayment(id, amount, `Оплата по заказу ${o.number}`, session.userId, body.method);
         audit(session.userId, 'payment', 'order', id, `${o.number}: +${amount}`);
         return orderDetail(id);
       });
