@@ -73,6 +73,18 @@ window.Pages.settings = (() => {
                 изделию отдельно: тогда кнопки просто не будет.
                 <b>Цена изделия хранится готовой суммой</b> — смена цены грамма не переписывает
                 ни ценники, ни прошлые чеки.</p>
+
+              <h4 style="margin:18px 0 10px">Предел скидки</h4>
+              <label class="field"><span>Максимальная скидка продавца, %</span>
+                <input name="max_discount_percent" type="number" step="0.5" min="0" max="100"
+                  value="${ui.esc(s.max_discount_percent || '')}"></label>
+              <p class="form-hint">Больше этого продавец поставить не сможет — ни на позицию,
+                ни на чек. <b>Вас это не ограничивает:</b> вы проводите любую скидку, и она
+                отдельной строкой попадает в журнал действий. Личная скидка клиента поднимает
+                предел для его покупок — её ставите тоже вы.
+                <br>Зачем: без предела скидку можно было поставить в размере всей цены
+                и отдать изделие за ноль. Так же выглядит и обычная опечатка — вместо 5 000
+                набрали 50 000 на изделии за 52 000.</p>
               <button type="button" class="btn btn-primary" id="st-save">Сохранить</button>
             </form>
           </div>
@@ -594,6 +606,7 @@ window.Pages.settings = (() => {
     password: 'смена пароля', sync: 'автообмен с 1С',
     login_failed: 'неудачный вход', logout_all: 'завершение всех сеансов',
     backup: 'скачана резервная копия',
+    discount: 'скидка сверх предела',
   };
   const AUDIT_ENTITIES = {
     product: 'изделие', products: 'изделия', customer: 'клиент', customers: 'клиенты',
@@ -603,8 +616,8 @@ window.Pages.settings = (() => {
     inventory: 'инвентаризация', debt: 'долг',
   };
   // Действия, за которыми владелец следит чаще всего, — их выносим в отбор.
-  const AUDIT_PICK = ['sale', 'return', 'exchange', 'payment', 'status', 'create', 'update',
-    'delete', 'import', 'transfer', 'finish', 'login', 'login_failed'];
+  const AUDIT_PICK = ['sale', 'return', 'exchange', 'payment', 'discount', 'status', 'create',
+    'update', 'delete', 'import', 'transfer', 'finish', 'login', 'login_failed'];
 
   async function renderAudit(box) {
     const users = await api.get('/api/users').then(r => r.items).catch(() => []);
