@@ -46,7 +46,7 @@ const BODY_LIMIT = 25 * 1024 * 1024; // 25 МБ — с запасом для CSV
 // ---------- Маршруты API ----------
 
 const modules = ['products', 'images', 'customers', 'sales', 'orders', 'finance', 'debts',
-  'stores', 'inventory', 'analytics', 'settings', 'importexport', 'sets', 'search', 'cash'];
+  'stores', 'inventory', 'analytics', 'settings', 'importexport', 'sets', 'search', 'cash', 'receipts'];
 const routes = [];
 for (const m of modules) {
   for (const r of require(`./src/api/${m}`).routes) {

@@ -39,12 +39,22 @@ async function войти(page, логин, пароль) {
  * и обычная работа приложения, — иначе пришлось бы повторять здесь
  * половину его устройства.
  */
-async function свободныйАртикул(page, занятые) {
-  return page.evaluate(async взятые => {
+async function свободныйАртикул(page, занятые, сЗакупочной = false) {
+  return page.evaluate(async ([взятые, нуженЗакуп]) => {
     const r = await window.api.get('/api/products?status=in_stock&limit=50');
-    const п = (r.items || []).find(p => p.status === 'in_stock' && !взятые.includes(p.sku));
+    /*
+     * Владельцу нужно изделие с настоящей закупочной ценой: проверка ниже
+     * смотрит, предупреждает ли касса о продаже ниже закупочной. На изделии
+     * с нулевой закупочной такого предупреждения не будет никогда, и проверка
+     * падала бы не по делу — в общем прогоне другие наборы успевают завести
+     * изделия без закупочной. Продавцу это поле вообще не приходит, поэтому
+     * для него признак не спрашиваем.
+     */
+    const п = (r.items || []).find(p => p.status === 'in_stock'
+      && !взятые.includes(p.sku)
+      && (!нуженЗакуп || (p.purchase_price > 0 && p.retail_price > p.purchase_price)));
     return п ? п.sku : null;
-  }, занятые);
+  }, [занятые, сЗакупочной]);
 }
 
 async function вКассуИзделие(page, артикул) {
@@ -124,7 +134,7 @@ async function вКассуИзделие(page, артикул) {
   page2.on('pageerror', e => ошибки.push(e.message));
   await войти(page2, 'admin', 'admin123');
 
-  const артикул2 = await свободныйАртикул(page2, [артикул]);
+  const артикул2 = await свободныйАртикул(page2, [артикул], true);
   const позиция2 = await вКассуИзделие(page2, артикул2);
   check('изделие добавлено в чек владельца', Boolean(позиция2));
   const подсказка2 = (await page2.textContent('#pos-disc-hint') || '').trim();

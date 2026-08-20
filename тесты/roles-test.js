@@ -157,13 +157,25 @@ async function main() {
   console.log('\n=== Продавец не может испортить закупочную цену ===');
   // Самое опасное: продавец правит изделие, а закупочная обнуляется.
   const edit = await seller.put('/api/products/' + pid, {
-    name: 'Кольцо для проверки ролей', retail_price: 310000,
+    name: 'Кольцо для проверки ролей', description: 'потёртость на ободке',
     purchase_price: 0, purchase_price_orig: 0, purchase_rate: 0, purchase_currency: '',
   });
   check('продавец может править изделие', edit.status === 200, edit.data);
   const afterEdit = (await admin.get('/api/products/' + pid)).data;
-  check('розничная цена изменилась', afterEdit.retail_price === 310000, afterEdit.retail_price);
+  check('правка сохранилась', afterEdit.description === 'потёртость на ободке', afterEdit.description);
   check('ЗАКУПОЧНАЯ НЕ ПОТЕРЯЛАСЬ', afterEdit.purchase_price === 170000, afterEdit.purchase_price);
+
+  /*
+   * А вот цену продавец не правит — и это не мелочь прав, а единственное,
+   * на чём держится потолок скидки: пока ценник можно переписать, потолок
+   * обходится одним запросом. Подробно это проверяется в наборе про скидки,
+   * здесь — что правило вообще действует.
+   */
+  const ценник = await seller.put('/api/products/' + pid, { retail_price: 310000 });
+  check('но цену — не может', ценник.status === 403, ценник.data);
+  check('ценник остался прежним',
+    (await admin.get('/api/products/' + pid)).data.retail_price === 300000,
+    (await admin.get('/api/products/' + pid)).data.retail_price);
   check('валютная закупка не потерялась',
     afterEdit.purchase_price_orig === 2000 && afterEdit.purchase_rate === 85,
     { orig: afterEdit.purchase_price_orig, rate: afterEdit.purchase_rate });
@@ -189,7 +201,7 @@ async function main() {
   check('чек продавцу виден', saleCard.status === 200);
   check('в чеке нет себестоимости', findForbidden(saleCard.data, 'чек').length === 0,
     findForbidden(saleCard.data, 'чек').slice(0, 4));
-  check('сумма чека продавцу видна', saleCard.data.total === 310000, saleCard.data.total);
+  check('сумма чека продавцу видна', saleCard.data.total === 300000, saleCard.data.total);
 
   const cust = await seller.post('/api/customers', {
     name: `Клиент продавца ${stamp}`, phone: `0555${String(stamp).slice(-6)}`,
