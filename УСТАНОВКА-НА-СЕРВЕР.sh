@@ -97,6 +97,35 @@ if ! apt update -qq; then
 fi
 apt install -y -qq curl ca-certificates gnupg git ufw >/dev/null
 
+# Файл подкачки — страховка, а не замена памяти.
+#
+# Системе хватает 111 МБ в самый тяжёлый момент (замерено на базе за три года
+# работы и 313 МБ фотографий), так что гигабайта достаточно с запасом. Но когда
+# память на сервере всё-таки кончается, Linux не тормозит и не предупреждает —
+# он молча убивает самый прожорливый процесс. То есть кассу, посреди рабочего
+# дня. Подкачка даёт пережить короткий всплеск: она в сотни раз медленнее
+# памяти, зато магазин продолжает торговать.
+#
+# swappiness=10: пользоваться ею только когда деваться некуда, а не постоянно.
+if [ -z "$(swapon --show 2>/dev/null)" ] && [ ! -f /swapfile ]; then
+  if fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none 2>/dev/null; then
+    chmod 600 /swapfile
+    if mkswap /swapfile >/dev/null 2>&1 && swapon /swapfile 2>/dev/null; then
+      grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+      sysctl -qw vm.swappiness=10 2>/dev/null || true
+      grep -q 'vm.swappiness' /etc/sysctl.conf || echo 'vm.swappiness=10' >> /etc/sysctl.conf
+      echo "   файл подкачки на 2 ГБ создан"
+    else
+      # Бывает на серверах типа OpenVZ: подкачку там не создать. Это не повод
+      # обрывать установку — система работает и без неё.
+      rm -f /swapfile
+      echo "   файл подкачки создать не вышло — не страшно, системе хватает памяти"
+    fi
+  fi
+else
+  echo "   файл подкачки уже есть"
+fi
+
 say "3/8. Ставлю Node.js 22"
 if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -lt 22 ]; then
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null
