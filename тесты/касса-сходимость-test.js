@@ -60,7 +60,13 @@ async function main() {
   const взято = new Set();
   async function изделие(дорогое) {
     if (!склад.length) {
-      const r = await админ.зов('GET', '/api/products?status=in_stock&limit=100');
+      /*
+       * Каталог целиком, а не первая сотня строк: он отдаёт самые свежие
+       * изделия первыми, а свежие в общем прогоне — это те, что завели
+       * наборы до нас. На сотне строк демонстрационный каталог вытесняется
+       * из ответа, и набор падает «нет изделий» на полном складе.
+       */
+      const r = await админ.зов('GET', '/api/products?status=in_stock&limit=2000');
       склад.push(...((r.data || {}).items || [])
         .filter(p => p.status === 'in_stock' && p.retail_price > 1000 && !взято.has(p.id))
         .sort((a, b) => b.retail_price - a.retail_price));
