@@ -2,19 +2,27 @@ require('./устройство');   // проверки называют себ
 const ВЫВОД = require('node:path').join(__dirname, '.вывод');
 require('node:fs').mkdirSync(ВЫВОД + '/снимки', { recursive: true });
 const { chromium } = require('./браузер');
+/*
+ * Порт берём у запускающего, а не вписываем в себя. Запускающий выбирает
+ * свободный: если 3122 занят — своим же сервером разработчика или прошлым
+ * прогоном, который не успел закрыться, — он поднимет систему на 3123.
+ * Набор с вписанным портом в этот момент стучится в пустоту и падает
+ * с «connection refused», хотя всё исправно.
+ */
+const BASE = process.env.BASE || 'http://127.0.0.1:3122';
 (async () => {
   const b = await chromium.launch();
   const p = await (await b.newContext({ viewport: { width: 1440, height: 950 } })).newPage();
   const errs = [];
   p.on('pageerror', e => errs.push(e.message));
-  await p.goto('http://127.0.0.1:3122');
+  await p.goto(BASE);
   await p.fill('#login-username', 'admin');
   await p.fill('#login-password', 'admin123');
   await p.click('#login-form button[type=submit]');
   await p.waitForSelector('#app:not(.hidden)');
 
   // Открываем чек со свежей продажей и жмём «Обмен»
-  await p.goto('http://127.0.0.1:3122/#/sales');
+  await p.goto(`${BASE}/#/sales`);
   await p.waitForTimeout(900);
   const row = await p.$('#sales-list tbody tr');
   await row.click();
@@ -44,7 +52,7 @@ const { chromium } = require('./браузер');
   }
 
   // Клиенты: не должно быть колонок сегментов и бонусов
-  await p.goto('http://127.0.0.1:3122/#/customers');
+  await p.goto(`${BASE}/#/customers`);
   await p.waitForTimeout(900);
   const heads = await p.$$eval('#cust-list th', els => els.map(e => e.textContent));
   console.log('Колонки клиентов:', heads.join(' | '));
