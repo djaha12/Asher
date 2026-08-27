@@ -58,11 +58,21 @@ jobs:
 
       - name: Смотрю, что сейчас стоит на сервере
         run: |
+          # Печатаем и список изменённых файлов. Обновление отказывается идти,
+          # когда в папке системы есть правки, — и это правильно, оно их не
+          # затирает. Но без списка непонятно, чьи это правки: чинил ли кто-то
+          # что-то руками на живом сервере, или git считает файл изменённым
+          # из-за переводов строк. Разбираться в этом вслепую — потерянный час.
           sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=20 -o NumberOfPasswordPrompts=1 -p "$PORT" "root@$HOST" \
-            'cd /home/asher/app && echo "ветка: $(sudo -u asher git rev-parse --abbrev-ref HEAD)" \
+            'cd /home/asher/app \
+             && echo "ветка:  $(sudo -u asher git rev-parse --abbrev-ref HEAD)" \
              && echo "версия: $(sudo -u asher git rev-parse --short HEAD)" \
-             && systemctl is-active asher'
+             && echo "служба: $(systemctl is-active asher)" \
+             && echo "--- изменённые файлы (пусто — значит чисто) ---" \
+             && sudo -u asher git status --porcelain \
+             && echo "--- чем именно отличаются ---" \
+             && sudo -u asher git diff --stat'
 
       - name: Обновляю — с копией до и откатом при неудаче
         run: |
