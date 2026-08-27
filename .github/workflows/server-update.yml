@@ -96,7 +96,7 @@ jobs:
           sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
             -p "$PORT" "root@$HOST" \
-            "bash /home/asher/app/ОБНОВИТЬ-НА-СЕРВЕРЕ.sh /home/asher/app $FLAG" \
+            "curl -sL https://raw.githubusercontent.com/djaha12/Asher/HEAD/update.sh | bash -s -- /home/asher/app $FLAG" \
             >обновление.log 2>&1 || RC=$?
           # Пароли скрипт обновления не печатает, но фильтр оставляем на случай,
           # если однажды начнёт: журнал запуска в открытом репозитории виден всем.
