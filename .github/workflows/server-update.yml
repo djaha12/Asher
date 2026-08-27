@@ -25,6 +25,10 @@ on:
       domain:
         description: Домен — по нему проверяется, что система жива
         required: true
+      store_name:
+        description: Название магазина — если заполнить, будет поставлено на сервере
+        required: false
+        default: ''
   push:
     branches: [update-now]
 
@@ -36,6 +40,7 @@ jobs:
       HOST: ${{ inputs.host || '77.235.20.172' }}
       PORT: ${{ inputs.port || '8369' }}
       DOMAIN: ${{ inputs.domain || 'diamonds.kg' }}
+      STORE_NAME: ${{ inputs.store_name || '' }}
       SSHPASS: ${{ secrets.SERVER_ROOT_PASSWORD }}
     steps:
       - name: Проверяю, что секрет с паролем сервера задан
@@ -70,6 +75,19 @@ jobs:
           # если однажды начнёт: журнал запуска в открытом репозитории виден всем.
           grep -v -iE 'пароль|password' обновление.log | tail -80
           exit "$RC"
+
+      - name: Ставлю название магазина, если его прислали
+        if: ${{ inputs.store_name != '' }}
+        run: |
+          # Название уезжает вводом, а не строкой команды: в нём бывают кавычки
+          # и пробелы, а строка команды ещё и видна в журнале ssh.
+          printf '%s\n' "$STORE_NAME" | sshpass -e ssh -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null -p "$PORT" "root@$HOST" \
+            'read -r NAME || true; cd /home/asher/app && sudo -u asher env ASHER_NAME="$NAME" node -e "
+               const { setSetting, getSetting } = require(\"./src/db\");
+               setSetting(\"store_name\", process.env.ASHER_NAME);
+               console.log(\"название магазина теперь: \" + getSetting(\"store_name\"));
+             "'
 
       - name: Проверяю, что сайт отвечает после обновления
         if: ${{ always() }}
