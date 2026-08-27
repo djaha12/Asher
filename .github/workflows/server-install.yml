@@ -1,0 +1,119 @@
+# Установка системы на сервер руками робота GitHub.
+#
+# Зачем это здесь. Установка сводится к одной короткой команде, но выполнить
+# её владелец должен в консоли сервера — а консоль хостинга открывается
+# в браузере и не умеет ни вставлять из буфера, ни показывать вводимый пароль.
+# Человек с готовой системой на руках упирается в чёрный экран и не понимает,
+# идёт набор или нет. Здесь ту же самую команду выполняет робот GitHub:
+# он заходит на сервер по SSH сам, а владельцу остаётся нажать кнопку.
+#
+# Пароли живут в секретах репозитория, а не в полях запуска. Это не мелочь:
+# поля запуска GitHub показывает на странице результата открытым текстом,
+# и в открытом репозитории пароль от сервера увидел бы кто угодно. Секреты
+# он хранит скрыто и вырезает из журнала, даже если их случайно напечатать.
+name: Установка на сервер
+
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        description: Адрес сервера (например 77.235.20.172)
+        required: true
+      port:
+        description: Порт входа на сервер (SSH)
+        required: true
+        default: '22'
+      domain:
+        description: Домен (например diamonds.kg)
+        required: true
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HOST: ${{ inputs.host }}
+      PORT: ${{ inputs.port }}
+      DOMAIN: ${{ inputs.domain }}
+      SSHPASS: ${{ secrets.SERVER_ROOT_PASSWORD }}
+      ADMIN_PASS: ${{ secrets.ASHER_ADMIN_PASSWORD }}
+    steps:
+      - name: Проверяю, что секрет с паролем сервера задан
+        run: |
+          if [ -z "$SSHPASS" ]; then
+            echo "Не задан секрет SERVER_ROOT_PASSWORD."
+            echo "Settings -> Secrets and variables -> Actions -> New repository secret."
+            exit 1
+          fi
+          echo "секрет на месте"
+
+      - name: Ставлю sshpass
+        run: |
+          sudo apt-get update -qq >/dev/null
+          sudo apt-get install -y -qq sshpass >/dev/null
+
+      - name: Проверяю вход на сервер
+        run: |
+          # NumberOfPasswordPrompts=1: без него неверный пароль даёт три
+          # попытки и шаг висит, вместо того чтобы честно упасть.
+          if sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+               -o ConnectTimeout=20 -o NumberOfPasswordPrompts=1 \
+               -p "$PORT" "root@$HOST" 'echo вошёл'; then
+            echo "вход работает"
+          else
+            echo
+            echo "Не пускает на сервер: неверный пароль root, либо закрыт порт $PORT."
+            echo "Проверьте пароль в панели хостинга и обновите секрет SERVER_ROOT_PASSWORD."
+            exit 1
+          fi
+
+      - name: Ставлю систему
+        run: |
+          RC=0
+          sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
+            -p "$PORT" "root@$HOST" \
+            "curl -sL https://raw.githubusercontent.com/djaha12/Asher/HEAD/install.sh | bash -s '$DOMAIN'" \
+            >install.log 2>&1 || RC=$?
+          # Установщик печатает придуманный им пароль администратора, а журнал
+          # запуска в открытом репозитории виден всем — поэтому строки про
+          # пароль в журнал не выводим. Свой пароль ставится следующим шагом.
+          grep -v -iE 'пароль|password' install.log | tail -120
+          exit "$RC"
+
+      - name: Ставлю пароль администратора из секрета
+        if: ${{ success() }}
+        run: |
+          if [ -z "$ADMIN_PASS" ]; then
+            echo "Секрет ASHER_ADMIN_PASSWORD не задан — оставляю пароль, придуманный установщиком."
+            echo "Выдать себе новый можно в любой момент, командой на сервере:"
+            echo "    cd /home/asher/app && sudo -u asher node src/пароль.js admin"
+            exit 0
+          fi
+          # Пароль уезжает на сервер по вводу, а не в строке команды: строка
+          # команды видна и в журнале ssh, и в списке процессов, ввод — нет.
+          printf '%s\n' "$ADMIN_PASS" | sshpass -e ssh -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null -p "$PORT" "root@$HOST" \
+            'read -r NEWPASS || true; cd /home/asher/app && sudo -u asher node src/пароль.js admin "$NEWPASS" >/dev/null'
+          echo "пароль администратора взят из секрета ASHER_ADMIN_PASSWORD"
+
+      - name: Проверяю, что сайт открывается
+        if: ${{ success() }}
+        run: |
+          for попытка in 1 2 3 4 5 6 7 8; do
+            if curl -s --max-time 20 "https://$DOMAIN/api/ping" | grep -q asher; then
+              echo
+              echo "==================================================="
+              echo "  ГОТОВО. https://$DOMAIN отвечает и работает."
+              echo "  Вход: admin + пароль из секрета ASHER_ADMIN_PASSWORD"
+              echo "==================================================="
+              exit 0
+            fi
+            echo "попытка $попытка: сайт пока молчит, жду 30 секунд (выдаётся сертификат https)"
+            sleep 30
+          done
+          echo
+          echo "Система на сервере поставлена, но https за 4 минуты не поднялся."
+          echo "Чаще всего это значит, что снаружи закрыты порты 80 и 443 —"
+          echo "их открывает хостинг. Проверьте сайт ещё раз через несколько минут."
+          echo "Что смотреть на сервере: journalctl -u caddy -n 50"
