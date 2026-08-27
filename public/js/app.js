@@ -83,6 +83,17 @@ window.App = (() => {
       document.getElementById('brand-name-mobile').textContent = App.storeName;
       document.getElementById('login-title').textContent = first;
       document.getElementById('login-sub').textContent = rest;
+      /*
+       * Вкладка браузера и имя будущего значка на телефоне. Сервер их уже
+       * подставил при выдаче страницы, но владелец мог сменить название
+       * только что, не перезагружая: без этих строк он увидел бы новое имя
+       * в шапке и старое — на вкладке, и решил бы, что настройка не сработала.
+       */
+      document.title = App.storeName + ' — CRM';
+      for (const имя of ['apple-mobile-web-app-title', 'application-name']) {
+        const тег = document.querySelector(`meta[name="${имя}"]`);
+        if (тег) тег.setAttribute('content', first);
+      }
       document.getElementById('user-name').textContent = App.user.name;
       document.getElementById('user-role').textContent = App.user.role === 'admin' ? 'Администратор' : 'Продавец';
       document.getElementById('user-avatar').textContent = (App.user.name || '?')[0].toUpperCase();

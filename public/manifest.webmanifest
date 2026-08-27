@@ -1,6 +1,6 @@
 {
-  "name": "Asher Diamonds — учёт",
-  "short_name": "Asher",
+  "name": "{{НАЗВАНИЕ}} — учёт",
+  "short_name": "{{КРАТКО}}",
   "description": "Учётная система ювелирного магазина: каталог, продажи, долги, склад",
   "lang": "ru",
   "start_url": "/",

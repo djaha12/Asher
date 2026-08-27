@@ -1,6 +1,7 @@
 'use strict';
 const os = require('node:os');
 const { db, nowIso, audit, getSetting, setSetting, hashPassword, makeSalt } = require('../db');
+const копия = require('../копия');
 const { ApiError } = require('./util');
 const { changePassword, passwordProblem, destroyUserSessions, countUserSessions } = require('../auth');
 const { PRESETS, LOCALE_KEYS, presetFor } = require('../locale');
@@ -55,6 +56,12 @@ function состояниеКопий() {
     backup_error_at: getSetting('backup_error_at') || '',
     disk_free_mb: свободноМб,
     disk_low: малоМеста,
+    /*
+     * Сам ключ отсюда не отдаём никогда — только «выдан или нет». Иначе он
+     * ездил бы в каждом ответе страницы «Безопасность», оседая в журналах
+     * прокси и в истории браузера.
+     */
+    backup_key_set: копия.ключЕсть(),
   };
 }
 
@@ -242,46 +249,34 @@ const routes = [
      */
     method: 'GET', path: '/api/backup/download', admin: true, raw: true,
     handler: async ({ res, session }) => {
-      const { streamZip, listFiles } = require('../zip');
-      const { MEDIA_DIR } = require('../db');
-
-      const snapshot = require('../sync').makeBackupNow();
-      const entries = [{ name: 'data/asher.db', file: snapshot }];
-      // Фотографии кладём рядом с базой, сохраняя структуру папок: так архив
-      // распаковывается прямо поверх папки системы.
-      for (const f of listFiles(MEDIA_DIR)) {
-        entries.push({ name: 'data/images/' + f.name, file: f.file });
-      }
-      // Короткая записка внутрь архива: через полгода никто не вспомнит,
-      // что это за файл и что с ним делать.
-      entries.push({
-        name: 'КАК-ВОССТАНОВИТЬ.txt',
-        data: Buffer.from(
-          'Резервная копия Asher\r\n' +
-          'Снята: ' + new Date().toLocaleString('ru-RU') + '\r\n\r\n' +
-          'Внутри:\r\n' +
-          '  data/asher.db     — вся база: изделия, продажи, клиенты, долги, журнал\r\n' +
-          '  data/images/      — фотографии изделий и сканы сертификатов\r\n\r\n' +
-          'Как восстановить:\r\n' +
-          '  1. Закройте систему (чёрное окно).\r\n' +
-          '  2. Удалите папку data целиком — вместе с файлами asher.db-wal\r\n' +
-          '     и asher.db-shm, если они есть. Если оставить их рядом со старой\r\n' +
-          '     базой, система возьмёт данные из них, а не из копии.\r\n' +
-          '  3. Распакуйте этот архив в папку с системой — папка data появится заново.\r\n' +
-          '  4. Запустите СТАРТ.\r\n', 'utf8'),
-      });
-
-      const name = 'asher-' + new Date().toISOString().slice(0, 10) + '.zip';
-      audit(session.userId, 'backup', 'settings', null,
-        `Скачана резервная копия (${name}, файлов: ${entries.length})`);
-      /*
-       * Отдаём потоком, а не собираем в памяти. Замер на 330 МБ фотографий:
-       * прежняя сборка занимала в пике 733 МБ, вдвое больше самого архива,
-       * и на сервере с гигабайтом памяти копия однажды просто перестала бы
-       * скачиваться. Заодно магазин больше не замирает: раньше продавец ждал
-       * ответа пять секунд на обычном экране, пока владелец качал копию.
-       */
-      await streamZip(entries, res, { filename: name });
+      await копия.отдатьКопию(res, { userId: session.userId, откуда: 'вручную' });
+    },
+  },
+  {
+    /*
+     * Создать ключ для автоматических копий.
+     *
+     * Показывается он ровно один раз — здесь, в ответе. Хранить его у себя
+     * и показывать по требованию значило бы держать в базе вечный пропуск
+     * ко всем данным магазина: украли базу — украли и его. Потерявшему
+     * ключ проще выдать новый: старый при этом сразу перестаёт работать.
+     */
+    method: 'POST', path: '/api/backup/key', admin: true,
+    handler: ({ session }) => {
+      const был = копия.ключЕсть();
+      const ключ = копия.создатьКлюч();
+      audit(session.userId, 'update', 'settings', null,
+        был ? 'Выдан новый ключ для копий, прежний отозван' : 'Выдан ключ для автоматических копий');
+      return { key: ключ };
+    },
+  },
+  {
+    method: 'DELETE', path: '/api/backup/key', admin: true,
+    handler: ({ session }) => {
+      if (!копия.ключЕсть()) throw new ApiError(400, 'Ключ и так не выдан');
+      копия.убратьКлюч();
+      audit(session.userId, 'update', 'settings', null, 'Ключ для автоматических копий отозван');
+      return { ok: true };
     },
   },
 

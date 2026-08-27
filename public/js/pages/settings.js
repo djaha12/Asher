@@ -159,7 +159,7 @@ window.Pages.settings = (() => {
                 <strong>Чтобы стало приложением.</strong> Открыв систему на телефоне, нажмите
                 в браузере «Поделиться» или «⋮» и выберите
                 <b>«На экран “Домой”»</b> (iPhone) или <b>«Установить приложение»</b> (Android).
-                Появится значок Asher — система будет открываться на весь экран, без адресной строки.
+                Появится значок ${App.storeName} — система будет открываться на весь экран, без адресной строки.
               </div>
             ` : `<p class="muted">Компьютер не подключён к сети — адрес появится, когда включите Wi-Fi.</p>`}
           </div>
@@ -499,7 +499,7 @@ window.Pages.settings = (() => {
             <div style="margin-top:6px">1. Навести камеру на код — откроется система.</div>
             <div>2. Ввести пароль (логин уже подставлен).</div>
             <div>3. В браузере нажать «Поделиться» → <b>«На экран “Домой”»</b> (iPhone)
-              или «⋮» → <b>«Установить приложение»</b> (Android) — появится значок Asher.</div>
+              или «⋮» → <b>«Установить приложение»</b> (Android) — появится значок ${App.storeName}.</div>
             <div style="margin-top:6px">${/^(localhost|127\.0\.0\.1|\[::1\]|\d+\.\d+\.\d+\.\d+)$/i.test(location.hostname)
               ? 'Телефон должен быть в том же Wi-Fi, что и компьютер.'
               : 'Работает откуда угодно — Wi-Fi магазина не нужен.'}</div>
@@ -517,7 +517,7 @@ window.Pages.settings = (() => {
     if (printBtn) printBtn.onclick = () => {
       const root = document.getElementById('print-root');
       root.innerHTML = `<div style="padding:20mm;text-align:center">
-        <h2 style="margin:0 0 8px">Asher — вход для сотрудника</h2>
+        <h2 style="margin:0 0 8px">${App.storeName} — вход для сотрудника</h2>
         <div style="font-size:22px;font-weight:600;margin-bottom:4px">${ui.esc(u.name)}</div>
         <div style="margin-bottom:14px">логин: <b>${ui.esc(u.username)}</b></div>
         <div style="width:70mm;margin:0 auto 12px">${phoneQr(link)}</div>
@@ -833,6 +833,26 @@ window.Pages.settings = (() => {
               папку, заменив <code>data</code>. Внутри архива лежит записка с этими же шагами.</p>
           </div>
           <div class="card">
+            <h3 class="card-title">Копия сама, каждый день</h3>
+            <p class="muted" style="margin-top:0">Кнопка выше требует, чтобы кто-то про неё помнил
+              каждый день. Люди не помнят — и теряют учёт не из-за поломки, а из-за этого.
+              Ключ ниже позволяет компьютеру магазина забирать копию самому, по расписанию.</p>
+            ${st.backup_key_set ? `
+              <div class="row" style="gap:10px;flex-wrap:wrap">
+                <button class="btn" data-act="key-new">Выдать новый ключ</button>
+                <button class="btn btn-danger" data-act="key-drop">Отозвать ключ</button>
+              </div>
+              <p class="form-hint">Ключ выдан. Показать его снова нельзя — он не хранится в открытом
+                виде. Потеряли или он попал не туда — выдайте новый: прежний перестанет работать
+                в ту же секунду.</p>
+            ` : `
+              <button class="btn btn-primary" data-act="key-new">Выдать ключ</button>
+              <p class="form-hint">Ключ покажется <b>один раз</b>. Он открывает только скачивание
+                копии — ни смотреть, ни менять что-либо в системе им нельзя. Но копия — это все
+                данные магазина, поэтому храните его как ключ от сейфа.</p>
+            `}
+          </div>
+          <div class="card">
             <h3 class="card-title">Правила, о которых стоит помнить</h3>
             <ul class="muted" style="margin:0;padding-left:18px;line-height:1.7">
               <li>У каждого сотрудника свой логин — общий обесценивает журнал.</li>
@@ -862,6 +882,71 @@ window.Pages.settings = (() => {
         await renderSecurity(box);
       } catch (e) { b.disabled = false; ui.toastErr(e); }
     }));
+
+    const кнопкаКлюча = box.querySelector('[data-act=key-new]');
+    if (кнопкаКлюча) кнопкаКлюча.addEventListener('click', async () => {
+      if (st.backup_key_set && !await ui.confirmDialog(
+        'Выдать новый ключ? Прежний перестанет работать сразу — если он прописан ' +
+        'в ежедневной задаче на компьютере, её придётся настроить заново.',
+        { okLabel: 'Выдать новый' })) return;
+      кнопкаКлюча.disabled = true;
+      try {
+        const r = await api.post('/api/backup/key');
+        показатьКлюч(r.key);
+        await renderSecurity(box);
+      } catch (e) { кнопкаКлюча.disabled = false; ui.toastErr(e); }
+    });
+    const кнопкаОтзыва = box.querySelector('[data-act=key-drop]');
+    if (кнопкаОтзыва) кнопкаОтзыва.addEventListener('click', async () => {
+      if (!await ui.confirmDialog(
+        'Отозвать ключ? Ежедневная копия на компьютер перестанет забираться.',
+        { danger: true, okLabel: 'Отозвать' })) return;
+      кнопкаОтзыва.disabled = true;
+      try {
+        await api.del('/api/backup/key');
+        ui.toast('Ключ отозван');
+        await renderSecurity(box);
+      } catch (e) { кнопкаОтзыва.disabled = false; ui.toastErr(e); }
+    });
+  }
+
+  /*
+   * Показываем ключ один раз — и сразу вместе с готовой строкой для проверки.
+   * Голый ключ владельцу ничего не говорит: он не знает, что с ним делать,
+   * закрывает окно и теряет его. Поэтому здесь же — адрес целиком, который
+   * можно вставить в браузер и убедиться, что копия скачивается.
+   */
+  function показатьКлюч(ключ) {
+    const адрес = `${location.origin}/api/backup/download?key=${ключ}`;
+    const m = ui.modal({
+      title: 'Ключ для ежедневных копий',
+      body: `
+        <p class="muted" style="margin-top:0"><b>Запишите его сейчас.</b> Второй раз система его
+          не покажет — она не хранит его в открытом виде.</p>
+        <div class="row" style="gap:8px;align-items:stretch;margin-bottom:12px">
+          <code style="font-size:17px;font-weight:600;flex:1;word-break:break-all">${ui.esc(ключ)}</code>
+          <button class="btn btn-sm" data-copy-key>Копировать</button>
+        </div>
+        <div class="hint-box">
+          <strong>Проверить прямо сейчас:</strong> вставьте этот адрес в браузер — должен
+          скачаться архив с копией.
+          <div class="row" style="gap:8px;align-items:stretch;margin-top:8px">
+            <code style="font-size:12.5px;flex:1;word-break:break-all">${ui.esc(адрес)}</code>
+            <button class="btn btn-sm" data-copy-url>Копировать</button>
+          </div>
+        </div>
+        <p class="form-hint">Чтобы копия забиралась сама каждый вечер, запустите на компьютере
+          магазина файл <code>КОПИЯ-КАЖДЫЙ-ДЕНЬ.bat</code> — он спросит этот адрес и заведёт
+          ежедневную задачу.</p>`,
+      footer: '<button class="btn btn-primary" data-act="cancel">Записал, закрыть</button>',
+    });
+    m.foot.querySelector('[data-act=cancel]').onclick = m.close;
+    const копировать = async (текст, что) => {
+      try { await navigator.clipboard.writeText(текст); ui.toast(что + ' скопирован'); }
+      catch { ui.toast('Скопируйте вручную', true); }
+    };
+    m.body.querySelector('[data-copy-key]').onclick = () => копировать(ключ, 'Ключ');
+    m.body.querySelector('[data-copy-url]').onclick = () => копировать(адрес, 'Адрес');
   }
 
   return {

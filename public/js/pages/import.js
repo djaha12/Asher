@@ -44,7 +44,7 @@ window.Pages.import = (() => {
             <li>Нажмите <b>Ещё → Вывести список</b>, отметьте нужные колонки (артикул, наименование, цены…).</li>
             <li>В открывшемся табличном документе: <b>Файл → Сохранить как…</b></li>
             <li>Выберите тип файла <b>«Текст CSV (разделитель — точка с запятой)»</b> или Excel, затем сохраните лист Excel как CSV.</li>
-            <li>Загрузите файл здесь — Asher сам предложит соответствие колонок.</li>
+            <li>Загрузите файл здесь — ${App.storeName} сам предложит соответствие колонок.</li>
           </ol>
           <p class="muted" style="font-size:12.5px">Также подойдёт любая таблица из Excel/Google Sheets, сохранённая как CSV: первая строка — названия колонок.</p>
           <p class="form-hint" style="margin-bottom:0"><b>Только переоценка?</b> Достаточно файла из двух
@@ -74,7 +74,7 @@ window.Pages.import = (() => {
         <div class="muted">Загрузка…</div>
       </div>
 
-      <h2 class="section-title">Экспорт данных из Asher</h2>
+      <h2 class="section-title">Экспорт данных из ${App.storeName}</h2>
       <div class="card">
         <p class="muted" style="margin-top:0">Резервная копия или перенос в Excel — данные выгружаются в CSV (открывается в Excel).</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap">

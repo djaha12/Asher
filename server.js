@@ -198,6 +198,50 @@ const MIME = {
   '.webmanifest': 'application/manifest+json; charset=utf-8',
 };
 
+/*
+ * Название магазина — настройка, и слушаться её должно всё, что видит человек:
+ * вкладка браузера, экран входа, имя значка на телефоне.
+ *
+ * Почему подстановкой на сервере, а не из JavaScript. Экран входа рисуется
+ * до всякого входа, а название система узнаёт только после него — то есть
+ * первое, что показывает система незнакомому человеку, было бы чужим именем.
+ * Манифест же читает не наша страница, а сам телефон, и никакого JavaScript
+ * там не выполняется вовсе.
+ *
+ * Разбор на «крупно» и «подстрочником» повторяет то, что делает showApp():
+ * «Asher Diamonds» → крупно ASHER, мельче DIAMONDS. Одно слово — без
+ * подстрочника.
+ */
+const ПОДСТАНОВКИ = /\{\{(НАЗВАНИЕ|КРАТКО|ПОДСТРОЧНИК)\}\}/g;
+
+/*
+ * Экранируем по месту, а не одинаково. Название вводит владелец, и кавычка
+ * в нём — не выдумка: «Ювелирный "Алмаз"» набирают именно так. В html такая
+ * кавычка закрыла бы content="…" в meta-теге, в json — разорвала бы строку
+ * и телефон отверг бы манифест целиком, перестав предлагать значок.
+ *
+ * Одним способом на оба случая не обойтись: html-экранирование внутри json
+ * даёт формально верный файл, но на значке телефона владелец прочитает
+ * «Ювелирный &quot;Алмаз&quot;».
+ */
+function экранировать(значение, вид) {
+  const s = String(значение);
+  if (вид === 'json') return JSON.stringify(s).slice(1, -1);
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function подставитьНазвание(текст, вид) {
+  const полное = String(getSetting('store_name') || 'Asher Diamonds').trim();
+  const слова = полное.split(/\s+/);
+  const значения = {
+    'НАЗВАНИЕ': полное,
+    'КРАТКО': слова[0],
+    'ПОДСТРОЧНИК': слова.slice(1).join(' '),
+  };
+  return текст.replace(ПОДСТАНОВКИ, (_, ключ) => экранировать(значения[ключ], вид));
+}
+
 function serveStatic(req, res, pathname) {
   let rel = pathname === '/' ? '/index.html' : pathname;
   const file = path.normalize(path.join(PUBLIC_DIR, rel));
@@ -210,15 +254,24 @@ function serveStatic(req, res, pathname) {
       fs.readFile(path.join(PUBLIC_DIR, 'index.html'), (e2, index) => {
         if (e2) { res.writeHead(404); res.end('Not found'); return; }
         res.writeHead(200, { 'Content-Type': MIME['.html'], ...securityHeaders(req) });
-        res.end(index);
+        res.end(подставитьНазвание(index.toString('utf8'), 'html'));
       });
       return;
     }
+    const тип = path.extname(file);
+    /*
+     * Подставляем только там, где подстановки есть: в html и манифесте.
+     * Гонять через замену фотографии и шрифты незачем, а испортить —
+     * можно: Buffer→строка→Buffer на двоичном файле его ломает.
+     */
+    const сНазванием = тип === '.html' || тип === '.webmanifest';
     res.writeHead(200, {
-      'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
+      'Content-Type': MIME[тип] || 'application/octet-stream',
       ...securityHeaders(req),
     });
-    res.end(data);
+    res.end(сНазванием
+      ? подставитьНазвание(data.toString('utf8'), тип === '.webmanifest' ? 'json' : 'html')
+      : data);
   });
 }
 
@@ -388,6 +441,40 @@ const server = http.createServer(async (req, res) => {
         currency: getSetting('currency'),
         locale: currentLocale(),
       });
+      return;
+    }
+
+    /*
+     * Скачивание резервной копии по ключу — единственный ответ системы без
+     * пароля, и потому написан здесь, отдельно, а не спрятан среди маршрутов.
+     *
+     * Зачем он вообще нужен. Копия, лежащая на том же диске, что и база,
+     * не спасает ни от сбоя диска, ни от пропавшего сервера, ни от забытой
+     * оплаты хостинга — а именно так учёт и теряют. Спасает копия в другом
+     * месте, и снимать её должен компьютер по расписанию, а не человек по
+     * памяти: люди забывают, и это свойство людей, а не их вина.
+     *
+     * Чем он не является. Это не пароль и не сотрудник: ключ открывает ровно
+     * один адрес и не даёт ни смотреть, ни менять ничего другого.
+     *
+     * Подбор закрыт с двух сторон: сам ключ — 160 бит, а неудачные попытки
+     * идут через ту же защиту, что и подбор пароля, поэтому долбить адрес
+     * бесполезно ещё и по времени.
+     */
+    if (pathname === '/api/backup/download' && req.method === 'GET' && !session) {
+      const копия = require('./src/копия');
+      const ip = clientIp(req);
+      const ждать = guard.retryAfter(ip, 'ключ-копий');
+      if (ждать > 0) {
+        res.setHeader('Retry-After', String(Math.ceil(ждать / 1000)));
+        throw new ApiError(429, 'Слишком много попыток. Подождите и повторите.');
+      }
+      if (!копия.ключВерен(url.searchParams.get('key') || '')) {
+        guard.noteFail(ip, 'ключ-копий');
+        throw new ApiError(401, 'Неверный ключ для копий');
+      }
+      guard.noteSuccess(ip, 'ключ-копий');
+      await копия.отдатьКопию(res, { userId: null, откуда: 'по ключу, автоматически' });
       return;
     }
 
