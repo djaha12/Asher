@@ -55,7 +55,9 @@ async function main() {
   if (!await админ.войти('admin', 'admin123')) { console.error('Не удалось войти'); process.exit(2); }
 
   const было = (await админ.зов('GET', '/api/settings')).data.store_name;
-  const вернуть = async () => админ.зов('PUT', '/api/settings', { store_name: было });
+  const подписьБыла = (await админ.зов('GET', '/api/settings')).data.site_note || '';
+  const вернуть = async () => админ.зов('PUT', '/api/settings',
+    { store_name: было, site_note: подписьБыла });
 
   try {
     console.log('=== 1. Простое название доезжает до вкладки и экрана входа ===');
@@ -122,7 +124,42 @@ async function main() {
     try { мЭ = JSON.parse(мЭкран); } catch { /* ниже */ }
     check('манифест с кавычкой остался правильным JSON', мЭ !== null, мЭкран.slice(0, 140));
 
-    console.log('\n=== 5. Подстановка работает и на внутренних адресах ===');
+    console.log('\n=== 5. Подпись для тех, кто ещё не вошёл ===');
+    /*
+     * Отдельная настройка, а не второе слово названия. Название печатается
+     * на чеках и стоит в шапке у продавцов: дописать в него «в разработке» —
+     * значит написать это и покупателю на чеке. А сказать заглянувшему, что
+     * система ещё не открыта, иногда нужно.
+     */
+    await админ.зов('PUT', '/api/settings', { store_name: 'Diamonds', site_note: 'в разработке' });
+    html = await страница('/');
+    check('подпись видна под названием на входе',
+      /<p class="login-sub" id="login-sub">в разработке<\/p>/.test(html),
+      (html.match(/id="login-sub">[^<]*/) || [''])[0]);
+    check('название при этом не изменилось',
+      /<h1 id="login-title">Diamonds<\/h1>/.test(html));
+    check('подпись попала в описание страницы',
+      /<meta name="description" content="Diamonds — в разработке">/.test(html),
+      (html.match(/<meta name="description"[^>]*>/) || [''])[0]);
+    check('и в описание для мессенджеров',
+      /<meta property="og:description" content="Diamonds — в разработке">/.test(html));
+    const мПодпись = JSON.parse(await страница('/manifest.webmanifest'));
+    check('и в описание приложения на телефоне',
+      мПодпись.description === 'Diamonds — в разработке', мПодпись.description);
+    check('название магазина в настройках осталось чистым',
+      (await админ.зов('GET', '/api/settings')).data.store_name === 'Diamonds');
+
+    console.log('\n=== 6. Без подписи всё как было ===');
+    await админ.зов('PUT', '/api/settings', { store_name: 'Asher Diamonds', site_note: '' });
+    html = await страница('/');
+    check('под названием снова второе слово',
+      /<p class="login-sub" id="login-sub">Diamonds<\/p>/.test(html),
+      (html.match(/id="login-sub">[^<]*/) || [''])[0]);
+    check('описание общее, без подписи',
+      /content="Asher Diamonds — учётная система ювелирного магазина"/.test(html),
+      (html.match(/<meta name="description"[^>]*>/) || [''])[0]);
+
+    console.log('\n=== 7. Подстановка работает и на внутренних адресах ===');
     /*
      * Любой адрес отдаёт index.html — это одностраничное приложение.
      * Подстановка живёт в двух местах кода (обычная выдача и запасная),

@@ -50,6 +50,10 @@ window.Pages.settings = (() => {
             <h3 class="card-title">Магазин</h3>
             <form id="st-form">
               <label class="field"><span>Название (печатается на чеках)</span><input name="store_name" value="${ui.esc(s.store_name)}"></label>
+              <label class="field"><span>Подпись на экране входа</span>
+                <input name="site_note" value="${ui.esc(s.site_note || '')}" placeholder="например: в разработке">
+                <small class="form-hint">Её видят только те, кто ещё не вошёл — под названием
+                  на экране входа и в описании ссылки. Внутри системы и на чеках не появляется.</small></label>
               <div class="form-grid">
                 <label class="field"><span>Адрес</span><input name="store_address" value="${ui.esc(s.store_address)}"></label>
                 <label class="field"><span>Телефон</span><input name="store_phone" value="${ui.esc(s.store_phone)}"></label>

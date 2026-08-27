@@ -19,7 +19,7 @@ const { PRESETS, LOCALE_KEYS, presetFor } = require('../locale');
  * max_discount_percent — потолок скидки для продавца. Отдаётся и продавцу
  * тоже: касса должна показать предел ещё до того, как он упрётся в отказ.
  */
-const SETTING_KEYS = ['store_name', 'store_address', 'store_phone', 'usd_rate',
+const SETTING_KEYS = ['store_name', 'site_note', 'store_address', 'store_phone', 'usd_rate',
   'gram_price', 'work_price', 'max_discount_percent', ...LOCALE_KEYS];
 
 /*
