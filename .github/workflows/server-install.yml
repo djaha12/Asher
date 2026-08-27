@@ -14,6 +14,9 @@
 name: Установка на сервер
 
 on:
+  # Кнопка «Run workflow» в разделе Actions. Появляется она только тогда,
+  # когда этот файл лежит в основной ветке репозитория — таково правило
+  # GitHub, и обойти его нельзя.
   workflow_dispatch:
     inputs:
       host:
@@ -26,15 +29,26 @@ on:
       domain:
         description: Домен (например diamonds.kg)
         required: true
+  # А это — запуск, которому основная ветка не нужна: он срабатывает сам,
+  # как только в репозитории появляется ветка «install-now». Работает
+  # с любой ветки, потому что при событии push GitHub берёт рабочий процесс
+  # из того самого коммита, который пришёл. Нужен ровно для одного случая:
+  # владелец не может выполнить установку руками, а ждать слияния в основу
+  # незачем — магазину нужна работающая касса, а не порядок в ветках.
+  push:
+    branches: [install-now]
 
 jobs:
   install:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      HOST: ${{ inputs.host }}
-      PORT: ${{ inputs.port }}
-      DOMAIN: ${{ inputs.domain }}
+      # При запуске кнопкой значения приходят из полей, при запуске веткой
+      # полей нет — тогда берутся эти. Адрес, порт и домен не секреты:
+      # они и так написаны в инструкции по переезду.
+      HOST: ${{ inputs.host || '77.235.20.172' }}
+      PORT: ${{ inputs.port || '8369' }}
+      DOMAIN: ${{ inputs.domain || 'diamonds.kg' }}
       SSHPASS: ${{ secrets.SERVER_ROOT_PASSWORD }}
       ADMIN_PASS: ${{ secrets.ASHER_ADMIN_PASSWORD }}
     steps:
