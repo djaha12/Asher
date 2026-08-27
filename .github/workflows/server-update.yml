@@ -1,0 +1,96 @@
+# Обновление системы на сервере руками робота GitHub.
+#
+# Отдельно от установки, и намеренно. Установка разворачивает систему на
+# чистом сервере; обновление трогает работающую кассу магазина, и цена ошибки
+# здесь другая: продавцы стоят у прилавка. Поэтому обновление идёт не через
+# установщик, а через ОБНОВИТЬ-НА-СЕРВЕРЕ.sh — он снимает копию базы ДО того,
+# как что-то менять, проверяет, что система поднялась и отвечает, и сам
+# возвращает прежнюю версию, если не поднялась. Худший исход — «осталось
+# как было».
+#
+# Запуск: кнопкой в разделе Actions (если файл в основной ветке) либо
+# появлением ветки update-now — так же, как у установки.
+name: Обновление сервера
+
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        description: Адрес сервера
+        required: true
+      port:
+        description: Порт входа на сервер (SSH)
+        required: true
+        default: '22'
+      domain:
+        description: Домен — по нему проверяется, что система жива
+        required: true
+  push:
+    branches: [update-now]
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      HOST: ${{ inputs.host || '77.235.20.172' }}
+      PORT: ${{ inputs.port || '8369' }}
+      DOMAIN: ${{ inputs.domain || 'diamonds.kg' }}
+      SSHPASS: ${{ secrets.SERVER_ROOT_PASSWORD }}
+    steps:
+      - name: Проверяю, что секрет с паролем сервера задан
+        run: |
+          if [ -z "$SSHPASS" ]; then
+            echo "Не задан секрет SERVER_ROOT_PASSWORD."
+            exit 1
+          fi
+          echo "секрет на месте"
+
+      - name: Ставлю sshpass
+        run: |
+          sudo apt-get update -qq >/dev/null
+          sudo apt-get install -y -qq sshpass >/dev/null
+
+      - name: Смотрю, что сейчас стоит на сервере
+        run: |
+          sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 -o NumberOfPasswordPrompts=1 -p "$PORT" "root@$HOST" \
+            'cd /home/asher/app && echo "ветка: $(sudo -u asher git rev-parse --abbrev-ref HEAD)" \
+             && echo "версия: $(sudo -u asher git rev-parse --short HEAD)" \
+             && systemctl is-active asher'
+
+      - name: Обновляю — с копией до и откатом при неудаче
+        run: |
+          RC=0
+          sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
+            -p "$PORT" "root@$HOST" \
+            'bash /home/asher/app/ОБНОВИТЬ-НА-СЕРВЕРЕ.sh' >обновление.log 2>&1 || RC=$?
+          # Пароли скрипт обновления не печатает, но фильтр оставляем на случай,
+          # если однажды начнёт: журнал запуска в открытом репозитории виден всем.
+          grep -v -iE 'пароль|password' обновление.log | tail -80
+          exit "$RC"
+
+      - name: Проверяю, что сайт отвечает после обновления
+        if: ${{ always() }}
+        run: |
+          # Имя счётчика латиницей: bash кириллические имена переменных
+          # не принимает и молча пропускает весь цикл — проверка тогда
+          # не проверяет ничего, а в журнал пишет уверенный ответ.
+          for try in 1 2 3 4 5 6; do
+            if curl -s --max-time 20 "https://$DOMAIN/api/ping" | grep -q asher; then
+              echo
+              echo "==================================================="
+              echo "  https://$DOMAIN отвечает. Обновление прошло."
+              echo "==================================================="
+              exit 0
+            fi
+            echo "попытка $try: сайт пока молчит, жду 15 секунд"
+            sleep 15
+          done
+          echo
+          echo "https://$DOMAIN не ответил за полторы минуты."
+          echo "Скрипт обновления возвращает прежнюю версию сам, если система не поднялась,"
+          echo "поэтому магазин, скорее всего, работает на старой версии — проверьте сайт."
+          echo "Что смотреть на сервере: journalctl -u asher -n 50"
+          exit 1
