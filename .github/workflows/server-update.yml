@@ -29,6 +29,11 @@ on:
         description: Название магазина — если заполнить, будет поставлено на сервере
         required: false
         default: ''
+      discard_local_changes:
+        description: Стереть правки в папке системы на сервере (только осознанно!)
+        required: false
+        type: boolean
+        default: false
   push:
     branches: [update-now]
 
@@ -73,6 +78,25 @@ jobs:
              && sudo -u asher git status --porcelain \
              && echo "--- чем именно отличаются ---" \
              && sudo -u asher git diff --stat'
+
+      - name: Стираю правки в папке системы — только если попросили явно
+        if: ${{ inputs.discard_local_changes }}
+        run: |
+          # Отдельная галочка, выключенная по умолчанию, и это принципиально.
+          # Обновление отказывается идти при правках в папке системы — это его
+          # защита: кто-то мог чинить что-то прямо на живом сервере, и стереть
+          # это молча значит потерять чужую работу. Обходить защиту можно
+          # только глазами посмотрев на список выше и поняв, что там нет
+          # ничего своего. Поэтому — не «на всякий случай», а по требованию,
+          # и с печатью того, что именно стёрто.
+          sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -p "$PORT" "root@$HOST" \
+            'cd /home/asher/app \
+             && echo "стираю следующие правки:" \
+             && sudo -u asher git -c core.quotepath=false status --porcelain \
+             && sudo -u asher git checkout -- . \
+             && echo "готово, осталось:" \
+             && (sudo -u asher git status --porcelain || true)'
 
       - name: Обновляю — с копией до и откатом при неудаче
         run: |
