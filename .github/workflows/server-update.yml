@@ -29,6 +29,10 @@ on:
         description: Название магазина — если заполнить, будет поставлено на сервере
         required: false
         default: ''
+      site_note:
+        description: Подпись на экране входа — например «в разработке»
+        required: false
+        default: ''
       discard_local_changes:
         description: Стереть правки в папке системы на сервере (только осознанно!)
         required: false
@@ -46,6 +50,7 @@ jobs:
       PORT: ${{ inputs.port || '8369' }}
       DOMAIN: ${{ inputs.domain || 'diamonds.kg' }}
       STORE_NAME: ${{ inputs.store_name || '' }}
+      SITE_NOTE: ${{ inputs.site_note || '' }}
       SSHPASS: ${{ secrets.SERVER_ROOT_PASSWORD }}
     steps:
       - name: Проверяю, что секрет с паролем сервера задан
@@ -103,17 +108,23 @@ jobs:
           grep -v -iE 'пароль|password' обновление.log | tail -80
           exit "$RC"
 
-      - name: Ставлю название магазина, если его прислали
-        if: ${{ inputs.store_name != '' }}
+      - name: Ставлю название и подпись, если их прислали
+        if: ${{ inputs.store_name != '' || inputs.site_note != '' }}
         run: |
-          # Название уезжает вводом, а не строкой команды: в нём бывают кавычки
-          # и пробелы, а строка команды ещё и видна в журнале ssh.
-          printf '%s\n' "$STORE_NAME" | sshpass -e ssh -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null -p "$PORT" "root@$HOST" \
-            'read -r NAME || true; cd /home/asher/app && sudo -u asher env ASHER_NAME="$NAME" node -e "
+          # Оба значения уезжают вводом, а не строкой команды: в них бывают
+          # кавычки и пробелы, а строка команды ещё и видна в журнале ssh.
+          # Пустое значение означает «не трогать»: так можно поменять подпись,
+          # не переписывая название, и наоборот.
+          printf '%s\n%s\n' "$STORE_NAME" "$SITE_NOTE" | sshpass -e ssh \
+            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -p "$PORT" "root@$HOST" \
+            'read -r NAME || true; read -r NOTE || true;
+             cd /home/asher/app && sudo -u asher env ASHER_NAME="$NAME" ASHER_NOTE="$NOTE" node -e "
                const { setSetting, getSetting } = require(\"./src/db\");
-               setSetting(\"store_name\", process.env.ASHER_NAME);
-               console.log(\"название магазина теперь: \" + getSetting(\"store_name\"));
+               if (process.env.ASHER_NAME) setSetting(\"store_name\", process.env.ASHER_NAME);
+               if (process.env.ASHER_NOTE) setSetting(\"site_note\", process.env.ASHER_NOTE);
+               console.log(\"название: \" + getSetting(\"store_name\"));
+               console.log(\"подпись:  \" + (getSetting(\"site_note\") || \"(пусто)\"));
              "'
 
       - name: Проверяю, что сайт отвечает после обновления
