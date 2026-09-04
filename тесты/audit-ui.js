@@ -29,7 +29,7 @@ const check = (n, c, e) => c ? (ok++, console.log('  ok  ' + n))
   check('действия подписаны по-русски',
     /продажа|приём оплаты|создание|вход в систему/.test(text) && !/upload_photo|release_reserves/.test(text),
     text.split('\n').slice(0, 30).join(' / '));
-  check('видно, кто продавец, а кто админ', /продавец/.test(text) && /админ/.test(text));
+  check('видно, кто продавец, а кто основатель', /продавец/.test(text) && /основатель/.test(text));
   check('есть сводка «кто сколько сделал»', /Кто сколько сделал/.test(text));
   await p.screenshot({ path: `${OUT}/журнал-все.png`, fullPage: false });
 
