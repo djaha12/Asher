@@ -1,6 +1,6 @@
 'use strict';
 const os = require('node:os');
-const { db, nowIso, audit, getSetting, setSetting, hashPassword, makeSalt } = require('../db');
+const { db, nowIso, audit, getSetting, setSetting, hashPassword, makeSalt, РОЛИ, видитВсё } = require('../db');
 const копия = require('../копия');
 const { ApiError } = require('./util');
 const { changePassword, passwordProblem, destroyUserSessions, countUserSessions } = require('../auth');
@@ -19,6 +19,33 @@ const { PRESETS, LOCALE_KEYS, presetFor } = require('../locale');
  * max_discount_percent — потолок скидки для продавца. Отдаётся и продавцу
  * тоже: касса должна показать предел ещё до того, как он упрётся в отказ.
  */
+/*
+ * Учётная запись основателя — только в руках основателя.
+ *
+ * Бухгалтеру открыто всё то же, что основателю, кроме панели с тем, что
+ * делают остальные. Но «кроме панели» держалось бы на честном слове, если бы
+ * бухгалтер мог сменить основателю пароль, отключить его, назначить
+ * основателем себя или разрешить под его логином свой телефон. Поэтому всё,
+ * что касается учётной записи основателя, — от роли до устройств, — делает
+ * только основатель. Всех остальных бухгалтер заводит и правит свободно.
+ */
+function толькоОснователю(session, что) {
+  if (session.role !== 'owner') throw new ApiError(403, что);
+}
+
+function толькоОснователюЕслиУстройствоЕго(deviceId, session) {
+  const d = db.prepare(
+    'SELECT u.role FROM devices d JOIN users u ON u.id = d.user_id WHERE d.id = ?'
+  ).get(Number(deviceId));
+  if (d && d.role === 'owner') {
+    толькоОснователю(session, 'Устройства основателя разрешает и отклоняет только основатель');
+  }
+}
+
+function активныхОснователей() {
+  return Number(db.prepare(`SELECT COUNT(*) AS c FROM users WHERE role = 'owner' AND active = 1`).get().c);
+}
+
 const SETTING_KEYS = ['store_name', 'site_note', 'store_address', 'store_phone', 'usd_rate',
   'gram_price', 'work_price', 'max_discount_percent', ...LOCALE_KEYS];
 
@@ -77,7 +104,7 @@ const routes = [
        * закупочную считают в уме. Продавцу настройки нужны только ради валюты
        * и формата сумм, поэтому курс отсюда убираем.
        */
-      if (session.role !== 'admin') delete out.usd_rate;
+      if (!видитВсё(session.role)) delete out.usd_rate;
       return out;
     },
   },
@@ -208,6 +235,7 @@ const routes = [
   {
     method: 'POST', path: '/api/devices/:id/approve', admin: true,
     handler: ({ params, session }) => {
+      толькоОснователюЕслиУстройствоЕго(params.id, session);
       const d = require('../auth').approveDevice(params.id, session.userId);
       if (!d) throw new ApiError(404, 'Устройство не найдено');
       return { ok: true };
@@ -222,6 +250,7 @@ const routes = [
      */
     method: 'POST', path: '/api/devices/:id/deny', admin: true,
     handler: ({ params, session }) => {
+      толькоОснователюЕслиУстройствоЕго(params.id, session);
       const r = require('../auth').denyDevice(params.id, session.userId);
       if (!r) throw new ApiError(404, 'Устройство не найдено');
       return { ok: true, dropped: r.dropped };
@@ -393,7 +422,8 @@ const routes = [
       const username = String(body.username || '').trim().toLowerCase();
       const name = String(body.name || '').trim();
       const password = String(body.password || '');
-      const role = body.role === 'admin' ? 'admin' : 'seller';
+      const role = РОЛИ.includes(body.role) ? body.role : 'seller';
+      if (role === 'owner') толькоОснователю(session, 'Назначить основателя может только основатель');
       if (!/^[a-z0-9._-]{3,30}$/.test(username)) {
         throw new ApiError(400, 'Логин: 3–30 символов, латиница, цифры, точки и дефисы');
       }
@@ -416,24 +446,27 @@ const routes = [
       const id = Number(params.id);
       const u = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
       if (!u) throw new ApiError(404, 'Сотрудник не найден');
+      if (u.role === 'owner' || body.role === 'owner') {
+        толькоОснователю(session, 'Учётную запись основателя меняет только основатель');
+      }
       if (body.name !== undefined) {
         const name = String(body.name).trim();
         if (!name) throw new ApiError(400, 'Имя обязательно');
         db.prepare('UPDATE users SET name = ? WHERE id = ?').run(name, id);
       }
       if (body.role !== undefined) {
-        const role = body.role === 'admin' ? 'admin' : 'seller';
-        if (u.role === 'admin' && role !== 'admin') {
-          const admins = db.prepare(`SELECT COUNT(*) AS c FROM users WHERE role = 'admin' AND active = 1`).get().c;
-          if (Number(admins) <= 1) throw new ApiError(400, 'Нельзя разжаловать последнего администратора');
+        const role = РОЛИ.includes(body.role) ? body.role : 'seller';
+        // Без основателя система остаётся без хозяина: некому будет ни
+        // журнал посмотреть, ни нового основателя назначить.
+        if (u.role === 'owner' && role !== 'owner' && u.active && активныхОснователей() <= 1) {
+          throw new ApiError(400, 'Нельзя разжаловать последнего основателя');
         }
         db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, id);
       }
       if (body.active !== undefined) {
         const active = body.active ? 1 : 0;
-        if (!active && u.role === 'admin') {
-          const admins = db.prepare(`SELECT COUNT(*) AS c FROM users WHERE role = 'admin' AND active = 1`).get().c;
-          if (Number(admins) <= 1) throw new ApiError(400, 'Нельзя отключить последнего администратора');
+        if (!active && u.role === 'owner' && u.active && активныхОснователей() <= 1) {
+          throw new ApiError(400, 'Нельзя отключить последнего основателя');
         }
         db.prepare('UPDATE users SET active = ? WHERE id = ?').run(active, id);
         if (!active) db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
@@ -477,6 +510,7 @@ const routes = [
       const id = Number(params.id);
       const u = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
       if (!u) throw new ApiError(404, 'Сотрудник не найден');
+      if (u.role === 'owner') толькоОснователю(session, 'Сеансы основателя завершает только основатель');
       const keep = id === session.userId ? session.token : '';
       const closed = destroyUserSessions(id, { keepToken: keep });
       audit(session.userId, 'logout_all', 'user', id,
@@ -490,9 +524,12 @@ const routes = [
    * отдаём не «последние 500», а любой отрезок с отбором по сотруднику,
    * виду действия и датам, страницами. Без этого журнал за неделю работы
    * магазина уже не показывает вчерашний день.
+   *
+   * Только основателю. Журнал — это и есть «что делают остальные», а его
+   * бухгалтеру по замыслу не показывают: он один из тех, за кем смотрят.
    */
   {
-    method: 'GET', path: '/api/audit', admin: true,
+    method: 'GET', path: '/api/audit', admin: true, owner: true,
     handler: ({ query }) => {
       const cond = [];
       const args = [];

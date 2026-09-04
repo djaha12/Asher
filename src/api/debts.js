@@ -11,7 +11,7 @@
  * Долг по чеку считается на лету: сумма невозвращённых позиций минус оплачено.
  * Так возврат товара сам уменьшает долг — отдельного пересчёта не нужно.
  */
-const { db, nowIso, round2, money, audit, transaction } = require('../db');
+const { db, nowIso, round2, money, audit, transaction, видитВсё } = require('../db');
 const { ApiError } = require('./util');
 
 const PAYMENT_METHODS = ['cash', 'card', 'transfer'];
@@ -142,7 +142,7 @@ const routes = [
         documents_count: all.length,
       };
       // Расчёты с поставщиками — коммерческая тайна владельца, продавцу не показываем.
-      if (session.role === 'admin') {
+      if (видитВсё(session.role)) {
         const suppliers = supplierBalances().filter(s => s.balance > 0.009);
         out.we_owe = round2(suppliers.reduce((s, r) => s + r.balance, 0));
         out.suppliers_count = suppliers.length;

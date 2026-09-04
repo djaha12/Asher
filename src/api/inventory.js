@@ -8,7 +8,7 @@
  *   не найдено — числится, но не отсканировано (пропажа или лежит не там);
  *   лишнее    — отсканировано, но числится за другой точкой либо уже продано.
  */
-const { db, nowIso, round2, audit, transaction } = require('../db');
+const { db, nowIso, round2, audit, transaction, видитВсё } = require('../db');
 const { ApiError } = require('./util');
 
 const COUNTABLE = `('in_stock','reserved')`;
@@ -25,7 +25,7 @@ function requireSession(id) {
   return s;
 }
 
-function sessionResult(session, role = 'admin') {
+function sessionResult(session, role = 'owner') {
   const id = session.id;
   const scanned = db.prepare(
     `SELECT p.id, p.sku, p.name, p.metal, p.weight, p.retail_price, p.purchase_price, p.status,
@@ -65,7 +65,7 @@ function sessionResult(session, role = 'admin') {
     },
     progress: expected ? Math.round(found.length / expected * 100) : 100,
   };
-  if (role !== 'admin') {
+  if (!видитВсё(role)) {
     delete result.values.missing_cost;
     [...found, ...missing, ...extra].forEach(p => delete p.purchase_price);
   }
@@ -171,12 +171,12 @@ const routes = [
       const inv = requireSession(Number(params.id));
       if (inv.status !== 'open') throw new ApiError(400, 'Инвентаризация уже завершена');
       const writeOff = Boolean(body.write_off_missing);
-      if (writeOff && session.role !== 'admin') {
-        throw new ApiError(403, 'Списывать недостачу может только администратор');
+      if (writeOff && !видитВсё(session.role)) {
+        throw new ApiError(403, 'Списывать недостачу может только основатель или бухгалтер');
       }
 
       return transaction(() => {
-        const before = sessionResult(inv, 'admin');
+        const before = sessionResult(inv, 'owner');
         if (writeOff) {
           // Причину пишем сразу: иначе недостача, ручное списание и возврат
           // поставщику выглядят в карточке одинаково и разобрать их потом нельзя.

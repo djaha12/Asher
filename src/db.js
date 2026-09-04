@@ -38,12 +38,33 @@ db.function('nlower', { deterministic: true }, s => (s === null || s === undefin
 db.function('digits', { deterministic: true },
   s => (s === null || s === undefined) ? '' : String(s).replace(/\D/g, ''));
 
+/*
+ * Роли.
+ *
+ * Их три, и разница между двумя верхними — ровно одна. Основатель видит,
+ * что делают остальные: панель основателя и журнал действий открыты только
+ * ему, и только он распоряжается своей учётной записью. Бухгалтер видит и
+ * делает всё то же, что основатель, — закупочные цены, прибыль, финансы,
+ * сотрудников, — но не панель, не журнал и не учётную запись основателя.
+ * Продавец работает за прилавком и внутренней кухни не видит нигде.
+ *
+ * Роль хранится словом, а не набором галочек, намеренно: владелец должен
+ * уметь ответить «кто это» одним словом, а не сверять список из двадцати
+ * разрешений у каждого сотрудника.
+ */
+const РОЛИ = ['owner', 'accountant', 'seller'];
+
+// Те, кто видит внутреннюю кухню: закупочные, наценку, прибыль, финансы.
+function видитВсё(role) {
+  return role === 'owner' || role === 'accountant';
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'seller' CHECK (role IN ('admin','seller')),
+  role TEXT NOT NULL DEFAULT 'seller' CHECK (role IN ('owner','accountant','seller')),
   password_hash TEXT NOT NULL,
   salt TEXT NOT NULL,
   active INTEGER NOT NULL DEFAULT 1,
@@ -436,7 +457,56 @@ function addColumn(table, column, definition) {
   return false;
 }
 
+/*
+ * Три роли вместо двух — в базах, созданных раньше.
+ *
+ * Роль ограничена CHECK-ом, а CHECK в SQLite не меняется: таблицу нужно
+ * пересобрать. Делаем это по правилам самого SQLite: новая таблица рядом,
+ * перенос строк, удаление старой, переименование — с выключенными на это
+ * время внешними ключами и проверкой, что после всего они сходятся.
+ *
+ * Все прежние администраторы становятся основателями, а не бухгалтерами.
+ * До этой минуты они видели всё, включая журнал; молча урезать их доступ —
+ * значит, что владелец после обновления перестал бы видеть собственный
+ * журнал и не понял бы почему. Кто из них бухгалтер — решит он сам.
+ */
+function migrateRoles() {
+  const row = db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'`).get();
+  if (!row || /'owner'/.test(row.sql)) return false;
+  db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    db.exec(`
+      BEGIN;
+      CREATE TABLE users_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'seller' CHECK (role IN ('owner','accountant','seller')),
+        password_hash TEXT NOT NULL,
+        salt TEXT NOT NULL,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO users_new (id, username, name, role, password_hash, salt, active, created_at)
+        SELECT id, username, name, CASE WHEN role = 'admin' THEN 'owner' ELSE role END,
+               password_hash, salt, active, created_at FROM users;
+      DROP TABLE users;
+      ALTER TABLE users_new RENAME TO users;
+    `);
+    const битые = db.prepare('PRAGMA foreign_key_check').all();
+    if (битые.length) throw new Error('после перестройки users не сходятся внешние ключи: ' + JSON.stringify(битые[0]));
+    db.exec('COMMIT');
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch { /* уже откатилось */ }
+    throw e;
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
+  }
+  return true;
+}
+
 function migrate() {
+  migrateRoles();
   // Наличная ли операция — для сверки кассы. У всех прежних записей ставим 1:
   // до появления сверки касса и была единственным способом платить.
   addColumn('finance_ops', 'cash', 'INTEGER NOT NULL DEFAULT 1');
@@ -644,7 +714,7 @@ function ensureDefaults() {
     const salt = makeSalt();
     db.prepare(
       'INSERT INTO users (username, name, role, password_hash, salt, active, created_at) VALUES (?,?,?,?,?,1,?)'
-    ).run('admin', 'Администратор', 'admin', hashPassword('admin123', salt), salt, nowIso());
+    ).run('admin', 'Администратор', 'owner', hashPassword('admin123', salt), salt, nowIso());
   }
   const hasCategories = db.prepare('SELECT COUNT(*) AS c FROM categories').get().c > 0;
   if (!hasCategories) {
@@ -718,4 +788,6 @@ module.exports = {
   nextNumber,
   audit,
   transaction,
+  РОЛИ,
+  видитВсё,
 };

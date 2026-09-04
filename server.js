@@ -21,7 +21,7 @@ const http = require('node:http');
 const path = require('node:path');
 const fs = require('node:fs');
 
-const { getSetting } = require('./src/db');
+const { getSetting, видитВсё } = require('./src/db');
 const auth = require('./src/auth');
 const guard = require('./src/guard');
 const changes = require('./src/changes');
@@ -46,7 +46,8 @@ const BODY_LIMIT = 25 * 1024 * 1024; // 25 МБ — с запасом для CSV
 // ---------- Маршруты API ----------
 
 const modules = ['products', 'images', 'customers', 'sales', 'orders', 'finance', 'debts',
-  'stores', 'inventory', 'analytics', 'settings', 'importexport', 'sets', 'search', 'cash', 'receipts'];
+  'stores', 'inventory', 'analytics', 'settings', 'importexport', 'sets', 'search', 'cash', 'receipts',
+  'team'];
 const routes = [];
 for (const m of modules) {
   for (const r of require(`./src/api/${m}`).routes) {
@@ -510,8 +511,18 @@ const server = http.createServer(async (req, res) => {
 
     const route = routes.find(r => r.method === req.method && r.regex.test(pathname));
     if (!route) throw new ApiError(404, 'Не найдено');
-    if (route.admin && session.role !== 'admin') {
-      throw new ApiError(403, 'Доступно только администратору');
+    /*
+     * Две ступени доступа. «admin» у маршрута означает внутреннюю кухню —
+     * закупочные, прибыль, финансы, сотрудников: её видят основатель и
+     * бухгалтер. «owner» — только основатель: панель с тем, что делают
+     * остальные, и журнал действий. Бухгалтер имеет тот же доступ, что
+     * основатель, за вычетом ровно этого.
+     */
+    if (route.admin && !видитВсё(session.role)) {
+      throw new ApiError(403, 'Доступно только основателю и бухгалтеру');
+    }
+    if (route.owner && session.role !== 'owner') {
+      throw new ApiError(403, 'Доступно только основателю');
     }
 
     const match = pathname.match(route.regex);

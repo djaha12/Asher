@@ -1,5 +1,5 @@
 'use strict';
-const { db, nowIso, round2, money, audit, nextNumber, transaction, getSetting } = require('../db');
+const { db, nowIso, round2, money, audit, nextNumber, transaction, getSetting, видитВсё } = require('../db');
 const { ApiError } = require('./util');
 const { recordConsignmentSale, revokeConsignmentSale } = require('./debts');
 
@@ -45,7 +45,7 @@ function скидкаПоКомплекту(setId, productId) {
   return позиция ? round2(позиция.sale_discount || 0) : null;
 }
 
-function saleDetail(id, role = 'admin') {
+function saleDetail(id, role = 'owner') {
   const s = db.prepare(
     `SELECT s.*, c.name AS customer_name, c.phone AS customer_phone, u.name AS seller_name,
             st.name AS store_name
@@ -67,8 +67,8 @@ function saleDetail(id, role = 'admin') {
   // Долг считаем по невозвращённым позициям: вернул товар — уменьшился и долг.
   const effective = round2(items.filter(i => !i.returned).reduce((sum, i) => sum + i.final_price, 0));
   const debt = round2(effective - s.paid);
-  // себестоимость — только администратору
-  if (role !== 'admin') {
+  // себестоимость — только основателю и бухгалтеру
+  if (!видитВсё(role)) {
     delete s.cost_total;
     for (const it of items) delete it.cost;
   }
@@ -133,7 +133,7 @@ function createSaleTx(body, session, opts = {}) {
       // Копейка запаса — от округления процентов, а не поблажка.
       const поКомплекту = setId ? скидкаПоКомплекту(setId, p.id) : null;
       const этоЦенаКомплекта = поКомплекту !== null && discount <= поКомплекту + 0.01;
-      if (session.role !== 'admin' && !этоЦенаКомплекта) {
+      if (!видитВсё(session.role) && !этоЦенаКомплекта) {
         throw new ApiError(400,
           `Скидка на «${p.name}» — ${процент}%, а продавцу разрешено до ${пределПроцентов}%. ` +
           'Такую скидку проводит владелец: он может оформить продажу сам или ' +
@@ -358,7 +358,7 @@ const routes = [
       const totals = db.prepare(
         `SELECT COUNT(*) AS cnt, COALESCE(SUM(s.total),0) AS sum FROM sales s ${where}`
       ).get(...args);
-      if (session.role !== 'admin') rows.forEach(r => delete r.cost_total);
+      if (!видитВсё(session.role)) rows.forEach(r => delete r.cost_total);
       return { items: rows, totals };
     },
   },

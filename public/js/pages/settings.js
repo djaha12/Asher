@@ -415,14 +415,29 @@ window.Pages.settings = (() => {
     };
   }
 
+  // Значок роли. строчными — для журнала, где он стоит после имени в строке.
+  function roleBadge(role, строчными) {
+    const текст = App.roleLabel(role);
+    const cls = role === 'owner' ? 'badge-gold' : role === 'accountant' ? 'badge-info' : 'badge-gray';
+    return `<span class="badge ${cls}">${строчными ? текст.toLowerCase() : текст}</span>`;
+  }
+
+  // Учётную запись основателя правит только основатель — см. пояснение на сервере.
+  const можноПравить = u => u.role !== 'owner' || App.isOwner();
+
   async function renderUsers(box) {
     const { items } = await api.get('/api/users');
     box.innerHTML = `
       <div class="hint-box" style="max-width:720px">
-        <strong>Две роли — два вида системы.</strong>
-        <div style="margin-top:8px"><span class="badge badge-gold">Администратор</span> —
-          видит всё: закупочные цены, наценку, прибыль, расчёты с поставщиками,
-          аналитику, финансы, импорт из 1С и журнал операций.</div>
+        <strong>Три роли — три вида системы.</strong>
+        <div style="margin-top:8px"><span class="badge badge-gold">Основатель</span> —
+          видит всё, включая панель основателя: кто когда входил, кто что продал,
+          кому давал скидки, что удалял, — и полный журнал действий. Только основатель
+          распоряжается учётными записями основателей.</div>
+        <div style="margin-top:6px"><span class="badge badge-info">Бухгалтер</span> —
+          видит и делает всё то же, что основатель: закупочные цены, наценку, прибыль,
+          расчёты с поставщиками, аналитику, финансы, импорт из 1С, сотрудников.
+          Не видит только панель основателя и журнал действий.</div>
         <div style="margin-top:6px"><span class="badge badge-gray">Продавец</span> —
           работает за прилавком: каталог, продажи, обмены и возвраты, клиенты, долги
           клиентов, заказы, комплекты, инвентаризация, бирки. Закупочных цен, наценки
@@ -433,15 +448,15 @@ window.Pages.settings = (() => {
         ${ui.table([
           { title: 'Логин', render: r => `<span class="mono">${ui.esc(r.username)}</span>` },
           { title: 'Имя', render: r => `<span class="strong">${ui.esc(r.name)}</span>` },
-          { title: 'Роль', render: r => r.role === 'admin' ? '<span class="badge badge-gold">Администратор</span>' : '<span class="badge badge-gray">Продавец</span>' },
+          { title: 'Роль', render: r => roleBadge(r.role) },
           { title: 'Статус', render: r => r.active ? '<span class="badge badge-good">Активен</span>' : '<span class="badge badge-crit">Отключён</span>' },
           { title: 'Устройства', cls: 'num', render: r => r.devices
             ? `<span title="Устройств, где выполнен вход">${r.devices}</span>` : '<span class="dim">—</span>' },
           { title: '', cls: 'nowrap', render: r =>
             `<button class="btn btn-sm" data-user-phone="${r.id}" title="Подключить телефон">📱</button>
-             ${r.devices ? `<button class="btn btn-sm" data-user-logout="${r.id}"
+             ${r.devices && можноПравить(r) ? `<button class="btn btn-sm" data-user-logout="${r.id}"
                title="Завершить вход на всех устройствах">⎋</button>` : ''}
-             <button class="btn btn-sm" data-user-edit="${r.id}">✎</button>` },
+             ${можноПравить(r) ? `<button class="btn btn-sm" data-user-edit="${r.id}">✎</button>` : ''}` },
         ], items)}
         <button class="btn" id="user-add" style="margin-top:12px">+ Сотрудник</button>
         <p class="form-hint">Столбец «Устройства» — сколько телефонов и компьютеров сейчас
@@ -511,7 +526,7 @@ window.Pages.settings = (() => {
         : '<p class="muted">Компьютер не подключён к сети — адрес появится, когда включите Wi-Fi.</p>'}
       </div>`,
       footer: `<button class="btn" data-act="cancel">Закрыть</button>
-        ${link ? `<button class="btn" data-act="pwd">Задать пароль</button>
+        ${link ? `${можноПравить(u) ? '<button class="btn" data-act="pwd">Задать пароль</button>' : ''}
           <button class="btn btn-primary" data-act="print">${ui.icon('print')} Печатать</button>` : ''}`,
     });
     m.foot.querySelector('[data-act=cancel]').onclick = m.close;
@@ -536,9 +551,20 @@ window.Pages.settings = (() => {
     };
   }
 
-  function userDialog(u, onChange) {
+  /*
+   * готовое — то, что уже решено за владельца: панель основателя открывает
+   * это окно с выбранной ролью и придуманным паролем, чтобы завести человека
+   * за одно действие. Пароль показывается открыто: его сейчас перепишут
+   * на карточку или скажут вслух, а прятать звёздочками то, что человек
+   * ещё ни разу не видел, — значит заставить его придумывать своё.
+   */
+  function userDialog(u, onChange, готовое = {}) {
     const isNew = !u;
-    u = u || {};
+    u = u || { role: готовое.role || 'seller' };
+    const роли = [['seller', 'Продавец'], ['accountant', 'Бухгалтер']];
+    // Назначать основателя может только основатель — на сервере это так же.
+    if (App.isOwner()) роли.push(['owner', 'Основатель']);
+    const готовыйПароль = isNew ? String(готовое.password || '') : '';
     const m = ui.modal({
       title: isNew ? 'Новый сотрудник' : 'Сотрудник: ' + u.name,
       size: 'sm',
@@ -546,11 +572,14 @@ window.Pages.settings = (() => {
         ${isNew ? `<label class="field"><span>Логин *</span><input name="username" required placeholder="anna" autocapitalize="none" pattern="[a-z0-9._\\-]{3,30}"></label>` : ''}
         <label class="field"><span>Имя *</span><input name="name" required value="${ui.esc(u.name || '')}"></label>
         <label class="field"><span>Роль</span><select name="role">
-          <option value="seller" ${u.role !== 'admin' ? 'selected' : ''}>Продавец</option>
-          <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Администратор</option></select></label>
+          ${роли.map(([v, t]) => `<option value="${v}" ${u.role === v ? 'selected' : ''}>${t}</option>`).join('')}
+        </select></label>
         <p class="form-hint" id="role-hint"></p>
         <label class="field"><span>${isNew ? 'Пароль * (не короче 8 знаков)' : 'Новый пароль (не короче 8 знаков)'}</span>
-          <input name="password" type="password" ${isNew ? 'required' : ''} minlength="8" autocomplete="new-password"></label>
+          <input name="password" type="${готовыйПароль ? 'text' : 'password'}" value="${ui.esc(готовыйПароль)}"
+            ${isNew ? 'required' : ''} minlength="8" autocomplete="new-password"${готовыйПароль ? ' class="mono"' : ''}></label>
+        ${готовыйПароль ? `<p class="form-hint">Пароль придуман за вас — скажите его сотруднику или
+          напишите на карточке. Можно стереть и задать свой.</p>` : ''}
         ${!isNew ? `<label class="field" style="flex-direction:row;align-items:center;gap:8px">
           <input type="checkbox" name="active" ${u.active ? 'checked' : ''} style="width:auto"> <span style="font-weight:400">Активен (может входить в систему)</span></label>` : ''}
       </form>`,
@@ -560,11 +589,12 @@ window.Pages.settings = (() => {
     // Владельцу важно понимать, что именно он открывает человеку, — пишем прямо здесь.
     const roleSel = m.body.querySelector('[name=role]');
     const roleHint = m.body.querySelector('#role-hint');
-    const showRoleHint = () => {
-      roleHint.textContent = roleSel.value === 'admin'
-        ? 'Администратор видит закупочные цены, наценку, прибыль, расчёты с поставщиками, аналитику и финансы.'
-        : 'Продавец работает с каталогом, продажами, клиентами и долгами, но закупочных цен, наценки и прибыли не видит нигде.';
+    const ПОДСКАЗКИ = {
+      seller: 'Продавец работает с каталогом, продажами, клиентами и долгами, но закупочных цен, наценки и прибыли не видит нигде.',
+      accountant: 'Бухгалтер видит закупочные цены, наценку, прибыль, расчёты с поставщиками, аналитику, финансы и сотрудников — всё, что основатель, кроме панели основателя и журнала действий.',
+      owner: 'Основатель видит всё, включая панель с тем, что делают остальные, и журнал действий. Учётные записи основателей меняет только основатель.',
     };
+    const showRoleHint = () => { roleHint.textContent = ПОДСКАЗКИ[roleSel.value] || ПОДСКАЗКИ.seller; };
     roleSel.addEventListener('change', showRoleHint);
     showRoleHint();
 
@@ -609,8 +639,10 @@ window.Pages.settings = (() => {
     upload_certificate: 'загрузка сертификата', delete_certificate: 'удаление сертификата',
     password: 'смена пароля', sync: 'автообмен с 1С',
     login_failed: 'неудачный вход', logout_all: 'завершение всех сеансов',
-    backup: 'скачана резервная копия',
-    discount: 'скидка сверх предела',
+    backup: 'скачана резервная копия', backup_failed: 'копия не удалась',
+    discount: 'скидка сверх предела', cash_count: 'сверка кассы',
+    device_first: 'первое устройство доверено', device_new: 'вход с незнакомого устройства',
+    device_approve: 'устройство разрешено', device_deny: 'устройство отклонено',
   };
   const AUDIT_ENTITIES = {
     product: 'изделие', products: 'изделия', customer: 'клиент', customers: 'клиенты',
@@ -637,7 +669,7 @@ window.Pages.settings = (() => {
       </div>
       <div class="toolbar">
         <select class="input" id="au-user"><option value="">Все сотрудники</option>
-          ${users.map(u => `<option value="${u.id}">${ui.esc(u.name)}${u.role === 'admin' ? ' (админ)' : ''}</option>`).join('')}
+          ${users.map(u => `<option value="${u.id}">${ui.esc(u.name)}${u.role !== 'seller' ? ` (${App.roleLabel(u.role).toLowerCase()})` : ''}</option>`).join('')}
         </select>
         <select class="input" id="au-action"><option value="">Любое действие</option>
           ${AUDIT_PICK.map(a => `<option value="${a}">${AUDIT_ACTIONS[a]}</option>`).join('')}
@@ -661,9 +693,7 @@ window.Pages.settings = (() => {
       listEl.innerHTML = ui.table([
         { title: 'Когда', cls: 'nowrap', render: r => `<span class="dim">${ui.dt(r.created_at)}</span>` },
         { title: 'Кто', render: r => r.user_name
-          ? `${ui.esc(r.user_name)}${r.user_role === 'admin'
-            ? ' <span class="badge badge-gold">админ</span>'
-            : ' <span class="badge badge-gray">продавец</span>'}`
+          ? `${ui.esc(r.user_name)} ${roleBadge(r.user_role, true)}`
           : '<span class="dim">система</span>' },
         { title: 'Действие', render: r =>
           `<span class="badge badge-gray">${ui.esc(AUDIT_ACTIONS[r.action] || r.action)}</span>` },
@@ -954,12 +984,15 @@ window.Pages.settings = (() => {
   }
 
   return {
+    // Панель основателя заводит людей тем же окном и подписывает действия теми же словами.
+    userDialog, phoneCard, roleBadge, AUDIT_ACTIONS, AUDIT_ENTITIES,
     title: 'Настройки',
     async render(el) {
       const admin = App.isAdmin();
+      // Журнал действий — только основателю: бухгалтер один из тех, кого в нём видно.
       const tabs = admin
         ? [['store', 'Магазин'], ['stores', 'Точки продаж'], ['refs', 'Справочники'],
-           ['users', 'Сотрудники'], ['audit', 'Журнал действий'],
+           ['users', 'Сотрудники'], ...(App.isOwner() ? [['audit', 'Журнал действий']] : []),
            ['security', 'Безопасность'], ['me', 'Мой пароль']]
         : [['me', 'Мой пароль']];
       el.innerHTML = `

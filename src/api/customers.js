@@ -1,5 +1,5 @@
 'use strict';
-const { db, nowIso, round2, audit, getSetting } = require('../db');
+const { db, nowIso, round2, audit, getSetting, видитВсё } = require('../db');
 const { ApiError } = require('./util');
 
 const FIELDS = ['name', 'phone', 'email', 'birthday', 'anniversary', 'discount',
@@ -20,7 +20,7 @@ function isValidDate(s) {
  * выше общего предела. Иначе потолок в кассе обходился бы за десять секунд —
  * завести клиента «Иван» со скидкой 90% и продать ему.
  */
-function validateCustomer(body, { partial = false, role = 'admin' } = {}) {
+function validateCustomer(body, { partial = false, role = 'owner' } = {}) {
   const out = {};
   if (!partial || body.name !== undefined) {
     out.name = String(body.name || '').trim();
@@ -37,7 +37,7 @@ function validateCustomer(body, { partial = false, role = 'admin' } = {}) {
   if (body.discount !== undefined) {
     out.discount = round2(body.discount);
     if (out.discount < 0 || out.discount > 100) throw new ApiError(400, 'Скидка должна быть от 0 до 100%');
-    if (role !== 'admin') {
+    if (!видитВсё(role)) {
       const предел = Number(getSetting('max_discount_percent'));
       const потолок = Number.isFinite(предел) && предел >= 0 && предел <= 100 ? предел : 15;
       if (out.discount > потолок) {

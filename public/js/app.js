@@ -20,6 +20,8 @@ window.App = (() => {
     { key: 'finance', title: 'Финансы', ico: 'wallet', admin: true },
     { key: 'analytics', title: 'Аналитика', ico: 'chart', admin: true },
     { key: 'import', title: 'Импорт из 1С', ico: 'sync', admin: true },
+    { section: 'Основатель', owner: true },
+    { key: 'team', title: 'Панель основателя', ico: 'eye', owner: true },
     { key: 'settings', title: 'Настройки', ico: 'gear' },
   ];
 
@@ -95,23 +97,33 @@ window.App = (() => {
         if (тег) тег.setAttribute('content', first);
       }
       document.getElementById('user-name').textContent = App.user.name;
-      document.getElementById('user-role').textContent = App.user.role === 'admin' ? 'Администратор' : 'Продавец';
+      document.getElementById('user-role').textContent = App.roleLabel(App.user.role);
       document.getElementById('user-avatar').textContent = (App.user.name || '?')[0].toUpperCase();
       renderNav();
       renderMobileNav();
       route();
     },
 
-    isAdmin: () => App.user && App.user.role === 'admin',
+    /*
+     * Три роли. isAdmin — историческое имя для «видит внутреннюю кухню»:
+     * закупочные, прибыль, финансы. Так называют себя и основатель, и
+     * бухгалтер. Разница между ними одна — панель основателя и журнал
+     * действий, — и её спрашивают через isOwner.
+     */
+    isAdmin: () => Boolean(App.user) && (App.user.role === 'owner' || App.user.role === 'accountant'),
+    isOwner: () => Boolean(App.user) && App.user.role === 'owner',
+    roleLabel: role => ({ owner: 'Основатель', accountant: 'Бухгалтер', seller: 'Продавец' })[role] || 'Продавец',
+    // Открыт ли пункт меню тому, кто вошёл.
+    canSee: item => (!item.admin || App.isAdmin()) && (!item.owner || App.isOwner()),
 
     go(hash) { location.hash = hash; },
   };
 
   function renderNav() {
     const nav = document.getElementById('nav');
-    nav.innerHTML = NAV.filter(item => !item.admin || App.isAdmin() || item.key === 'settings')
+    nav.innerHTML = NAV.filter(App.canSee)
       .map(item => item.section
-        ? ((!item.admin || App.isAdmin()) ? `<div class="nav-section">${item.section}</div>` : '')
+        ? `<div class="nav-section">${item.section}</div>`
         : `<div class="nav-item" data-key="${item.key}"><span class="ico">${ui.icon(item.ico)}</span>${item.title}</div>`
       ).join('');
     nav.querySelectorAll('.nav-item').forEach(el => {
@@ -132,7 +144,7 @@ window.App = (() => {
 
   // «☰» на телефоне — полный список разделов списком, крупными строками.
   function showAllSections() {
-    const available = NAV.filter(i => i.key && (!i.admin || App.isAdmin()));
+    const available = NAV.filter(i => i.key && App.canSee(i));
     const m = ui.modal({
       title: 'Разделы',
       size: 'sm',
@@ -172,7 +184,7 @@ window.App = (() => {
     const { key, param } = currentRoute();
     const page = Pages[key] || Pages.dashboard;
     const navItem = NAV.find(n => n.key === key);
-    if (navItem && navItem.admin && !App.isAdmin()) { App.go('#/dashboard'); return; }
+    if (navItem && !App.canSee(navItem)) { App.go('#/dashboard'); return; }
 
     const activeKey = Pages[key] ? key : 'dashboard';
     document.querySelectorAll('.nav-item').forEach(el =>

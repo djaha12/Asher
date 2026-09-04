@@ -1,5 +1,5 @@
 'use strict';
-const { db, round2, getSetting } = require('../db');
+const { db, round2, getSetting, видитВсё } = require('../db');
 
 function tzMod(query) {
   const tz = Number(query.tz) || 0;
@@ -143,8 +143,8 @@ const routes = [
         recent_sales: recentSales,
         store_name: getSetting('store_name'),
       };
-      // прибыль, себестоимость и оценка склада — только администратору
-      if (session.role !== 'admin') {
+      // прибыль, себестоимость и оценка склада — только основателю и бухгалтеру
+      if (!видитВсё(session.role)) {
         for (const p of [result.today, result.month]) { delete p.profit; delete p.cogs; }
         delete result.stock.cost_value;
         delete result.stock.retail_value;

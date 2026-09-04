@@ -1,5 +1,5 @@
 'use strict';
-const { db, nowIso, round2, audit } = require('../db');
+const { db, nowIso, round2, audit, видитВсё } = require('../db');
 const { ApiError } = require('./util');
 const { listImages, listCertificates, removeFiles } = require('./images');
 
@@ -55,7 +55,7 @@ function hidePurchase(p) {
  * сервере эти поля у продавца просто не существуют: ни прочитать, ни стереть.
  */
 function stripPurchaseInput(body, role) {
-  if (role === 'admin') return body;
+  if (видитВсё(role)) return body;
   const out = { ...body };
   for (const f of PURCHASE_FIELDS) delete out[f];
   return out;
@@ -89,7 +89,7 @@ const OWNER_ONLY_FIELDS = ['retail_price', 'write_off_reason',
 const ПРОДАВЦУ_МОЖНО = new Set(['in_stock', 'reserved']);
 
 function stripOwnerFields(body, role, existing) {
-  if (role === 'admin') return body;
+  if (видитВсё(role)) return body;
   /*
    * Правила касаются ПРАВКИ уже заведённой карточки, а не заведения новой.
    *
@@ -358,9 +358,9 @@ const routes = [
       ).all(...args, limit, offset);
       const totalRow = db.prepare(`SELECT COUNT(*) AS c FROM products p ${where}`).get(...args);
       const items = rows.map(rowToProduct);
-      // Закупочные цены — только администратору. Валютные поля убираем тоже:
+      // Закупочные цены — только основателю и бухгалтеру. Валютные поля убираем тоже:
       // цена в долларах, умноженная на курс, и есть закупочная.
-      if (session.role !== 'admin') items.forEach(hidePurchase);
+      if (!видитВсё(session.role)) items.forEach(hidePurchase);
       return { items, total: Number(totalRow.c) };
     },
   },
@@ -455,7 +455,7 @@ const routes = [
         certificates: listCertificates(Number(params.id)),
         supplier_return: supplierReturn || null,
       };
-      if (session.role !== 'admin') {
+      if (!видитВсё(session.role)) {
         hidePurchase(product);
         product.supplier_return = null; // сумма возврата — это закупочная цена
         history.forEach(h => delete h.cost);

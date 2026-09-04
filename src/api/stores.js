@@ -3,7 +3,7 @@
  * Точки продаж (магазины) и перемещение изделий между ними.
  * Точка всегда есть хотя бы одна — удалить последнюю нельзя.
  */
-const { db, nowIso, audit, transaction } = require('../db');
+const { db, nowIso, audit, transaction, видитВсё } = require('../db');
 const { ApiError } = require('./util');
 
 function storeStats() {
@@ -31,7 +31,7 @@ const routes = [
     method: 'GET', path: '/api/stores',
     handler: ({ session }) => {
       const items = storeStats();
-      if (session.role !== 'admin') items.forEach(s => delete s.stock_cost);
+      if (!видитВсё(session.role)) items.forEach(s => delete s.stock_cost);
       return { items };
     },
   },
