@@ -139,7 +139,9 @@ svg.i {
     radial-gradient(900px 500px at 80% -10%, rgba(165, 129, 58, .16), transparent 60%),
     radial-gradient(700px 500px at 10% 110%, rgba(165, 129, 58, .10), transparent 55%),
     #121110;
-  padding: 20px;
+  padding:
+    calc(20px + env(safe-area-inset-top, 0px)) calc(20px + env(safe-area-inset-right, 0px))
+    calc(20px + env(safe-area-inset-bottom, 0px)) calc(20px + env(safe-area-inset-left, 0px));
 }
 .login-card {
   width: 400px; max-width: 100%;
@@ -241,9 +243,11 @@ svg.i {
 .btn-logout:hover { color: var(--crit); background: var(--crit-soft); }
 
 .main-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* Та же полоса часов на планшете, где боковое меню остаётся на месте. */
 .topbar {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 22px 32px 14px; position: sticky; top: 0; background: var(--bg); z-index: 5;
+  padding: calc(22px + env(safe-area-inset-top, 0px)) 32px 14px;
+  position: sticky; top: 0; background: var(--bg); z-index: 5;
 }
 .page-title { font-size: 24px; margin: 0; font-weight: 650; letter-spacing: -.02em; }
 .topbar-actions { display: flex; gap: 10px; align-items: center; }
@@ -605,7 +609,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 }
 .lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; }
 .lightbox .lb-close {
-  position: absolute; top: 14px; right: 18px; background: none; border: none; color: #fff;
+  /* Крестик держим ниже часов: под ними по нему не попасть. */
+  position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); right: 18px; background: none; border: none; color: #fff;
   font-size: 38px; cursor: pointer; line-height: 1; padding: 6px 14px; opacity: .8;
 }
 .lightbox .lb-close:hover { opacity: 1; }
@@ -704,8 +709,22 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
   .app { display: block; }
   .main-wrap { display: block; }
 
+  /*
+   * Отступ сверху — на высоту часов и батареи.
+   *
+   * Установленное на телефон приложение открывается во весь экран, вместе
+   * с полосой часов: так задано в разметке (viewport-fit=cover), и это
+   * правильно — иначе под шапкой оставалась бы чужая белая полоса. Но тогда
+   * первые сорок точек экрана принадлежат часам, и всё, что там нарисовано,
+   * оказывается под ними. Название магазина в шапке было ровно там.
+   *
+   * env(safe-area-inset-top) — это и есть высота той полосы; телефон
+   * подставляет её сам. В браузере она равна нулю, поэтому запасное значение
+   * 0px оставляет обычный вид страницы нетронутым.
+   */
   .mobile-head {
-    display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+    display: flex; align-items: center; gap: 10px;
+    padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 12px;
     background: var(--surface); color: var(--ink);
     border-bottom: 1px solid var(--line);
     position: sticky; top: 0; z-index: 20;
@@ -726,7 +745,9 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
   .topbar .theme-toggle { display: none; }
   .page-title { font-size: 21px; }
   .topbar-actions .btn { padding: 9px 14px; }
-  .page { padding: 0 16px 96px; }
+  /* Нижняя панель выросла на высоту «домашней полоски» — на столько же
+     отодвигаем и конец страницы, иначе последняя строка прячется под ней. */
+  .page { padding: 0 16px calc(96px + env(safe-area-inset-bottom, 0px)); }
 
   .mobile-nav {
     display: flex; position: fixed; bottom: 0; left: 0; right: 0; z-index: 30;
@@ -924,7 +945,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
   .global-search { display: none; }
   .global-search.gs-mobile-open {
     display: block; position: fixed; inset: 0; z-index: 60; margin: 0;
-    max-width: none; background: var(--bg); padding: 12px;
+    max-width: none; background: var(--bg);
+    padding: calc(12px + env(safe-area-inset-top, 0px)) 12px 12px;
   }
   .global-search.gs-mobile-open .input { font-size: 16px; padding: 14px; }
   .global-search.gs-mobile-open .gs-results {

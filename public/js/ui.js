@@ -259,6 +259,16 @@ window.ui = (() => {
   function applyTheme(theme) {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem(THEME_KEY, theme);
+    /*
+     * Цвет полосы часов на телефоне.
+     *
+     * В установленном приложении эта полоса — часть окна, и телефон красит её
+     * в цвет, указанный здесь. Раньше он был вписан тёмным навсегда: в светлой
+     * теме над белой шапкой висела чёрная полоса, будто экран не догрузился.
+     * Берём цвет самой шапки, чтобы стыка не было видно вовсе.
+     */
+    const тег = document.querySelector('meta[name="theme-color"]');
+    if (тег) тег.setAttribute('content', theme === 'dark' ? '#191917' : '#ffffff');
     document.querySelectorAll('[data-theme-icon]').forEach(el => {
       el.innerHTML = icon(theme === 'dark' ? 'sun' : 'moon');
       el.title = theme === 'dark' ? 'Светлая тема' : 'Тёмная тема';
