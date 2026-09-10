@@ -95,6 +95,12 @@
     <div class="main-wrap">
       <!-- Шапка телефона -->
       <div class="mobile-head">
+        <!--
+          Кнопка «назад». На телефоне система открыта значком, без адресной
+          строки и без браузерной стрелки: уйти с раздела нечем, кроме нижней
+          панели, а в ней помещается пять кнопок из десяти разделов.
+        -->
+        <button id="btn-back" class="mh-back hidden" title="Назад" aria-label="Назад"></button>
         <div class="mh-brand" id="brand-name-mobile-wrap">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M7 3h10l4 6-9 12L3 9l4-6z"/><path d="M3 9h18M9.5 3 8 9l4 12M14.5 3 16 9l-4 12"/></svg>
           <span id="brand-name-mobile">{{НАЗВАНИЕ}}</span>
@@ -108,9 +114,20 @@
         <h1 id="page-title" class="page-title">—</h1>
         <!-- Одно поле на всю систему: артикул, клиент, телефон, чек, сертификат -->
         <div class="global-search" id="gs-wrap">
+          <!--
+            Выход из поиска. На телефоне поиск раскрывается во весь экран, и
+            без этой кнопки из него нельзя выйти вовсе: Esc на телефоне нет,
+            а нажатие «мимо» попадает в сам поиск, потому что он и есть весь
+            экран. На компьютере кнопка не показывается — там есть Esc.
+          -->
+          <button type="button" id="gs-back" class="gs-back"></button>
           <input type="text" id="gs-input" class="input" autocomplete="off"
             placeholder="Искать везде: артикул, клиент, чек, сертификат…">
           <div class="gs-results hidden" id="gs-results"></div>
+          <!-- Пустой экран поиска не должен молчать: на телефоне он занимает
+               всё, и человеку надо сказать, что сюда набирать. -->
+          <p class="gs-idle">Наберите артикул, имя клиента, номер чека, телефон
+            или номер сертификата. Достаточно двух знаков.</p>
         </div>
         <div class="topbar-actions">
           <button class="theme-toggle" data-theme-icon id="btn-theme" title="Сменить тему"></button>

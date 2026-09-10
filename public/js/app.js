@@ -173,11 +173,37 @@ window.App = (() => {
     App.showLogin();
   }
 
+  /*
+   * Куда возвращает кнопка «назад».
+   *
+   * Не история браузера, а свой список разделов, и намеренно: в установленном
+   * приложении история начинается с пустого места, и один лишний шаг назад
+   * закрыл бы систему целиком. Свой список не может вывести за её пределы —
+   * в худшем случае он приведёт на Главную.
+   */
+  const пройдено = [];
+  let идёмНазад = false;
+
+  function запомнитьПереход(былКлюч, сталКлюч) {
+    if (идёмНазад) { идёмНазад = false; return; }
+    if (!былКлюч || былКлюч === сталКлюч) return;
+    пройдено.push(былКлюч);
+    if (пройдено.length > 20) пройдено.shift();
+  }
+
+  function назад() {
+    const куда = пройдено.pop();
+    идёмНазад = true;
+    App.go('#/' + (куда || 'dashboard'));
+  }
+
   function currentRoute() {
     const h = location.hash.replace(/^#\/?/, '');
     const [key, param] = h.split('/');
     return { key: key || 'dashboard', param };
   }
+
+  let текущийКлюч = '';
 
   async function route() {
     if (!App.user) return;
@@ -187,6 +213,15 @@ window.App = (() => {
     if (navItem && !App.canSee(navItem)) { App.go('#/dashboard'); return; }
 
     const activeKey = Pages[key] ? key : 'dashboard';
+    запомнитьПереход(текущийКлюч, activeKey);
+    текущийКлюч = activeKey;
+    /*
+     * На Главной возвращаться некуда — она и есть начало. На любом другом
+     * разделе кнопка есть всегда, даже если человек попал туда по ссылке:
+     * тогда она ведёт на Главную.
+     */
+    const кнопкаНазад = document.getElementById('btn-back');
+    if (кнопкаНазад) кнопкаНазад.classList.toggle('hidden', activeKey === 'dashboard');
     document.querySelectorAll('.nav-item').forEach(el =>
       el.classList.toggle('active', el.dataset.key === activeKey));
     document.querySelectorAll('.mn-item').forEach(el =>
@@ -283,6 +318,10 @@ window.App = (() => {
     }
   });
 
+  const btnBack = document.getElementById('btn-back');
+  btnBack.innerHTML = ui.icon('back');
+  btnBack.addEventListener('click', назад);
+
   document.getElementById('btn-logout').innerHTML = ui.icon('logout');
   document.getElementById('btn-more').innerHTML = ui.icon('menu');
   document.getElementById('btn-quick-sale').innerHTML = ui.icon('plus') + ' Продажа';
@@ -318,8 +357,12 @@ window.App = (() => {
 
     const close = () => {
       box.classList.add('hidden');
+      const былНаВесьЭкран = wrap.classList.contains('gs-mobile-open');
       wrap.classList.remove('gs-mobile-open');
       active = -1;
+      // Закрыли поиск на телефоне — убираем и клавиатуру, иначе она остаётся
+      // висеть над разделом, к которому уже не относится.
+      if (былНаВесьЭкран) input.blur();
     };
 
     const go = it => {
@@ -460,6 +503,25 @@ window.App = (() => {
         input.focus();
       });
     }
+
+    /*
+     * Выход из поиска на телефоне.
+     *
+     * Кнопка — потому что выйти было нечем вовсе: Esc на телефоне нет, а
+     * общий обработчик «щёлкнули мимо» здесь не срабатывает — раскрытый
+     * поиск занимает весь экран, и любое нажатие попадает внутрь него.
+     * Нажатие по пустому месту рядом с полем закрывает тоже: так ведут себя
+     * все окна в системе, и рука тянется именно туда.
+     */
+    const кнопкаПоиска = document.getElementById('gs-back');
+    кнопкаПоиска.innerHTML = ui.icon('back') + 'Назад';
+    кнопкаПоиска.addEventListener('click', () => {
+      input.value = '';
+      close();
+    });
+    wrap.addEventListener('click', e => {
+      if (e.target === wrap && wrap.classList.contains('gs-mobile-open')) { input.value = ''; close(); }
+    });
     // На компьютере поиск открывается с клавиатуры — руки не уходят с клавиш.
     document.addEventListener('keydown', e => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {

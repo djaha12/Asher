@@ -9,6 +9,7 @@ window.ui = (() => {
   const ICONS = {
     diamond: '<path d="M7 3h10l4 6-9 12L3 9l4-6z"/><path d="M3 9h18M9.5 3 8 9l4 12M14.5 3 16 9l-4 12"/>',
     home: '<path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9.5h12V10"/>',
+    back: '<path d="M15 4.5 7.5 12l7.5 7.5"/>',
     sale: '<path d="M6 3.5h12V20l-2-1.4L14 20l-2-1.4L10 20l-2-1.4L6 20V3.5z"/><path d="M9 8h6M9 11.5h6M9 15h3.5"/>',
     gem: '<path d="M8 4h8l3 4.5L12 20 5 8.5 8 4z"/><path d="M5 8.5h14M10 4l-1 4.5 3 11.5M14 4l1 4.5-3 11.5"/>',
     eye: '<path d="M2.5 12S6 5.5 12 5.5s9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3.2"/>',

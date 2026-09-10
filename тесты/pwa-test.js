@@ -66,8 +66,17 @@ const снимокТелефона = стр =>
    * «написано ли в стилях нужное слово», а то, что видит человек: где
    * оказалось название и не залезло ли оно под часы.
    */
+  /*
+   * Размер экрана телефона, без «мобильной эмуляции» браузера.
+   *
+   * С ней браузер сам решает, какой ширины сделать страницу, и получает 484
+   * точки вместо 390: разметка живёт по одним размерам, а всё, что прибито
+   * к экрану (position: fixed), — по другим. На настоящем телефоне они
+   * совпадают, и проверка, поставленная на эмуляцию, мерила бы то, чего
+   * у владельца в руках не бывает. Прикосновения при этом включены.
+   */
   const телефон = await ctx.browser().newContext({
-    viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true,
+    viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true,
   });
   const t = await телефон.newPage();
   t.on('pageerror', e => errors.push(e.message));
@@ -125,7 +134,70 @@ const снимокТелефона = стр =>
     await цветПолосы() + ' / ' + await цветШапки());
   await t.evaluate(() => ui.applyTheme('light'));
 
+  /*
+   * ---------- Выход есть с каждого экрана ----------
+   *
+   * В установленном приложении нет ни адресной строки, ни браузерной стрелки
+   * «назад»: экран — это всё, что есть. Поиск при этом раскрывается во весь
+   * экран, и выйти из него было нечем совсем — Esc на телефоне нет, а нажатие
+   * «мимо» попадает в сам поиск, потому что он и есть весь экран. Владелец
+   * упёрся в это в первый же день.
+   */
   await снимокТелефона(t);
+
+  await t.click('#btn-search-mobile');
+  await t.waitForTimeout(400);
+  check('поиск раскрылся во весь экран',
+    await t.$eval('#gs-wrap', el => el.classList.contains('gs-mobile-open')));
+  check('в раскрытом поиске есть кнопка выхода', await t.isVisible('#gs-back'));
+  check('пустой экран поиска объясняет, что набирать',
+    /Наберите артикул/.test(await t.textContent('.gs-idle')) && await t.isVisible('.gs-idle'));
+  const кнопка = await (await t.$('#gs-back')).boundingBox();
+  check('до кнопки выхода можно дотянуться пальцем', кнопка.height >= 44 && кнопка.y >= ЧЕЛКА,
+    `высота ${Math.round(кнопка.height)}, верх ${Math.round(кнопка.y)}`);
+  await t.click('#gs-back');
+  await t.waitForTimeout(400);
+  check('кнопка закрывает поиск',
+    await t.$eval('#gs-wrap', el => !el.classList.contains('gs-mobile-open')));
+
+  await t.click('#btn-search-mobile');
+  await t.waitForTimeout(400);
+  // Нажатие по пустому месту рядом с полем — так закрываются все окна системы.
+  await t.mouse.click(200, 600);
+  await t.waitForTimeout(400);
+  check('нажатие мимо поля тоже закрывает',
+    await t.$eval('#gs-wrap', el => !el.classList.contains('gs-mobile-open')));
+
+  /*
+   * Кнопка «назад» в шапке. Нижняя панель вмещает пять разделов из десяти;
+   * в остальные попадают через «☰», и вернуться оттуда было нечем.
+   */
+  check('на Главной кнопки «назад» нет',
+    await t.$eval('#btn-back', el => el.classList.contains('hidden')));
+  await t.goto(`${BASE}/#/settings`);
+  await t.waitForTimeout(1200);
+  check('в разделе кнопка «назад» появилась', await t.isVisible('#btn-back'));
+  await t.goto(`${BASE}/#/labels`);
+  await t.waitForTimeout(1200);
+  await t.click('#btn-back');
+  await t.waitForTimeout(900);
+  check('«назад» возвращает на предыдущий раздел', t.url().endsWith('#/settings'), t.url());
+  await t.click('#btn-back');
+  await t.waitForTimeout(900);
+  check('и дальше — на Главную', t.url().endsWith('#/dashboard'), t.url());
+  check('на Главной кнопка снова спряталась',
+    await t.$eval('#btn-back', el => el.classList.contains('hidden')));
+
+  /*
+   * Заходы по прямой ссылке. Человек открывает систему значком, попадает
+   * сразу в раздел, и списка пройденного ещё нет — кнопка обязана работать
+   * и здесь, иначе она обманывает ровно в том случае, ради которого нужна.
+   */
+  await t.goto(`${BASE}/#/orders`);
+  await t.waitForTimeout(1200);
+  await t.click('#btn-back');
+  await t.waitForTimeout(900);
+  check('с прямого захода «назад» ведёт на Главную', t.url().endsWith('#/dashboard'), t.url());
 
   await b.close();
   if (errors.length) { console.log('Ошибки JS:'); [...new Set(errors)].forEach(e => console.log('  ' + e)); }

@@ -702,6 +702,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 
 .mobile-nav { display: none; }
 .mobile-head { display: none; }
+/* Кнопка выхода из поиска и подсказка — только на телефоне, где поиск во весь экран. */
+.gs-back, .gs-idle { display: none; }
 
 @media (max-width: 860px) {
   body { font-size: 15.5px; }
@@ -731,8 +733,11 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
   }
   .mobile-head .mh-brand {
     font-size: 14px; font-weight: 650; letter-spacing: .12em; text-transform: uppercase;
-    flex: 1; display: flex; align-items: center; gap: 9px;
+    flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px;
   }
+  /* Длинное название не должно выдавливать кнопки за край экрана. */
+  .mobile-head .mh-brand span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-head .mh-back svg { width: 20px; height: 20px; }
   .mobile-head .mh-brand svg { width: 20px; height: 20px; color: var(--gold); stroke-width: 1.5; }
   .mobile-head button {
     background: var(--surface-2); border: 1px solid var(--line); color: var(--ink);
@@ -944,14 +949,29 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
      не даёт ни набрать, ни прочитать найденное. */
   .global-search { display: none; }
   .global-search.gs-mobile-open {
-    display: block; position: fixed; inset: 0; z-index: 60; margin: 0;
+    display: flex; flex-direction: column; position: fixed; inset: 0; z-index: 60; margin: 0;
     max-width: none; background: var(--bg);
     padding: calc(12px + env(safe-area-inset-top, 0px)) 12px 12px;
   }
   .global-search.gs-mobile-open .input { font-size: 16px; padding: 14px; }
   .global-search.gs-mobile-open .gs-results {
-    position: static; max-height: calc(100vh - 90px); box-shadow: none;
+    position: static; max-height: none; flex: 1; box-shadow: none;
     border: none; margin-top: 8px;
+  }
+  /*
+   * «Назад» стоит НАД полем, а не под ним: снизу телефон открывает
+   * клавиатуру, и всё, что там нарисовано, оказывается под ней.
+   */
+  .global-search.gs-mobile-open .gs-back {
+    display: inline-flex; align-items: center; gap: 6px; order: -1;
+    align-self: flex-start; margin-bottom: 10px; min-height: 44px; padding: 0 14px 0 8px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    color: var(--ink); font-family: var(--font); font-size: 15px; font-weight: 550; cursor: pointer;
+  }
+  .global-search.gs-mobile-open .gs-back svg { width: 20px; height: 20px; }
+  /* Видна, пока список находок пуст, и уходит, как только он появился. */
+  .global-search.gs-mobile-open .gs-results.hidden + .gs-idle {
+    display: block; margin: 18px 4px 0; color: var(--muted); font-size: 14.5px; line-height: 1.5;
   }
 }
 
