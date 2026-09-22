@@ -1,0 +1,41 @@
+# Проект приложения для iPhone.
+#
+# Файла проекта Xcode в хранилище нет, и это намеренно: он длинный, машинный
+# и при правке вручную ломается от одной запятой. Его собирает XcodeGen из
+# этого описания — на компьютере Mac, в роботе GitHub (.github/workflows/ios-app.yml).
+#
+# Приложение — окно в систему на diamonds.kg плюс то, чего у окна браузера
+# нет: печать ценников и чеков через AirPrint, уведомления на телефон,
+# сохранение выгрузок и копий в «Файлы», камера для штрихкодов.
+name: Diamonds
+options:
+  bundleIdPrefix: kg.diamonds
+  deploymentTarget:
+    iOS: "16.0"
+  developmentLanguage: ru
+settings:
+  base:
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1"
+targets:
+  Diamonds:
+    type: application
+    platform: iOS
+    sources:
+      # Info.plist и права приложения подключаются настройками ниже, а не как
+      # ресурсы: иначе Xcode положит их в сборку дважды и откажется собирать.
+      - path: Diamonds
+        excludes:
+          - Info.plist
+          - Diamonds.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: kg.diamonds.crm
+        PRODUCT_NAME: Diamonds
+        INFOPLIST_FILE: Diamonds/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Diamonds/Diamonds.entitlements
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: NO

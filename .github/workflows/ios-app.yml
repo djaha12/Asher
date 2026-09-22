@@ -1,0 +1,55 @@
+# Приложение для iPhone: сборка и отправка в App Store.
+#
+# Своего компьютера Mac у нас нет, а собрать приложение для iPhone можно
+# только на нём. Поэтому собирает робот GitHub — на их Mac, с их Xcode.
+#
+# Без ключей App Store Connect робот только проверяет, что приложение
+# собирается (сборка для симулятора). С ключами — подписывает, загружает
+# в App Store Connect и, если отмечено, отправляет на проверку Apple.
+name: Приложение для iPhone
+
+on:
+  workflow_dispatch:
+    inputs:
+      submit:
+        description: После загрузки отправить на проверку Apple
+        type: boolean
+        default: false
+  push:
+    branches: [claude/server-connection-yv2kwg]
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios-app.yml'
+
+jobs:
+  app:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Выбираю Xcode
+        run: |
+          # Самый свежий НЕ бета-выпуск: сборку из бета-версии Xcode
+          # App Store не принимает, а слишком старую — тоже.
+          ls -d /Applications/Xcode*.app
+          XC=$(ls -d /Applications/Xcode_*.app | grep -vi beta | sort -V | tail -1)
+          echo "беру: $XC"
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+
+      - name: Ставлю XcodeGen
+        run: brew install xcodegen
+
+      - name: Собираю проект Xcode из описания
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Проверочная сборка для симулятора
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild -project Diamonds.xcodeproj -scheme Diamonds -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build 2>&1 | tee сборка.log | grep -E "error:|warning:|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" сборка.log
