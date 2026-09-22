@@ -257,6 +257,34 @@ window.ui = (() => {
     if (saved === 'dark' || saved === 'light') return saved;
     return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   }
+  /*
+   * Приложение для iPhone.
+   *
+   * Открытая в приложении страница получает от него window.asherNative
+   * (ios/Diamonds/Bridge.swift). В браузере этого объекта нет, и всё ниже
+   * работает как раньше.
+   */
+  const native = (window.asherNative && window.asherNative.app) ? window.asherNative : null;
+
+  /*
+   * Печать, которая дожидается печати.
+   *
+   * В браузере window.print() держит страницу, пока открыт диалог, поэтому
+   * подготовленное для печати можно убирать сразу после вызова. В приложении
+   * печать идёт через AirPrint и возвращается мгновенно — уберёшь сразу,
+   * и на бумагу уйдёт пустой лист. Поэтому здесь обещание: убирать — после.
+   */
+  function печать() {
+    if (native) return native.print();
+    window.print();
+    return Promise.resolve();
+  }
+
+  // Цвет часов и батареи в приложении: светлые на тёмном, тёмные на светлом.
+  function часы(светлые) {
+    if (native) native.statusBar(светлые ? 'light' : 'dark');
+  }
+
   function applyTheme(theme) {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem(THEME_KEY, theme);
@@ -268,6 +296,7 @@ window.ui = (() => {
      * теме над белой шапкой висела чёрная полоса, будто экран не догрузился.
      * Берём цвет самой шапки, чтобы стыка не было видно вовсе.
      */
+    часы(theme === 'dark');
     const тег = document.querySelector('meta[name="theme-color"]');
     if (тег) тег.setAttribute('content', theme === 'dark' ? '#191917' : '#ffffff');
     document.querySelectorAll('[data-theme-icon]').forEach(el => {
@@ -392,6 +421,7 @@ window.ui = (() => {
 
   return { esc, icon, money, moneyRich, num, dt, dateOnly, monthName, badge, L, modal, confirmDialog, toast, toastErr,
     table, bindRows, formValues, debounce, currentTheme, applyTheme, toggleTheme, lightbox,
+    native, печать, часы,
     barcodeSvg, photoUrl, highlight, whatsappLink, normalizePhone, locale: loc };
 })();
 

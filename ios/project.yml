@@ -39,3 +39,12 @@ targets:
         CODE_SIGN_STYLE: Automatic
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: NO
+      # Сервер уведомлений Apple у отладочной сборки тестовый, у сборки для
+      # App Store — боевой. Права приложения (Diamonds.entitlements) берут
+      # значение отсюда: впиши туда одно на все случаи — и сборка для App Store
+      # не подпишется, потому что профиль App Store разрешает только боевой.
+      configs:
+        Debug:
+          APS_ENVIRONMENT: development
+        Release:
+          APS_ENVIRONMENT: production

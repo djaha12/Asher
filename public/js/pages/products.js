@@ -1113,17 +1113,18 @@ window.Pages.products = (() => {
       el.innerHTML = `
         <div class="toolbar">
           <input type="text" class="input search" id="pf-search" placeholder="Поиск: название, артикул, штрихкод…" autocomplete="off">
-          <select class="input" id="pf-cat"><option value="">Все категории</option>
+          <button class="btn pf-toggle" id="pf-toggle" type="button">Фильтры</button>
+          <select class="input pf-more" id="pf-cat"><option value="">Все категории</option>
             ${cats.map(c => `<option value="${c.id}">${ui.esc(c.name)}</option>`).join('')}</select>
-          <select class="input" id="pf-metal"><option value="">Любой металл</option>
+          <select class="input pf-more" id="pf-metal"><option value="">Любой металл</option>
             ${meta.metals.map(mt => `<option>${ui.esc(mt)}</option>`).join('')}</select>
-          <select class="input" id="pf-color"><option value="">Любой цвет</option>
+          <select class="input pf-more" id="pf-color"><option value="">Любой цвет</option>
             ${(meta.colors || []).map(v => `<option>${ui.esc(v)}</option>`).join('')}</select>
-          <select class="input" id="pf-clarity"><option value="">Любая чистота</option>
+          <select class="input pf-more" id="pf-clarity"><option value="">Любая чистота</option>
             ${(meta.clarities || []).map(v => `<option>${ui.esc(v)}</option>`).join('')}</select>
-          ${stores.length > 1 ? `<select class="input" id="pf-store"><option value="">Все точки</option>
+          ${stores.length > 1 ? `<select class="input pf-more" id="pf-store"><option value="">Все точки</option>
             ${stores.map(s => `<option value="${s.id}">${ui.esc(s.name)}</option>`).join('')}</select>` : ''}
-          <select class="input" id="pf-sort">
+          <select class="input pf-more" id="pf-sort">
             <option value="new">Сначала новые</option>
             <option value="name">По названию</option>
             <option value="sku">По артикулу</option>
@@ -1134,7 +1135,7 @@ window.Pages.products = (() => {
           </select>
           <div class="spacer"></div>
           <button class="btn" id="pf-view" title="Плитки или таблица">${view === 'grid' ? '☰ Списком' : '▦ Плитками'}</button>
-          ${App.isAdmin() ? '<a class="btn" href="/api/export/products" download>Экспорт CSV</a>' : ''}
+          ${App.isAdmin() ? '<a class="btn pf-more" href="/api/export/products" download>Экспорт CSV</a>' : ''}
           ${App.isAdmin() ? '<button class="btn" id="pf-receipt">📦 Приёмка от поставщика</button>' : ''}
           <button class="btn btn-primary" id="pf-add">${ui.icon('plus')} Добавить изделие</button>
         </div>
@@ -1162,6 +1163,21 @@ window.Pages.products = (() => {
       el.querySelector('#pf-sort').addEventListener('change', e => { filters.sort = e.target.value; doRefresh(); });
       const storeSel = el.querySelector('#pf-store');
       if (storeSel) storeSel.addEventListener('change', e => { filters.store_id = e.target.value; doRefresh(); });
+
+      /*
+       * На телефоне шесть выпадающих списков занимали весь экран — до первого
+       * изделия надо было листать. Там они свёрнуты под кнопку «Фильтры»,
+       * а на кнопке видно, сколько из них включено, чтобы выбранный вчера
+       * металл не прятал половину каталога незаметно.
+       */
+      const панель = el.querySelector('.toolbar');
+      const кнопкаФильтров = el.querySelector('#pf-toggle');
+      const отметитьФильтры = () => {
+        const включено = [...el.querySelectorAll('select.pf-more')].filter(s => s.id !== 'pf-sort' && s.value).length;
+        кнопкаФильтров.textContent = (панель.classList.contains('open') ? 'Скрыть фильтры' : 'Фильтры') + (включено ? ` · ${включено}` : '');
+      };
+      кнопкаФильтров.addEventListener('click', () => { панель.classList.toggle('open'); отметитьФильтры(); });
+      el.querySelectorAll('select.pf-more').forEach(s => s.addEventListener('change', отметитьФильтры));
 
       el.querySelector('#pf-chips').addEventListener('click', e => {
         const chip = e.target.closest('.chip');

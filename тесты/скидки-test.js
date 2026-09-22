@@ -84,11 +84,33 @@ async function main() {
     const карта = new Map();
     for (const p of ((r.data || {}).items || [])) {
       if (p.status !== 'in_stock' || !(p.retail_price > 1000)) continue;
-      if (!/^AS-/.test(p.sku) || p.set_id || взято.has(p.id)) continue;
+      if (!(/^AS-/.test(p.sku) || заведённые.has(p.id)) || p.set_id || взято.has(p.id)) continue;
       if (!карта.has(p.store_id)) карта.set(p.store_id, []);
       карта.get(p.store_id).push(p);
     }
     return карта;
+  }
+
+  /*
+   * Витрина опустела — заводим свои изделия. Демо-каталог в общем прогоне
+   * раскупают и другие наборы, а сколько в нём было «в наличии» с самого
+   * начала, решает случайное наполнение. Так набор однажды и упал на
+   * последнем разделе — «на складе не осталось изделий», хотя система
+   * работала верно. Свои изделия помечены своим артикулом, наценка у них
+   * заведомо больше любого предела скидки.
+   */
+  const заведённые = new Set();
+  let своихЗаведено = 0;
+  async function завести(сколько, где) {
+    for (let i = 0; i < сколько; i++) {
+      const r = await админ.зов('POST', '/api/products', {
+        sku: `СКИДКИ-${process.pid}-${++своихЗаведено}`, name: 'Кольцо для проверки скидок',
+        metal: 'Золото', retail_price: 50000, purchase_price: 20000,
+        ...(где ? { store_id: где } : {}),
+      });
+      if (r.status !== 200) throw new Error('не удалось завести изделие для проверки: ' + JSON.stringify(r.data));
+      заведённые.add(r.data.id);
+    }
   }
 
   /*
@@ -99,6 +121,12 @@ async function main() {
    * по точкам случайно — это невезение набора, а не сбой системы.
    */
   async function пополнить(нужно) {
+    if (await взятьСВитрины(нужно)) return true;
+    await завести(нужно + 3, точка);
+    return взятьСВитрины(нужно);
+  }
+
+  async function взятьСВитрины(нужно) {
     const карта = await свободныеПоТочкам();
     let список = точка === null ? [] : (карта.get(точка) || []);
     if (список.length < нужно) {

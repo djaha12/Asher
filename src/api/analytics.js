@@ -1,5 +1,5 @@
 'use strict';
-const { db, round2, getSetting, видитВсё } = require('../db');
+const { db, round2, getSetting, setSetting, видитВсё } = require('../db');
 
 function tzMod(query) {
   const tz = Number(query.tz) || 0;
@@ -40,6 +40,15 @@ const routes = [
     handler: ({ query, session }) => {
       const now = new Date();
       const tz = Number(query.tz) || 0;
+      /*
+       * Часы магазина запоминаем с его же страницы. Серверу они нужны, чтобы
+       * напоминание об аренде пришло днём, а не в три часа ночи, — а сам сервер
+       * может стоять в любом часовом поясе. Пишем только при смене.
+       */
+      if (query.tz !== undefined && Number.isFinite(Number(query.tz))
+          && String(getSetting('store_tz')) !== String(tz)) {
+        setSetting('store_tz', String(tz));
+      }
       const local = new Date(now.getTime() + tz * 60000);
       const localDate = local.toISOString().slice(0, 10);
       const dayStartUtc = new Date(new Date(localDate + 'T00:00:00Z').getTime() - tz * 60000).toISOString();

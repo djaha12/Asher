@@ -1,0 +1,17 @@
+Diamonds is the internal business system of the Diamonds jewelry store (Bishkek, Kyrgyzstan). Accounts are issued by the store owner to employees; there is no public sign-up. We intend to request Unlisted App Distribution for this app.
+
+HOW TO REVIEW
+The production system holds real customer data, so please use the demo system with sample data:
+1. On the sign-in screen tap «Посмотреть демо-версию» (View demo) at the bottom.
+2. Sign in with username admin, password admin123 (the same as in the review details). The demo trusts any device, so no owner approval is needed.
+3. «Вернуться к рабочей системе» returns to the production sign-in screen.
+The demo data is reset every night.
+
+NATIVE FEATURES
+- Push notifications: after sign-in the app offers to enable notifications («Разрешить»). Menu → Настройки (Settings) → Безопасность (Security) → «Прислать проверочное» sends a test notification. Owners are notified about sign-in attempts from new devices, recurring expenses coming due and failed nightly backups.
+- AirPrint: Menu → Ценники и бирки (Labels) → select items → print sends barcode labels to an AirPrint printer; sale receipts print the same way.
+- Camera: Продажи (Sales) or Инвентаризация (Stock check) → scan button reads the barcode on a label.
+- Files: «Экспорт CSV» in Sales and Customers opens the iOS share sheet; certificates and photos open in a native viewer.
+- Offline: without a connection the app shows its own offline screen and reconnects by itself.
+
+The interface is in Russian. Privacy policy: https://diamonds.kg/privacy — Support: https://diamonds.kg/support

@@ -47,7 +47,7 @@ const BODY_LIMIT = 25 * 1024 * 1024; // 25 МБ — с запасом для CSV
 
 const modules = ['products', 'images', 'customers', 'sales', 'orders', 'finance', 'debts',
   'stores', 'inventory', 'analytics', 'settings', 'importexport', 'sets', 'search', 'cash', 'receipts',
-  'team'];
+  'team', 'push'];
 const routes = [];
 for (const m of modules) {
   for (const r of require(`./src/api/${m}`).routes) {
@@ -333,6 +333,16 @@ const server = http.createServer(async (req, res) => {
       serveMedia(req, res, pathname.slice('/media/'.length));
       return;
     }
+    /*
+     * Политика конфиденциальности и поддержка — открыты без входа: их читает
+     * проверяющий App Store и любой, у кого есть ссылка из магазина приложений.
+     */
+    if (pathname === '/privacy' || pathname === '/privacy/' || pathname === '/support' || pathname === '/support/') {
+      const страницы = require('./src/страницы');
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', ...securityHeaders(req) });
+      res.end(pathname.startsWith('/privacy') ? страницы.политика() : страницы.поддержка());
+      return;
+    }
     if (!pathname.startsWith('/api/')) {
       serveStatic(req, res, pathname);
       return;
@@ -432,6 +442,9 @@ const server = http.createServer(async (req, res) => {
      */
     if (pathname === '/api/login-hint' && req.method === 'GET') {
       sendJson(res, 200, {
+        // Демо-версия показывает вход прямо на странице: её для того и открывают.
+        // Рабочая система о демо не говорит ничего — лишнего до входа не отдаём.
+        ...(process.env.ASHER_DEMO === '1' ? { demo: true } : {}),
         default_admin: isLocalRequest(req) && auth.defaultAdminActive(),
         // Владельцу нужно знать, что стандартный пароль всё ещё стоит, даже
         // когда система в интернете, — эту строку читает страница «Безопасность»
@@ -571,6 +584,10 @@ const server = http.createServer(async (req, res) => {
 
 auth.cleanupSessions();
 setInterval(() => auth.cleanupSessions(), 6 * 3600 * 1000).unref();
+// Напоминания о постоянных расходах на телефон: проверка раз в час, отправка
+// раз в месяц на каждый расход и только днём по часам магазина.
+setInterval(() => { require('./src/push').проверитьРасходы().catch(e => console.error('Напоминания:', e.message)); },
+  3600 * 1000).unref();
 
 // Автообмен с 1С (папка «1С-ОБМЕН») и ежедневные резервные копии.
 require('./src/sync').start();

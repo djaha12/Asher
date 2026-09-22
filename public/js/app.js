@@ -63,14 +63,17 @@ window.App = (() => {
       } else {
         setTimeout(() => userInput.focus(), 50);
       }
+      // Экран входа всегда тёмный — часы и батарея на нём светлые.
+      ui.часы(true);
       // Подсказка про admin/admin123 видна только пока пароль стандартный.
       const hint = document.getElementById('login-hint');
-      if (hint) {
-        fetch('/api/login-hint')
-          .then(r => r.json())
-          .then(d => hint.classList.toggle('hidden', !d.default_admin))
-          .catch(() => hint.classList.add('hidden'));
-      }
+      fetch('/api/login-hint')
+        .then(r => r.json())
+        .then(d => {
+          if (hint) hint.classList.toggle('hidden', !d.default_admin || d.demo);
+          показатьДемо(Boolean(d.demo));
+        })
+        .catch(() => { if (hint) hint.classList.add('hidden'); });
     },
 
     showApp() {
@@ -96,6 +99,7 @@ window.App = (() => {
         const тег = document.querySelector(`meta[name="${имя}"]`);
         if (тег) тег.setAttribute('content', first);
       }
+      ui.часы(ui.currentTheme() === 'dark');
       document.getElementById('user-name').textContent = App.user.name;
       document.getElementById('user-role').textContent = App.roleLabel(App.user.role);
       document.getElementById('user-avatar').textContent = (App.user.name || '?')[0].toUpperCase();
@@ -168,6 +172,10 @@ window.App = (() => {
   }
 
   async function logout() {
+    // Телефон, из которого вышли, больше не получает уведомления этого человека.
+    if (ui.native && ui.native.token) {
+      try { await api.post('/api/push/unregister', { token: ui.native.token }); } catch { /* не критично */ }
+    }
     try { await api.post('/api/logout'); } catch { /* не критично */ }
     App.user = null;
     App.showLogin();
@@ -264,8 +272,92 @@ window.App = (() => {
     прекратитьОжидание();
     // Убираем «#login=…» из ссылки, чтобы дальше работали обычные разделы.
     if (/^#login=/i.test(location.hash)) location.hash = '#/dashboard';
+    // С этого телефона уже входили в рабочую систему — ссылка на демо ему больше ни к чему.
+    if (!этоДемо) { try { localStorage.setItem('asher-был-вход', '1'); } catch { /* не беда */ } }
     App.showApp();
+    уведомления();
   }
+
+  /*
+   * Демо-версия.
+   *
+   * Проверяющий App Store и любой, кому показывают систему, входят в отдельную
+   * демо-версию с выдуманными данными (demo.<домен>): в рабочую систему с
+   * настоящими клиентами и их телефонами посторонних пускать нельзя.
+   *
+   * В рабочей системе ссылка на демо видна только в приложении и только пока
+   * с этого телефона ни разу не входили: сотрудникам она ни к чему. В демо —
+   * вход прямо на экране и ссылка обратно.
+   */
+  let этоДемо = false;
+
+  function показатьДемо(демо) {
+    этоДемо = демо;
+    const плашка = document.getElementById('login-demo');
+    const назад = document.getElementById('login-demo-back');
+    const туда = document.getElementById('login-to-demo');
+    if (плашка) плашка.classList.toggle('hidden', !демо);
+    const рабочий = location.host.replace(/^demo\./, '');
+    if (назад) {
+      назад.classList.toggle('hidden', !(демо && ui.native));
+      назад.href = `https://${рабочий}/`;
+    }
+    let былВход = false;
+    try { былВход = localStorage.getItem('asher-был-вход') === '1'; } catch { /* нет памяти */ }
+    if (туда) {
+      туда.classList.toggle('hidden', демо || !ui.native || былВход);
+      туда.href = `https://demo.${рабочий}/`;
+    }
+    if (демо) {
+      document.getElementById('login-username').value = document.getElementById('login-username').value || 'admin';
+    }
+  }
+
+  /*
+   * Уведомления на телефон — спрашиваем один раз и по-человечески.
+   *
+   * Системное окно iPhone говорит только «приложение хочет присылать
+   * уведомления» — без слова о том, какие. Отказавшись там, человек потом
+   * не найдёт, где включить. Поэтому сначала объясняем, о чём уведомления,
+   * и только по «Разрешить» зовём системное окно. Спрашиваем тех, кому они
+   * приходят: основателя и бухгалтера.
+   */
+  async function уведомления() {
+    if (!ui.native || !App.isAdmin()) return;
+    let решение = '';
+    try { решение = localStorage.getItem('asher-уведомления') || ''; } catch { /* нет памяти */ }
+    if (решение === 'да') { ui.native.requestPush(); return; }
+    if (решение === 'нет') return;
+    const st = await api.get('/api/push/status').catch(() => null);
+    if (!st || !st.configured) return;
+    const запомнить = v => { try { localStorage.setItem('asher-уведомления', v); } catch { /* спросим снова */ } };
+    const m = ui.modal({
+      title: 'Уведомления на телефон',
+      size: 'sm',
+      body: `<p style="margin-top:0">Телефон сообщит сразу, если:</p>
+        <ul style="margin:0 0 10px;padding-left:20px;line-height:1.6">
+          <li>кто-то просится войти в систему с нового телефона;</li>
+          <li>резервная копия не сделалась;</li>
+          <li>подошёл срок аренды или зарплаты, а расход не записан.</li>
+        </ul>
+        <p class="muted" style="margin:0">Можно выключить в любой момент: Настройки iPhone → Diamonds.</p>`,
+      footer: `<button class="btn" data-act="later">Не сейчас</button>
+        <button class="btn btn-primary" data-act="ok">Разрешить</button>`,
+    });
+    m.foot.querySelector('[data-act=later]').onclick = () => { запомнить('нет'); m.close(); };
+    m.foot.querySelector('[data-act=ok]').onclick = () => { запомнить('да'); m.close(); ui.native.requestPush(); };
+  }
+
+  // Приложение прислало адрес телефона — привязываем его к тому, кто вошёл.
+  window.addEventListener('asher-push-token', e => {
+    if (!App.user || !e.detail || !e.detail.token) return;
+    api.post('/api/push/register', { token: e.detail.token, env: e.detail.env }).catch(() => {});
+  });
+  window.addEventListener('asher-push-state', e => {
+    if (e.detail && e.detail.state === 'denied') {
+      ui.toast('Уведомления выключены в настройках iPhone: Настройки → Diamonds → Уведомления', true);
+    }
+  });
 
   /*
    * Ждём, пока владелец разрешит это устройство, и входим сами.
@@ -662,7 +754,11 @@ window.App = (() => {
       App.showApp();
     } catch {
       App.showLogin();
+      return;
     }
+    // Приложение открыли, уже будучи внутри: адрес телефона для уведомлений
+    // мог смениться (iOS меняет его после переустановки) — обновим.
+    уведомления();
   })();
 
   return App;

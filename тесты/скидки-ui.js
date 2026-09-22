@@ -34,27 +34,26 @@ async function войти(page, логин, пароль) {
 }
 
 /*
- * Артикул любого изделия в наличии. Спрашиваем у самой страницы её же
- * средствами: так запрос уходит с теми же заголовками и правами, что
- * и обычная работа приложения, — иначе пришлось бы повторять здесь
- * половину его устройства.
+ * Изделие для проверки заводит владелец — через API, до того как продавец
+ * откроет кассу. Раньше брали «любое в наличии», и это было ненадёжно:
+ * в общем прогоне витрину раскупают соседние наборы, а среди оставшегося
+ * попадались их изделия с закупочной, равной цене. У такого изделия предел
+ * скидки честно равен нулю, и набор падал «поле скидки не ограничено»
+ * при исправной кассе. Своё изделие — с известной ценой и наценкой.
  */
-async function свободныйАртикул(page, занятые, сЗакупочной = false) {
-  return page.evaluate(async ([взятые, нуженЗакуп]) => {
-    const r = await window.api.get('/api/products?status=in_stock&limit=50');
-    /*
-     * Владельцу нужно изделие с настоящей закупочной ценой: проверка ниже
-     * смотрит, предупреждает ли касса о продаже ниже закупочной. На изделии
-     * с нулевой закупочной такого предупреждения не будет никогда, и проверка
-     * падала бы не по делу — в общем прогоне другие наборы успевают завести
-     * изделия без закупочной. Продавцу это поле вообще не приходит, поэтому
-     * для него признак не спрашиваем.
-     */
-    const п = (r.items || []).find(p => p.status === 'in_stock'
-      && !взятые.includes(p.sku)
-      && (!нуженЗакуп || (p.purchase_price > 0 && p.retail_price > p.purchase_price)));
-    return п ? п.sku : null;
-  }, [занятые, сЗакупочной]);
+async function своёИзделие(номер) {
+  const вход = await fetch(BASE + '/api/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'admin', password: 'admin123' }),
+  });
+  const cookie = (вход.headers.get('set-cookie') || '').split(';')[0];
+  const артикул = `СКИДКИ-UI-${process.pid}-${номер}`;
+  const r = await fetch(BASE + '/api/products', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    body: JSON.stringify({ sku: артикул, name: 'Кольцо для проверки кассы', metal: 'Золото', retail_price: 52000, purchase_price: 20000 }),
+  });
+  if (!r.ok) throw new Error('не удалось завести изделие для проверки: ' + await r.text());
+  return артикул;
 }
 
 async function вКассуИзделие(page, артикул) {
@@ -79,7 +78,7 @@ async function вКассуИзделие(page, артикул) {
   page.on('pageerror', e => ошибки.push(e.message));
   await войти(page, 'anna', 'seller123');
 
-  const артикул = await свободныйАртикул(page, []);
+  const артикул = await своёИзделие(1);
   check('на складе есть что продать', Boolean(артикул), артикул);
   const позиция = await вКассуИзделие(page, артикул);
   check('изделие добавлено в чек', Boolean(позиция));
@@ -134,7 +133,7 @@ async function вКассуИзделие(page, артикул) {
   page2.on('pageerror', e => ошибки.push(e.message));
   await войти(page2, 'admin', 'admin123');
 
-  const артикул2 = await свободныйАртикул(page2, [артикул], true);
+  const артикул2 = await своёИзделие(2);
   const позиция2 = await вКассуИзделие(page2, артикул2);
   check('изделие добавлено в чек владельца', Boolean(позиция2));
   const подсказка2 = (await page2.textContent('#pos-disc-hint') || '').trim();

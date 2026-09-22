@@ -66,8 +66,7 @@ window.Pages.labels = (() => {
     root.innerHTML = `<div class="label-sheet">${products.map(p => labelHtml(p, o)).join('')}</div>`;
     // Даём браузеру отрисовать SVG до вызова диалога печати.
     setTimeout(() => {
-      window.print();
-      setTimeout(() => { root.innerHTML = ''; }, 500);
+      ui.печать().then(() => setTimeout(() => { root.innerHTML = ''; }, 500));
     }, 60);
   }
 
@@ -171,7 +170,7 @@ window.Pages.labels = (() => {
 
     el.innerHTML = `
       <div class="hint-box">
-        <strong>Ценники и бирки.</strong> Отметьте изделия, проверьте образец справа и печатайте.
+        <strong>Ценники и бирки.</strong> Отметьте изделия, проверьте образец бирки и печатайте.
         Штрихкод на бирке читается сканером при продаже и инвентаризации — даже если своего
         штрихкода у изделия нет, он будет закодирован из артикула.
       </div>

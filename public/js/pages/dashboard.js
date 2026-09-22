@@ -14,6 +14,9 @@ window.Pages.dashboard = {
     ]);
     if (!el.isConnected) return;
     const admin = App.isAdmin();
+    // «1 продажа», «3 продажи», «11 продаж».
+    const продаж = n => (n % 100 >= 11 && n % 100 <= 14) ? 'продаж'
+      : n % 10 === 1 ? 'продажа' : (n % 10 >= 2 && n % 10 <= 4) ? 'продажи' : 'продаж';
     const debts = d.debts || { customers_owe: 0, overdue: 0, debtors_count: 0, top: [] };
 
     // Разбивка склада по металлам — показываем три самых весомых.
@@ -42,7 +45,7 @@ window.Pages.dashboard = {
           <div class="bs-label">Продали сегодня</div>
           <div class="bs-value">${ui.moneyRich(d.today.revenue)}</div>
           <div class="bs-sub">${d.today.sales_count
-            ? `${d.today.sales_count} продаж, средний чек ${ui.money(d.today.avg_check)}`
+            ? `${d.today.sales_count} ${продаж(d.today.sales_count)}, средний чек ${ui.money(d.today.avg_check)}`
             : 'Продаж пока не было'}</div>
         </div>
         <div class="big-stat accent-gold">
@@ -50,7 +53,7 @@ window.Pages.dashboard = {
           <div class="bs-value">${ui.moneyRich(d.month.revenue)}</div>
           <div class="bs-sub">${admin
             ? `Заработали чистыми <b class="good">${ui.money(d.month.profit)}</b>`
-            : `${d.month.sales_count} продаж`}</div>
+            : `${d.month.sales_count} ${продаж(d.month.sales_count)}`}</div>
         </div>
         <div class="big-stat ${debts.overdue > 0 ? 'accent-crit' : ''}">
           <div class="bs-label">Должны нам</div>
