@@ -66,7 +66,8 @@ window.Pages.labels = (() => {
     root.innerHTML = `<div class="label-sheet">${products.map(p => labelHtml(p, o)).join('')}</div>`;
     // Даём браузеру отрисовать SVG до вызова диалога печати.
     setTimeout(() => {
-      ui.печать().then(() => setTimeout(() => { root.innerHTML = ''; }, 500));
+      window.print();
+      setTimeout(() => { root.innerHTML = ''; }, 500);
     }, 60);
   }
 

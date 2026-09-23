@@ -22,8 +22,7 @@ const check = (n, c, e) => c ? (ok++, console.log('  ok  ' + n))
   : (fail++, console.log('  FAIL ' + n, e === undefined ? '' : String(JSON.stringify(e)).slice(0, 300)));
 
 const СТРАНИЦЫ = ['dashboard', 'sales', 'products', 'customers', 'debts', 'orders', 'sets', 'inventory',
-  'labels', 'finance', 'analytics', 'import', 'team', 'settings/store', 'settings/stores', 'settings/refs',
-  'settings/users', 'settings/audit', 'settings/security', 'settings/me'];
+  'labels', 'finance', 'analytics', 'import', 'team', 'settings'];
 
 // Что вылезло за правый край — кроме того, что лежит в своей прокрутке.
 const вылезло = () => {
@@ -64,15 +63,18 @@ const вылезло = () => {
     if (r.ширина > r.экран || r.где.length) await p.screenshot({ path: path.join(OUT, стр.replace('/', '-') + '.png') });
   }
 
-  console.log('\n=== Вкладка, открытая адресом, видна ===');
-  await p.evaluate(() => { location.hash = '#/settings/me'; });
+  console.log('\n=== Вкладки настроек — каждая по очереди ===');
+  await p.evaluate(() => { location.hash = '#/settings'; });
   await p.waitForTimeout(1200);
-  const вкладка = await p.$eval('.tab.active', el => {
-    const r = el.getBoundingClientRect();
-    return { текст: el.textContent.trim(), слева: Math.round(r.left), справа: Math.round(r.right), экран: document.documentElement.clientWidth };
-  });
-  check('последняя вкладка «Мой пароль» на экране, а не за краем',
-    вкладка.текст === 'Мой пароль' && вкладка.слева >= 0 && вкладка.справа <= вкладка.экран, вкладка);
+  const вкладки = await p.$$eval('.tab[data-tab]', els => els.map(e => e.dataset.tab));
+  check('вкладок больше, чем помещается в строку, — все на месте', вкладки.length >= 6, вкладки);
+  for (const в of вкладки) {
+    await p.click(`.tab[data-tab="${в}"]`);
+    await p.waitForLoadState('networkidle');
+    await p.waitForTimeout(700);
+    const r = await p.evaluate(вылезло);
+    check(`настройки → ${в}: не шире экрана`, r.ширина <= r.экран && !r.где.length, r);
+  }
 
   console.log('\n=== Каталог: фильтры свёрнуты ===');
   await p.evaluate(() => { location.hash = '#/products'; });

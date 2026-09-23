@@ -46,19 +46,7 @@ function активныхОснователей() {
   return Number(db.prepare(`SELECT COUNT(*) AS c FROM users WHERE role = 'owner' AND active = 1`).get().c);
 }
 
-/*
- * Демо-версия: вход admin / admin123 знают все, кто знакомится с системой,
- * и проверяющий Apple тоже. Отключить эту учётку, разжаловать её или выкинуть
- * со всех устройств — значит запереть демо-версию для всех остальных, в том
- * числе посреди проверки. Поэтому в демо её не трогают.
- */
-function демоНеТрогать(u, что) {
-  if (process.env.ASHER_DEMO === '1' && u.username === 'admin') {
-    throw new ApiError(400, `В демо-версии учётку admin ${что}: ею пользуются все, кто знакомится с системой.`);
-  }
-}
-
-const SETTING_KEYS = ['store_name', 'site_note', 'store_address', 'store_phone', 'store_email', 'usd_rate',
+const SETTING_KEYS = ['store_name', 'site_note', 'store_address', 'store_phone', 'usd_rate',
   'gram_price', 'work_price', 'max_discount_percent', ...LOCALE_KEYS];
 
 /*
@@ -461,9 +449,6 @@ const routes = [
       if (u.role === 'owner' || body.role === 'owner') {
         толькоОснователю(session, 'Учётную запись основателя меняет только основатель');
       }
-      if ((body.active !== undefined && !body.active) || (body.role !== undefined && body.role !== u.role)) {
-        демоНеТрогать(u, 'не отключают и не разжалуют');
-      }
       if (body.name !== undefined) {
         const name = String(body.name).trim();
         if (!name) throw new ApiError(400, 'Имя обязательно');
@@ -484,16 +469,9 @@ const routes = [
           throw new ApiError(400, 'Нельзя отключить последнего основателя');
         }
         db.prepare('UPDATE users SET active = ? WHERE id = ?').run(active, id);
-        if (!active) {
-          db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
-          // И уведомления: уволившийся бухгалтер не должен узнавать о делах магазина.
-          db.prepare('DELETE FROM push_tokens WHERE user_id = ?').run(id);
-        }
+        if (!active) db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
       }
       if (body.password) {
-        if (process.env.ASHER_DEMO === '1') {
-          throw new ApiError(400, 'В демо-версии пароли не меняются: ею пользуются все, кто знакомится с системой.');
-        }
         const weak = passwordProblem(body.password);
         if (weak) throw new ApiError(400, weak);
         // Свой пароль меняем, не выкидывая себя же из системы.
@@ -511,9 +489,6 @@ const routes = [
     // смена собственного пароля — доступна всем
     method: 'POST', path: '/api/me/password',
     handler: ({ body, session }) => {
-      if (process.env.ASHER_DEMO === '1') {
-        throw new ApiError(400, 'В демо-версии пароли не меняются: ею пользуются все, кто знакомится с системой.');
-      }
       const pwd = String(body.password || '');
       const weak = passwordProblem(pwd);
       if (weak) throw new ApiError(400, weak);
@@ -536,12 +511,8 @@ const routes = [
       const u = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
       if (!u) throw new ApiError(404, 'Сотрудник не найден');
       if (u.role === 'owner') толькоОснователю(session, 'Сеансы основателя завершает только основатель');
-      демоНеТрогать(u, 'не выкидывают со всех устройств');
       const keep = id === session.userId ? session.token : '';
       const closed = destroyUserSessions(id, { keepToken: keep });
-      // Телефон потеряли — уведомления туда тоже больше не нужны. Свои оставляем:
-      // человек выкинул остальные устройства, а не этот телефон.
-      if (!keep) db.prepare('DELETE FROM push_tokens WHERE user_id = ?').run(id);
       audit(session.userId, 'logout_all', 'user', id,
         `${u.name}: завершено сеансов ${closed}`);
       return { closed };

@@ -810,10 +810,6 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
   .toolbar .input, .toolbar select { flex: 1 1 calc(50% - 4px); min-width: 0; }
   .toolbar .btn { flex: 1 1 calc(50% - 4px); }
   .toolbar .spacer { display: none; }
-  /*
-   * Вкладок в настройках шесть, а на экран телефона помещается три-четыре.
-   * Без прокрутки лишние уезжали за край и тащили за собой всю страницу.
-   */
   .toolbar .pf-toggle { display: inline-flex; }
   .toolbar:not(.open) .pf-more { display: none; }
   /*
@@ -823,6 +819,10 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
    */
   .pos-item { grid-template-columns: 1fr 104px 40px; row-gap: 8px; }
   .pos-item > :first-child { grid-column: 1 / -1; }
+  /*
+   * Вкладок в настройках шесть, а на экран телефона помещается три-четыре.
+   * Без прокрутки лишние уезжали за край и тащили за собой всю страницу.
+   */
   .tabs { overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
   .tabs::-webkit-scrollbar { display: none; }
   .tab { flex: 0 0 auto; white-space: nowrap; }
@@ -911,12 +911,6 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 .cert-num { font-weight: 600; letter-spacing: .01em; }
 
 /* Подсказка первого входа: видна, пока пароль администратора стандартный */
-.login-demo {
-  margin-top: 16px; padding: 12px 14px; border-radius: var(--radius-sm);
-  background: var(--gold-soft); color: var(--ink); font-size: 13.5px; line-height: 1.5;
-}
-.login-demo a, .login-demo-link { display: block; margin-top: 8px; color: var(--gold-strong); font-weight: 600; }
-.login-demo-link { text-align: center; margin-top: 16px; font-size: 14px; }
 .login-hint {
   margin: 14px 0 0; text-align: center; font-size: 13px; color: var(--muted);
 }

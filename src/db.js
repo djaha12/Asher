@@ -350,31 +350,6 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
 
-/*
- * Телефоны, которые получают уведомления.
- *
- * token — адрес телефона у Apple для уведомлений. Привязан к человеку, а не
- * к устройству: если на телефоне сменился вошедший, строка переходит к новому
- * человеку, и прежнему его уведомления туда больше не придут.
- * env — куда слать: сборка из App Store получает через боевой сервер Apple,
- * отладочная — через песочницу; перепутать значит молча не доставить.
- */
-CREATE TABLE IF NOT EXISTS push_tokens (
-  token TEXT PRIMARY KEY,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  env TEXT NOT NULL DEFAULT 'production',
-  created_at TEXT NOT NULL,
-  last_seen TEXT NOT NULL
-);
-
--- Что уже отправлено: напоминание об аренде приходит раз в месяц, а не раз в час.
-CREATE TABLE IF NOT EXISTS push_sent (
-  kind TEXT NOT NULL,
-  key TEXT NOT NULL,
-  sent_at TEXT NOT NULL,
-  PRIMARY KEY (kind, key)
-);
-
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL DEFAULT ''

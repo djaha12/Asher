@@ -91,26 +91,8 @@ function countApprovedDevices(userId) {
  * контролируемый: владелец сам заводит сотрудника и сам выдаёт ему карточку
  * подключения, стоя рядом. Все последующие устройства — только с разрешения.
  */
-/*
- * Демо-версия для знакомства (ASHER_DEMO=1): отдельный сервер с выдуманными
- * данными, в который входит проверяющий App Store и любой, кому показывают
- * систему. Разрешать там каждый новый телефон было бы некому — поэтому
- * в демо любое устройство считается разрешённым. В настоящей системе
- * эта ветка не работает никогда.
- */
-const ДЕМО = process.env.ASHER_DEMO === '1';
-
 function checkDevice(user, ключ, { ip = '', name = '' } = {}) {
   const key = String(ключ || '').slice(0, 100);
-  if (ДЕМО && key) {
-    db.prepare(
-      `INSERT OR IGNORE INTO devices (user_id, device_key, code, name, approved, created_at, approved_at, last_seen, last_ip)
-       VALUES (?,?,?,?,1,?,?,?,?)`
-    ).run(user.id, key, makeDeviceCode(), String(name || '').slice(0, 80), nowIso(), nowIso(), nowIso(), ip);
-    db.prepare('UPDATE devices SET approved = 1, last_seen = ?, last_ip = ? WHERE user_id = ? AND device_key = ?')
-      .run(nowIso(), ip, user.id, key);
-    return { state: 'ok' };
-  }
   if (!key) {
     /*
      * Устройство не назвалось. Раньше это означало бы «пускать» — и тогда
@@ -154,8 +136,6 @@ function checkDevice(user, ключ, { ip = '', name = '' } = {}) {
    */
   audit(user.id, 'device_new', 'user', user.id,
     `Вход с незнакомого устройства (код ${code})${ip ? `, адрес ${ip}` : ''} — ждёт разрешения`);
-  // И сразу — на телефон владельца: запись в журнале увидят, когда откроют журнал.
-  require('./push').новоеУстройство(user, code);
   return { state: 'ждёт', device: db.prepare('SELECT * FROM devices WHERE id = ?').get(info.lastInsertRowid) };
 }
 

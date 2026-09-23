@@ -57,8 +57,6 @@ window.Pages.settings = (() => {
               <div class="form-grid">
                 <label class="field"><span>Адрес</span><input name="store_address" value="${ui.esc(s.store_address)}"></label>
                 <label class="field"><span>Телефон</span><input name="store_phone" value="${ui.esc(s.store_phone)}"></label>
-                <label class="field"><span>Почта для связи</span><input name="store_email" type="email" value="${ui.esc(s.store_email || '')}"
-                  placeholder="например: shop@diamonds.kg"></label>
               </div>
               <label class="field"><span>Курс доллара для закупок</span>
                 <input name="usd_rate" type="number" step="0.01" min="0" value="${ui.esc(s.usd_rate || '')}"></label>
@@ -547,7 +545,8 @@ window.Pages.settings = (() => {
           затем добавьте страницу на главный экран.</p>
       </div>`;
       setTimeout(() => {
-        ui.печать().then(() => setTimeout(() => { root.innerHTML = ''; }, 500));
+        window.print();
+        setTimeout(() => { root.innerHTML = ''; }, 500);
       }, 80);
     };
   }
@@ -771,48 +770,6 @@ window.Pages.settings = (() => {
    * видеть, всё ли в порядке, и уметь нажать две кнопки: сменить стандартный
    * пароль и забрать копию базы. Всё остальное система делает сама.
    */
-  /*
-   * Уведомления на телефон — сверху вкладки «Безопасность».
-   *
-   * Три состояния, и каждое говорит, что делать: сервер ещё не подключён;
-   * открыто не в приложении (уведомления приходят только в него); подключено —
-   * тогда кнопка «Прислать проверочное», чтобы убедиться своими глазами.
-   */
-  async function карточкаУведомлений(box) {
-    const st = await api.get('/api/push/status').catch(() => null);
-    if (!st) return;
-    const карточка = document.createElement('div');
-    карточка.className = 'card';
-    карточка.id = 'push-card';
-    let текст;
-    let кнопки = '';
-    if (!st.configured) {
-      текст = 'На сервере уведомления ещё не подключены. Когда подключим, сюда будут приходить вход с нового телефона, сломанная резервная копия и неоплаченная аренда.';
-    } else if (!ui.native) {
-      текст = 'Уведомления приходят в приложение Diamonds на iPhone: вход с нового телефона, сломанная резервная копия, неоплаченная аренда.';
-    } else if (st.mine > 0) {
-      текст = 'Этот телефон получает уведомления: вход с нового телефона, сломанная резервная копия, неоплаченная аренда.';
-      кнопки = '<button class="btn" id="push-test">Прислать проверочное</button>';
-    } else {
-      текст = 'Уведомления на этот телефон ещё не включены.';
-      кнопки = '<button class="btn btn-primary" id="push-on">Включить уведомления</button>';
-    }
-    карточка.innerHTML = `<h3 class="card-title">Уведомления на телефон</h3>
-      <p class="muted" style="margin:0 0 10px">${ui.esc(текст)}</p>${кнопки}`;
-    box.prepend(карточка);
-    const тест = карточка.querySelector('#push-test');
-    if (тест) тест.addEventListener('click', async () => {
-      try { const r = await api.post('/api/push/test'); ui.toast(`Отправлено на телефонов: ${r.sent}`); }
-      catch (e) { ui.toastErr(e); }
-    });
-    const вкл = карточка.querySelector('#push-on');
-    if (вкл) вкл.addEventListener('click', () => {
-      try { localStorage.setItem('asher-уведомления', 'да'); } catch { /* без памяти — спросим снова */ }
-      ui.native.requestPush();
-      ui.toast('Разрешите уведомления в окне iPhone');
-    });
-  }
-
   async function renderSecurity(box) {
     // Спрашиваем систему, а не браузер: только сервер знает, что перед ним
     // прокси с https и что пароль администратора всё ещё стандартный.
@@ -1030,7 +987,7 @@ window.Pages.settings = (() => {
     // Панель основателя заводит людей тем же окном и подписывает действия теми же словами.
     userDialog, phoneCard, roleBadge, AUDIT_ACTIONS, AUDIT_ENTITIES,
     title: 'Настройки',
-    async render(el, param) {
+    async render(el) {
       const admin = App.isAdmin();
       // Журнал действий — только основателю: бухгалтер один из тех, кого в нём видно.
       const tabs = admin
@@ -1038,17 +995,10 @@ window.Pages.settings = (() => {
            ['users', 'Сотрудники'], ...(App.isOwner() ? [['audit', 'Журнал действий']] : []),
            ['security', 'Безопасность'], ['me', 'Мой пароль']]
         : [['me', 'Мой пароль']];
-      // Вкладку можно открыть адресом: уведомление «вход с нового телефона»
-      // ведёт сразу в «Безопасность», а не на первую вкладку.
-      const начальная = tabs.some(t => t[0] === param) ? param : tabs[0][0];
       el.innerHTML = `
-        <div class="tabs">${tabs.map(([k, t]) =>
-          `<button class="tab ${k === начальная ? 'active' : ''}" data-tab="${k}">${t}</button>`).join('')}</div>
+        <div class="tabs">${tabs.map(([k, t], i) =>
+          `<button class="tab ${i === 0 ? 'active' : ''}" data-tab="${k}">${t}</button>`).join('')}</div>
         <div id="set-body"></div>`;
-      // На телефоне вкладки прокручиваются вбок: открытая адресом «Безопасность»
-      // иначе осталась бы за краем экрана, и было бы непонятно, где ты.
-      const открытая = el.querySelector('.tab.active');
-      if (открытая) открытая.parentElement.scrollLeft = открытая.offsetLeft - 16;
       const body = el.querySelector('#set-body');
       const show = async (key) => {
         body.innerHTML = '<div class="empty"><p>Загрузка…</p></div>';
@@ -1058,7 +1008,7 @@ window.Pages.settings = (() => {
           if (key === 'refs') await renderCatalogRefs(body);
           if (key === 'users') await renderUsers(body);
           if (key === 'audit') await renderAudit(body);
-          if (key === 'security') { await renderSecurity(body); await карточкаУведомлений(body); }
+          if (key === 'security') await renderSecurity(body);
           if (key === 'me') renderMyPassword(body);
         } catch (e) { body.innerHTML = `<div class="empty"><p>${ui.esc(e.message)}</p></div>`; }
       };
@@ -1067,7 +1017,7 @@ window.Pages.settings = (() => {
         t.classList.add('active');
         show(t.dataset.tab);
       }));
-      await show(начальная);
+      await show(tabs[0][0]);
     },
   };
 })();

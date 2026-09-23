@@ -63,7 +63,7 @@ window.Pages.sales = (() => {
       <div class="r-center">Продавец: ${ui.esc(s.seller_name || '—')}</div>
       <div class="r-center">Спасибо за покупку!</div>
     </div>`;
-    ui.печать();
+    window.print();
   }
 
   const r2 = x => Math.round((Number(x) || 0) * 100) / 100;
