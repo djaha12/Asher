@@ -17,9 +17,16 @@ const BASE = process.env.BASE || 'http://127.0.0.1:3122';
 
 let ok = 0, fail = 0;
 const провалы = [];
+// Ответ сервера печатаем целиком, а не «[object Object]»: набор изредка
+// падает в общем прогоне и не повторяется поодиночке, и тогда только этот
+// ответ и объясняет, что случилось.
 const check = (имя, усл, доп) => {
   if (усл) { ok++; console.log('  ok  ' + имя); }
-  else { fail++; провалы.push(имя); console.log('  FAIL ' + имя, доп === undefined ? '' : String(доп).slice(0, 260)); }
+  else {
+    fail++; провалы.push(имя);
+    const текст = доп !== null && typeof доп === 'object' ? JSON.stringify(доп) : String(доп);
+    console.log('  FAIL ' + имя, доп === undefined ? '' : текст.slice(0, 400));
+  }
 };
 const около = (a, b) => Math.abs(Number(a) - Number(b)) < 0.011;
 
