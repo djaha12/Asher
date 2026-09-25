@@ -15,11 +15,21 @@ window.Pages.labels = (() => {
 
   // Что печатать на бирке — набор полей запоминается между сеансами.
   const OPTS_KEY = 'asher_label_opts';
+  /*
+   * QR на бирке включён по умолчанию. Камера iPhone в системе читает только
+   * QR — полосатый штрихкод ей недоступен, — и с бирками без QR касса на
+   * iPhone не находила ни одного изделия.
+   */
   const defaultOpts = { name: true, sku: true, metal: true, stone: true, weight: true,
-    price: true, barcode: true, qr: false, store: false };
+    price: true, barcode: true, qr: true, store: false };
   function loadOpts() {
-    try { return { ...defaultOpts, ...JSON.parse(localStorage.getItem(OPTS_KEY) || '{}') }; }
-    catch { return { ...defaultOpts }; }
+    try {
+      const saved = JSON.parse(localStorage.getItem(OPTS_KEY) || '{}');
+      // Сохранённое раньше «без QR» почти всегда просто прежнее умолчание:
+      // включаем один раз. Кто выключит снова — так и останется.
+      if (!saved.qr_v2) { saved.qr = true; saved.qr_v2 = true; }
+      return { ...defaultOpts, ...saved };
+    } catch { return { ...defaultOpts }; }
   }
   let opts = loadOpts();
 

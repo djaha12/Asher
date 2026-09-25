@@ -156,5 +156,46 @@ window.Scan = (() => {
         + 'или сканером. Чтобы заработала и камера, системе нужен адрес с https.';
   }
 
-  return { decodeFile, pickAndDecode, candidates, watchVideo, cameraSupported, cameraProblem };
+  /*
+   * Живая камера в указанном месте: читает коды сама, кадр за кадром, пока её
+   * не выключат. onCode получает каждый новый код; тот же код, пока он держится
+   * в кадре, повторно не приходит. Возвращает функцию «выключить» — или null,
+   * если камеры нет (причину уже показали человеку).
+   */
+  async function live(место, onCode) {
+    if (!cameraSupported()) { ui.toast(cameraProblem(), true); return null; }
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+    } catch {
+      ui.toast('Камера недоступна. Разрешите доступ к камере в настройках браузера.', true);
+      return null;
+    }
+    const video = document.createElement('video');
+    video.className = 'scan-video';
+    video.setAttribute('playsinline', '');   // iPhone иначе раскрывает видео на весь экран
+    video.muted = true;
+    место.replaceChildren(video);
+    место.classList.remove('hidden');
+    video.srcObject = stream;
+    await video.play().catch(() => {});
+
+    let последний = '';
+    let когда = 0;
+    const стопКадров = watchVideo(video, код => {
+      if (код === последний && Date.now() - когда < 2500) return;
+      последний = код;
+      когда = Date.now();
+      onCode(код);
+    });
+    return () => {
+      стопКадров();
+      stream.getTracks().forEach(t => t.stop());
+      video.srcObject = null;
+      место.replaceChildren();
+      место.classList.add('hidden');
+    };
+  }
+
+  return { decodeFile, pickAndDecode, candidates, watchVideo, cameraSupported, cameraProblem, live };
 })();

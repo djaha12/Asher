@@ -265,6 +265,8 @@ svg.i {
 }
 .btn:hover { background: var(--surface-2); border-color: var(--line-strong); }
 .btn:active { transform: translateY(1px); }
+/* Включённая кнопка-переключатель: камера в кассе читает бирки прямо сейчас */
+.btn.active { background: var(--primary); color: var(--primary-ink); border-color: var(--primary); }
 .btn svg.i { width: 16px; height: 16px; }
 
 .btn-primary {

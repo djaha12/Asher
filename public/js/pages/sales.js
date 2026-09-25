@@ -72,16 +72,68 @@ window.Pages.sales = (() => {
    * Фото бирки → изделие. Распознаём QR, из текста готовим кандидатов
    * (артикул, штрихкод, кусок ссылки) и ищем точное совпадение в каталоге.
    */
-  async function productFromPhoto() {
-    const text = await Scan.pickAndDecode();
-    if (!text) { ui.toast('QR-код на фото не распознан. Снимите ближе и без бликов.', true); return null; }
+  async function productByCode(text) {
     for (const code of Scan.candidates(text)) {
       const { items } = await api.get('/api/products?search=' + encodeURIComponent(code));
       const exact = items.find(pr => pr.barcode === code || pr.sku.toLowerCase() === code.toLowerCase());
       if (exact) return exact;
     }
-    ui.toast(`Изделие с кодом «${Scan.candidates(text)[0]}» не найдено`, true);
     return null;
+  }
+
+  async function productFromPhoto() {
+    const text = await Scan.pickAndDecode();
+    if (!text) { ui.toast('QR-код на фото не распознан. Снимите ближе и без бликов.', true); return null; }
+    const found = await productByCode(text);
+    if (!found) ui.toast(`Изделие с кодом «${Scan.candidates(text)[0]}» не найдено`, true);
+    return found;
+  }
+
+  /*
+   * Камера в кассе и при обмене. Раньше на каждое изделие открывалась камера
+   * телефона: снять, «использовать фото», и так на каждую бирку. Теперь одно
+   * нажатие — и камера читает бирки сама, изделие за изделием, пока её не
+   * выключат тем же нажатием. Где живой камеры браузер не даёт (адрес без
+   * https), остаётся прежнее — распознать по фото.
+   *
+   * Возвращает «выключить»: окно зовёт его, закрываясь, иначе камера
+   * телефона так и осталась бы включённой.
+   */
+  function камераВЧеке(кнопка, место, добавить) {
+    let стоп = null;
+    let занята = false;
+    const взятые = new Set();   // бирка, долго стоящая в кадре, не добавляется по кругу
+    function выключить() {
+      if (стоп) { стоп(); стоп = null; }
+      кнопка.classList.remove('active');
+      кнопка.setAttribute('aria-pressed', 'false');
+    }
+    кнопка.addEventListener('click', async () => {
+      if (стоп) { выключить(); return; }
+      if (!Scan.cameraSupported()) {
+        const found = await productFromPhoto();
+        if (found) добавить(found);
+        return;
+      }
+      стоп = await Scan.live(место, async код => {
+        if (занята) return;
+        занята = true;
+        try {
+          const found = await productByCode(код);
+          if (!found) { ui.toast(`Изделие с кодом «${Scan.candidates(код)[0]}» не найдено`, true); return; }
+          if (взятые.has(found.id)) return;
+          взятые.add(found.id);
+          добавить(found);
+          if (navigator.vibrate) navigator.vibrate(40);
+        } catch { /* связь моргнула — прочитаем эту бирку снова со следующего кадра */ }
+        finally { занята = false; }
+      });
+      if (стоп) {
+        кнопка.classList.add('active');
+        кнопка.setAttribute('aria-pressed', 'true');
+      }
+    });
+    return выключить;
   }
 
   /*
@@ -100,9 +152,11 @@ window.Pages.sales = (() => {
     const debtCut = r2(returnedValue - credit);
     const newItems = []; // {product, discount}
 
+    let выключитьКамеру = null;
     const m = ui.modal({
       title: `Обмен по чеку ${s.number}`,
       size: 'lg',
+      onClose: () => { if (выключитьКамеру) выключитьКамеру(); },
       грязно: () => newItems.length > 0 || ui.естьВведённое(m.body),
       body: `
         <div class="hint-box">
@@ -116,8 +170,9 @@ window.Pages.sales = (() => {
             <input type="text" class="input" id="ex-search"
               placeholder="Что берёт взамен: название, артикул или сканируйте штрихкод…" autocomplete="off">
           </div>
-          <button type="button" class="btn" id="ex-scan" title="Распознать QR на фото бирки">${ui.icon('camera')}</button>
+          <button type="button" class="btn" id="ex-scan" title="Камера: читает бирки сама">${ui.icon('camera')}</button>
         </div>
+        <div id="ex-camera" class="hidden" style="margin-bottom:14px"></div>
         <div class="pos-items" id="ex-items"></div>
         <div class="form-grid">
           <label class="field"><span>Способ оплаты доплаты</span>
@@ -275,10 +330,7 @@ window.Pages.sales = (() => {
       if (pick) { addItem(pick); searchInput.value = ''; clearResults(); }
     });
     searchInput.addEventListener('blur', () => setTimeout(clearResults, 150));
-    m.body.querySelector('#ex-scan').addEventListener('click', async () => {
-      const found = await productFromPhoto();
-      if (found) addItem(found);
-    });
+    выключитьКамеру = камераВЧеке(m.body.querySelector('#ex-scan'), m.body.querySelector('#ex-camera'), addItem);
 
     m.foot.querySelector('[data-act=cancel]').onclick = m.close;
     okBtn.onclick = async () => {
@@ -456,9 +508,11 @@ window.Pages.sales = (() => {
     const пределЧека = () => Math.max(ПРЕДЕЛ,
       state.customer ? Number(state.customer.discount) || 0 : 0);
 
+    let выключитьКамеру = null;
     const m = ui.modal({
       title: 'Новая продажа',
       size: 'lg',
+      onClose: () => { if (выключитьКамеру) выключитьКамеру(); },
       // Набранный чек — список изделий, а не поля: поиск после каждого
       // изделия снова пуст, и без этой проверки окно считалось бы пустым.
       грязно: () => state.items.length > 0 || ui.естьВведённое(m.body),
@@ -467,8 +521,9 @@ window.Pages.sales = (() => {
           <div class="rel grow">
             <input type="text" class="input" id="pos-search" placeholder="Изделие: название, артикул или сканируйте штрихкод…" autocomplete="off">
           </div>
-          <button type="button" class="btn" id="pos-scan" title="Распознать QR на фото бирки">${ui.icon('camera')}</button>
+          <button type="button" class="btn" id="pos-scan" title="Камера: читает бирки сама">${ui.icon('camera')}</button>
         </div>
+        <div id="pos-camera" class="hidden" style="margin-bottom:14px"></div>
         <div class="pos-items" id="pos-items"></div>
         <div class="form-grid">
           <div>
@@ -697,10 +752,7 @@ window.Pages.sales = (() => {
       }
     });
     searchInput.addEventListener('blur', () => setTimeout(clearResults, 150));
-    m.body.querySelector('#pos-scan').addEventListener('click', async () => {
-      const found = await productFromPhoto();
-      if (found) addProduct(found);
-    });
+    выключитьКамеру = камераВЧеке(m.body.querySelector('#pos-scan'), m.body.querySelector('#pos-camera'), addProduct);
 
     // Выбор клиента
     const custInput = m.body.querySelector('#pos-customer');
