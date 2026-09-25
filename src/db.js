@@ -345,6 +345,19 @@ CREATE TABLE IF NOT EXISTS service_orders (
 );
 CREATE INDEX IF NOT EXISTS idx_orders_status ON service_orders(status);
 
+-- Фотографии изделия при приёме в ремонт: в каком виде его принесли.
+-- Файлы — в data/images/orders/<id заказа>/, рядом с фотографиями каталога,
+-- поэтому попадают в резервную копию вместе с ними.
+CREATE TABLE IF NOT EXISTS order_images (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL REFERENCES service_orders(id) ON DELETE CASCADE,
+  file TEXT NOT NULL,
+  thumb TEXT NOT NULL,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_order_images ON order_images(order_id);
+
 CREATE TABLE IF NOT EXISTS finance_ops (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   type TEXT NOT NULL CHECK (type IN ('income','expense')),
@@ -642,6 +655,21 @@ function migrate() {
   // в src/customer-sources.js. У всех прежних клиентов пусто: откуда они
   // пришли, никто не записывал, и выдумывать это за владельца нельзя.
   addColumn('customers', 'source', `TEXT NOT NULL DEFAULT ''`);
+
+  /*
+   * Приём в ремонт: что за изделие, сколько весило, какие камни и в каком
+   * оно состоянии. Без этого спор «было три камня, а стало два» или «цепь
+   * была тяжелее» решается словом продавца против слова клиента. С весом,
+   * камнями и подписью клиента на квитанции он решается за минуту.
+   */
+  addColumn('service_orders', 'item', `TEXT NOT NULL DEFAULT ''`);
+  addColumn('service_orders', 'weight', 'REAL NOT NULL DEFAULT 0');
+  addColumn('service_orders', 'stones', `TEXT NOT NULL DEFAULT ''`);
+  addColumn('service_orders', 'defects', `TEXT NOT NULL DEFAULT ''`);
+  // Когда заказ стал готов и когда клиенту об этом написали: готовый заказ,
+  // о котором клиент не знает, лежит в сейфе неделями.
+  addColumn('service_orders', 'ready_at', 'TEXT');
+  addColumn('service_orders', 'notified_at', 'TEXT');
 
   /*
    * Изделия без точки продаж: они числятся в общем складе, но не попадают

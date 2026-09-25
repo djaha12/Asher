@@ -308,4 +308,4 @@ const routes = [
   },
 ];
 
-module.exports = { routes, listImages, listCertificates, removeFiles, safeMediaPath, mimeForFile };
+module.exports = { routes, listImages, listCertificates, removeFiles, safeMediaPath, mimeForFile, decodeDataUrl };

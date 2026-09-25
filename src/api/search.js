@@ -75,11 +75,11 @@ function searchOrders(like) {
     `SELECT o.id, o.number, o.type, o.status, o.estimate, o.final_price, o.due_date,
             c.name AS customer_name
      FROM service_orders o LEFT JOIN customers c ON c.id = o.customer_id
-     WHERE nlower(o.number) LIKE ? OR nlower(o.description) LIKE ?
+     WHERE nlower(o.number) LIKE ? OR nlower(o.description) LIKE ? OR nlower(o.item) LIKE ?
         OR nlower(COALESCE(c.name, '')) LIKE ?
      ORDER BY o.accepted_at DESC
      LIMIT ?`
-  ).all(like.any, like.any, like.any, PER_GROUP + 1);
+  ).all(like.any, like.any, like.any, like.any, PER_GROUP + 1);
 }
 
 function searchSets(like) {
