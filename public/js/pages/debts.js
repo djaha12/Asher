@@ -85,9 +85,14 @@ window.Pages.debts = (() => {
 
     function apply() {
       const q = поиск.toLowerCase();
+      // Номер — голыми цифрами и без местной приставки: «0555123456»
+      // находит «+996 555 12-34-56».
+      const цифры = q.replace(/\D/g, '');
+      const безПриставки = цифры.length > 3 && цифры.startsWith('0') ? цифры.slice(1) : цифры;
+      const поТелефону = r => цифры.length >= 3 && String(r.customer_phone || '').replace(/\D/g, '').includes(безПриставки);
       filtered = items.filter(r =>
         (!толькоПросроченные || r.overdue_debt > 0) &&
-        (!q || String(r.customer_name).toLowerCase().includes(q) || String(r.customer_phone).includes(q)));
+        (!q || String(r.customer_name).toLowerCase().includes(q) || поТелефону(r)));
       draw();
     }
 
@@ -178,7 +183,8 @@ window.Pages.debts = (() => {
   }
 
   // Приём денег. Сумма подставлена целиком — обычно долг гасят полностью.
-  function payDialog({ customer, doc, maxAmount }) {
+  // onDone — кто открыл окно, тот и обновляется: карточка клиента, а не страница долгов.
+  function payDialog({ customer, doc, maxAmount, onDone }) {
     const m = ui.modal({
       title: 'Приём оплаты',
       size: 'sm',
@@ -216,7 +222,7 @@ window.Pages.debts = (() => {
         const res = await api.post('/api/debts/payments', payload);
         ui.toast(`Принято ${ui.money(res.total)}. Закрыто документов: ${res.applied.length}`);
         m.close();
-        reload();
+        if (onDone) onDone(); else reload();
       } catch (e) { ui.toastErr(e); }
     };
   }

@@ -10,7 +10,7 @@ window.Pages.dashboard = {
   async render(el) {
     const [d, bd] = await Promise.all([
       api.get('/api/dashboard?tz=' + api.tz()),
-      api.get('/api/customers/birthdays?days=14'),
+      api.get('/api/customers/occasions?days=14&today=' + new Date(Date.now() + api.tz() * 60000).toISOString().slice(0, 10)),
     ]);
     if (!el.isConnected) return;
     const admin = App.isAdmin();
@@ -180,19 +180,52 @@ window.Pages.dashboard = {
     ], d.recent_sales, { empty: 'Продаж пока нет — самое время оформить первую!' });
     ui.bindRows(recent, d.recent_sales, r => App.go('#/sales/' + r.id));
 
+    /*
+     * Поводы связаться: праздники, «спасибо за покупку» через пару дней,
+     * приглашение почистить изделие через полгода. У каждого — WhatsApp
+     * с готовым текстом; кому написали, из списка пропадает у всех — чтобы
+     * два продавца не поздравили одного человека дважды.
+     */
     const bdEl = el.querySelector('#dash-bd');
-    if (!bd.items.length) {
-      bdEl.innerHTML = '<p class="muted" style="margin:4px 0">В ближайшие 2 недели дней рождения и годовщин у клиентов нет.</p>';
-    } else {
-      bdEl.innerHTML = bd.items.slice(0, 8).map(b => `
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)">
+    const магазин = App.storeName || 'наш магазин';
+    const повод = {
+      birthday: b => ({ что: b.in_days === 0 ? 'День рождения сегодня' : 'День рождения',
+        текст: `Здравствуйте! ${магазин} от всей души поздравляет вас с днём рождения! Счастья, радости и красоты. Будем рады видеть вас в гостях.` }),
+      anniversary: b => ({ что: b.in_days === 0 ? 'Годовщина сегодня' : 'Годовщина',
+        текст: `Здравствуйте! ${магазин} поздравляет вас с годовщиной! Счастья и любви вашей семье.` }),
+      thanks: b => ({ что: `Покупка ${ui.dateOnly(b.date)} — сказать спасибо`,
+        текст: `Здравствуйте! Спасибо за покупку в ${магазин}. Если появятся вопросы по изделию — пишите, всегда поможем.` }),
+      cleaning: b => ({ что: `Покупка полгода назад — пригласить почистить`,
+        текст: `Здравствуйте! Полгода назад вы выбрали украшение в ${магазин}. Приходите — почистим его и проверим закрепку камней.` }),
+    };
+    const показать = items => {
+      if (!items.length) {
+        bdEl.innerHTML = '<p class="muted" style="margin:4px 0">Сегодня поводов нет: праздников в ближайшие две недели и свежих покупок не было.</p>';
+        return;
+      }
+      bdEl.innerHTML = items.slice(0, 8).map((b, i) => {
+        const п = повод[b.kind](b);
+        const wa = b.phone ? ui.whatsappLink(b.phone, п.текст) : '';
+        const когда = b.in_days === undefined ? ''
+          : `<span class="badge ${b.in_days <= 3 ? 'badge-gold' : 'badge-gray'}">${b.in_days === 0 ? 'сегодня!' : 'через ' + b.in_days + ' дн.'}</span>`;
+        return `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)">
           <div>
             <a href="#/customers/${b.id}">${ui.esc(b.name)}</a>
-            <div class="muted" style="font-size:13px">${b.kind === 'birthday' ? 'День рождения' : 'Годовщина'} · ${ui.esc(b.phone || 'без телефона')}</div>
+            <div class="muted" style="font-size:13px">${ui.esc(п.что)} · ${ui.esc(b.phone || 'без телефона')}</div>
           </div>
-          <span class="badge ${b.in_days <= 3 ? 'badge-gold' : 'badge-gray'}">${b.in_days === 0 ? 'сегодня!' : 'через ' + b.in_days + ' дн.'}</span>
-        </div>`).join('');
-    }
+          <span class="row-tight" style="gap:6px">${когда}
+            ${wa ? `<a class="btn btn-sm" href="${ui.esc(wa)}" target="_blank" rel="noopener" data-occ="${i}">WhatsApp</a>` : ''}</span>
+        </div>`;
+      }).join('');
+      bdEl.querySelectorAll('[data-occ]').forEach(a => a.addEventListener('click', () => {
+        const b = items[Number(a.dataset.occ)];
+        // Ссылка открывается сама; отметку ставим параллельно и убираем строку.
+        api.post(`/api/customers/${b.id}/contacted`, { kind: b.kind, ref: b.ref }).catch(() => {});
+        показать(items.filter(x => x !== b));
+      }));
+    };
+    показать(bd.items);
 
     const on = (id, fn) => { const b = el.querySelector('#' + id); if (b) b.onclick = fn; };
     on('qa-sale', () => Pages.sales.newSale());

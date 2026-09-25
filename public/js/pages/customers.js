@@ -24,8 +24,27 @@ window.Pages.customers = (() => {
     ui.bindRows(listEl, items, r => openDetail(r.id, () => refresh(el)));
   }
 
+  /*
+   * Связаться — из самой карточки: WhatsApp с готовым приветствием и звонок.
+   * Раньше номер был просто текстом: его переписывали в телефон руками.
+   */
+  function связь(c) {
+    if (!c.phone) return '';
+    const wa = ui.whatsappLink(c.phone, 'Здравствуйте! Пишем вам из ' + (App.storeName || 'магазина') + '.');
+    const тел = String(c.phone).replace(/[^\d+]/g, '');
+    return `<span class="row-tight" style="gap:6px;margin-left:6px">
+      ${wa ? `<a class="btn btn-sm" href="${ui.esc(wa)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
+      <a class="btn btn-sm" href="tel:${ui.esc(тел)}">Позвонить</a></span>`;
+  }
+
   function openDetail(id, onChange) {
-    api.get('/api/customers/' + id).then(c => {
+    // Долг — отдельным запросом: он считается по документам, а не хранится в клиенте.
+    Promise.all([
+      api.get('/api/customers/' + id),
+      api.get('/api/debts/customers/' + id).catch(() => null),
+    ]).then(([c, долг]) => {
+      const долгСумма = долг ? Number(долг.total_debt) || 0 : 0;
+      const просрочено = долг ? долг.documents.filter(d => d.overdue).reduce((s, d) => s + d.debt, 0) : 0;
       const nextDates = [c.birthday && `ДР: ${ui.dateOnly(c.birthday)}`, c.anniversary && `Годовщина: ${ui.dateOnly(c.anniversary)}`]
         .filter(Boolean).join(' · ');
       const m = ui.modal({
@@ -34,7 +53,7 @@ window.Pages.customers = (() => {
         body: `
           <div class="grid grid-2">
             <dl class="kv">
-              <dt>Телефон</dt><dd class="mono">${ui.esc(c.phone || '—')}</dd>
+              <dt>Телефон</dt><dd><span class="mono">${ui.esc(c.phone || '—')}</span>${связь(c)}</dd>
               <dt>E-mail</dt><dd>${ui.esc(c.email || '—')}</dd>
               <dt>Откуда пришёл</dt><dd>${c.source ? ui.esc(sourceName(c.source)) : '—'}</dd>
               <dt>Памятные даты</dt><dd>${nextDates || '—'}</dd>
@@ -47,8 +66,21 @@ window.Pages.customers = (() => {
               <dt>С нами с</dt><dd>${ui.dateOnly(c.created_at)}</dd>
             </dl>
           </div>
+          ${долгСумма > 0 ? `<div class="hint-box" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+              <span>Долг: <b>${ui.money(долгСумма)}</b>${просрочено > 0 ? ` · <span class="crit">просрочено ${ui.money(просрочено)}</span>` : ''}</span>
+              <button class="btn btn-sm btn-primary" data-act="pay">Принять оплату</button></div>` : ''}
           ${c.preferences ? `<p><b>Предпочтения:</b> ${ui.esc(c.preferences)}</p>` : ''}
           ${c.notes ? `<p class="muted">${ui.esc(c.notes)}</p>` : ''}
+          <h4 style="margin:14px 0 8px">Хочет</h4>
+          <div id="cust-wishes">${(c.wishes || []).map(w => `
+            <div class="row" style="justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)">
+              <span>${ui.esc(w.text)} <span class="dim" style="font-size:12px">· ${ui.dateOnly(w.created_at)}</span></span>
+              <button class="btn btn-sm" data-wish-del="${w.id}" title="Уже не актуально">×</button></div>`).join('')
+            || '<p class="muted" style="margin:0 0 6px;font-size:13px">Пока ничего. Спросила про серьги с сапфиром, а их нет? Запишите — позвоните, когда появятся.</p>'}</div>
+          <div class="row" style="gap:8px;margin-top:8px">
+            <input class="input grow" id="wish-text" maxlength="300" placeholder="Например: серьги с сапфиром до 60 000">
+            <button class="btn" data-act="wish-add">Записать</button>
+          </div>
           ${c.reserved.length ? `<div class="row" style="justify-content:space-between;align-items:center;margin:14px 0 8px">
               <h4 style="margin:0">В резерве</h4>
               <button class="btn btn-sm btn-primary" data-act="sell-reserved">Продать отложенное</button></div>
@@ -72,6 +104,27 @@ window.Pages.customers = (() => {
           <button class="btn btn-primary" data-act="sale">Оформить продажу</button>`,
       });
       m.foot.querySelector('[data-act=edit]').onclick = () => { m.close(); openEditor(c, onChange); };
+      // Перечитать карточку после изменений — без потери места в списке.
+      const заново = () => { m.close(); openDetail(id, onChange); onChange && onChange(); };
+      const кнопкаОплаты = m.body.querySelector('[data-act=pay]');
+      if (кнопкаОплаты) кнопкаОплаты.onclick = () => {
+        m.close();
+        Pages.debts.payDialog({ customer: { id: c.id, name: c.name }, maxAmount: долгСумма,
+          onDone: () => { openDetail(id, onChange); onChange && onChange(); } });
+      };
+      m.body.querySelector('[data-act=wish-add]').onclick = async () => {
+        const поле = m.body.querySelector('#wish-text');
+        if (!поле.value.trim()) { поле.focus(); return; }
+        try {
+          await api.post(`/api/customers/${c.id}/wishes`, { text: поле.value.trim() });
+          ui.toast('Записано');
+          заново();
+        } catch (e) { ui.toastErr(e); }
+      };
+      m.body.querySelectorAll('[data-wish-del]').forEach(b => b.addEventListener('click', async () => {
+        try { await api.del(`/api/customers/${c.id}/wishes/${b.dataset.wishDel}`); заново(); }
+        catch (e) { ui.toastErr(e); }
+      }));
       m.foot.querySelector('[data-act=sale]').onclick = () => { m.close(); Pages.sales.newSale(null, c); };
       /*
        * Клиентка пришла за отложенным — все её изделия сразу в чеке, и она
@@ -121,9 +174,17 @@ window.Pages.customers = (() => {
     m.foot.querySelector('[data-act=save]').onclick = async () => {
       if (!form.reportValidity()) return;
       const v = ui.formValues(form);
+      const сохранить = данные => isNew ? api.post('/api/customers', данные) : api.put('/api/customers/' + c.id, данные);
       try {
-        if (isNew) await api.post('/api/customers', v);
-        else await api.put('/api/customers/' + c.id, v);
+        try {
+          await сохранить(v);
+        } catch (e) {
+          if (e.status !== 409 || !e.data || !e.data.existing) throw e;
+          const выбор = await ui.выборПриДубле(e.data.existing, { взять: 'Открыть его карточку' });
+          if (!выбор) return;
+          if (выбор === 'existing') { m.close(); openDetail(e.data.existing.id, onChange); return; }
+          await сохранить({ ...v, allow_duplicate: true });
+        }
         ui.toast(isNew ? 'Клиент добавлен' : 'Сохранено');
         m.close(); onChange && onChange();
       } catch (e) { ui.toastErr(e); }

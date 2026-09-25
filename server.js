@@ -584,7 +584,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (e instanceof ApiError) {
-      sendJson(res, e.status, { error: e.message });
+      sendJson(res, e.status, { ...(e.extra || {}), error: e.message });
     } else {
       console.error(`[${new Date().toISOString()}]`, req.method, pathname, e);
       sendJson(res, 500, { error: 'Внутренняя ошибка сервера' });

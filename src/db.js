@@ -268,6 +268,29 @@ CREATE TABLE IF NOT EXISTS customers (
 );
 CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
 
+-- Чего хочет клиент: «серьги с сапфиром до 60 000», «кольцо к годовщине, 17-й».
+-- Спросили и забыли — значит, продали кому-то другому.
+CREATE TABLE IF NOT EXISTS customer_wishes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  text TEXT NOT NULL,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_wishes_customer ON customer_wishes(customer_id);
+
+-- Кому уже написали по поводу — чтобы «спасибо за покупку» не ушло дважды
+-- от двух продавцов. ref — к чему повод: номер чека или дата праздника.
+CREATE TABLE IF NOT EXISTS customer_contacts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  ref TEXT NOT NULL DEFAULT '',
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_contacts_customer ON customer_contacts(customer_id, kind, ref);
+
 CREATE TABLE IF NOT EXISTS sales (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   number TEXT NOT NULL UNIQUE,      -- номер чека, например "П-000123"

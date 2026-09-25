@@ -278,6 +278,31 @@ window.ui = (() => {
     });
   }
 
+  /*
+   * Номер уже есть у другого клиента. Не молчаливый отказ, а выбор: чаще
+   * всего это тот же человек, записанный раньше, — тогда его и выбираем,
+   * и история покупок, скидка и долг остаются в одной карточке. Но бывает
+   * общий номер семьи — тогда «всё равно завести».
+   * Возвращает 'existing', 'new' или null (передумали).
+   */
+  function выборПриДубле(существующий, { взять = 'Выбрать этого клиента' } = {}) {
+    return new Promise(resolve => {
+      let ответ = null;
+      const m = modal({
+        title: 'Такой номер уже есть',
+        size: 'sm',
+        body: `<p style="margin:4px 0 8px">Номер <b>${esc(существующий.phone)}</b> уже записан
+          у клиента <b>${esc(существующий.name)}</b>. Скорее всего, это он и есть.</p>`,
+        footer: `
+          <button class="btn" data-act="new">Всё равно завести нового</button>
+          <button class="btn btn-primary" data-act="existing">${esc(взять)}</button>`,
+        onClose: () => resolve(ответ),
+      });
+      m.foot.querySelector('[data-act=new]').onclick = () => { ответ = 'new'; m.close(); };
+      m.foot.querySelector('[data-act=existing]').onclick = () => { ответ = 'existing'; m.close(); };
+    });
+  }
+
   // ---------- Тосты ----------
   function toast(msg, isError) {
     const el = document.createElement('div');
@@ -469,7 +494,7 @@ window.ui = (() => {
   return { esc, icon, money, moneyRich, num, dt, dateOnly, monthName, badge, L, modal, confirmDialog, toast, toastErr,
     table, bindRows, formValues, debounce, currentTheme, applyTheme, toggleTheme, lightbox,
     barcodeSvg, photoUrl, highlight, whatsappLink, normalizePhone, sourcePicker, bindSourcePicker,
-    естьВведённое, locale: loc };
+    естьВведённое, выборПриДубле, locale: loc };
 })();
 
 // Тему применяем сразу при загрузке, до первого кадра — чтобы не мигало белым.

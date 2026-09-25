@@ -664,12 +664,27 @@ window.Pages.products = (() => {
     m.foot.querySelector('[data-act=ok]').onclick = async () => {
       if (!form.reportValidity()) return;
       const v = ui.formValues(form);
+      const данные = { name: v.name.trim(), phone: v.phone.trim(), source: v.source };
       try {
-        const { id } = await api.post('/api/customers',
-          { name: v.name.trim(), phone: v.phone.trim(), source: v.source });
+        let id;
+        try {
+          ({ id } = await api.post('/api/customers', данные));
+        } catch (e) {
+          if (e.status !== 409 || !e.data || !e.data.existing) throw e;
+          const выбор = await ui.выборПриДубле(e.data.existing);
+          if (!выбор) return;
+          if (выбор === 'existing') {
+            // Тот же человек — берём его карточку со скидкой, а не заводим вторую.
+            const c = await api.get('/api/customers/' + e.data.existing.id);
+            m.close();
+            onDone({ id: c.id, name: c.name, phone: c.phone, discount: c.discount });
+            return;
+          }
+          ({ id } = await api.post('/api/customers', { ...данные, allow_duplicate: true }));
+        }
         ui.toast('Клиент заведён');
         m.close();
-        onDone({ id, name: v.name.trim(), phone: v.phone.trim(), discount: 0 });
+        onDone({ id, name: данные.name, phone: данные.phone, discount: 0 });
       } catch (e) { ui.toastErr(e); }
     };
   }
