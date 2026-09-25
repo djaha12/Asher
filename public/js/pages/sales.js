@@ -700,6 +700,20 @@ window.Pages.sales = (() => {
     function addProduct(p) {
       if (state.items.some(it => it.product.id === p.id)) { ui.toast('Это изделие уже в чеке', true); return; }
       if (p.status !== 'in_stock' && p.status !== 'reserved') { ui.toast('Изделие недоступно для продажи', true); return; }
+      /*
+       * Отложенное изделие продаётся только тому, за кем отложено. Раньше
+       * касса молча пускала его в чек, а при оплате сервер отвечал «в резерве
+       * за другим клиентом» — хотя клиента никто и не выбирал. Теперь клиент
+       * подставляется сам, откуда бы изделие ни пришло: из карточки, поиска
+       * или с камеры. Если в чеке уже другой клиент — говорим сразу.
+       */
+      if (p.status === 'reserved' && p.reserved_for) {
+        if (state.customer && state.customer.id !== p.reserved_for) {
+          ui.toast(`«${p.name}» отложено за ${p.reserved_for_name || 'другим клиентом'} — продать можно только ему`, true);
+          return;
+        }
+        if (!state.customer) подставитьКлиентаРезерва(p.reserved_for);
+      }
       state.items.push({ product: p, discount: 0 });
       if (Number(discPctInput.value)) applyPctDiscount(); else renderItems();
     }
@@ -757,6 +771,18 @@ window.Pages.sales = (() => {
     // Выбор клиента
     const custInput = m.body.querySelector('#pos-customer');
     const custInfo = m.body.querySelector('#pos-cust-info');
+    // Клиент отложенного изделия — с личной скидкой и телефоном, как при
+    // обычном выборе из поиска. Пока ответ идёт, человек мог выбрать кого-то
+    // сам — тогда его выбор не трогаем.
+    async function подставитьКлиентаРезерва(id) {
+      try {
+        const c = await api.get('/api/customers/' + id);
+        if (state.customer) return;
+        setCustomer({ id: c.id, name: c.name, phone: c.phone, discount: c.discount });
+        ui.toast(`Изделие отложено за ${c.name} — клиент подставлен`);
+      } catch { /* не вышло — сервер всё равно не даст продать чужой резерв */ }
+    }
+
     function setCustomer(c) {
       state.customer = c;
       if (c) {
@@ -808,7 +834,11 @@ window.Pages.sales = (() => {
     };
 
     renderItems();
-    if (initialProduct) addProduct(initialProduct);
+    // Клиент — раньше изделий: отложенное за ним изделие тогда сразу ложится
+    // в чек, а его личная скидка применяется ко всему, что добавится.
+    if (initialCustomer) setCustomer(initialCustomer);
+    // Одно изделие или несколько — «Продать отложенное» из карточки клиента.
+    for (const p of [].concat(initialProduct || [])) addProduct(p);
     /*
      * Комплект приходит в кассу уже разложенным: сервер посчитал, какая часть
      * скидки приходится на каждое изделие, чтобы сумма чека совпала с ценой
@@ -827,7 +857,6 @@ window.Pages.sales = (() => {
       renderItems();
       ui.toast(`Комплект «${initialSet.name}» добавлен в чек`);
     }
-    if (initialCustomer) setCustomer(initialCustomer);
     setTimeout(() => searchInput.focus(), 60);
   }
 

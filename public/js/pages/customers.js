@@ -49,7 +49,9 @@ window.Pages.customers = (() => {
           </div>
           ${c.preferences ? `<p><b>Предпочтения:</b> ${ui.esc(c.preferences)}</p>` : ''}
           ${c.notes ? `<p class="muted">${ui.esc(c.notes)}</p>` : ''}
-          ${c.reserved.length ? `<h4 style="margin:14px 0 8px">В резерве</h4>
+          ${c.reserved.length ? `<div class="row" style="justify-content:space-between;align-items:center;margin:14px 0 8px">
+              <h4 style="margin:0">В резерве</h4>
+              <button class="btn btn-sm btn-primary" data-act="sell-reserved">Продать отложенное</button></div>
             ${c.reserved.map(p => `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line)">
               <span>${ui.esc(p.name)} <span class="dim">${ui.esc(p.sku)}</span></span><b>${ui.money(p.retail_price)}</b></div>`).join('')}` : ''}
           ${c.items.length ? `<h4 style="margin:16px 0 8px">Купленные изделия</h4>
@@ -71,6 +73,19 @@ window.Pages.customers = (() => {
       });
       m.foot.querySelector('[data-act=edit]').onclick = () => { m.close(); openEditor(c, onChange); };
       m.foot.querySelector('[data-act=sale]').onclick = () => { m.close(); Pages.sales.newSale(null, c); };
+      /*
+       * Клиентка пришла за отложенным — все её изделия сразу в чеке, и она
+       * уже выбрана. Раньше это были поиск каждого изделия в кассе и ошибка
+       * «в резерве за другим клиентом», если клиента не выбрали первым.
+       */
+      const продатьОтложенное = m.body.querySelector('[data-act=sell-reserved]');
+      if (продатьОтложенное) продатьОтложенное.onclick = async () => {
+        try {
+          const изделия = await Promise.all(c.reserved.map(r => api.get('/api/products/' + r.id)));
+          m.close();
+          Pages.sales.newSale(изделия, { id: c.id, name: c.name, phone: c.phone, discount: c.discount });
+        } catch (e) { ui.toastErr(e); }
+      };
     }).catch(ui.toastErr);
   }
 
