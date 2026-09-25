@@ -47,7 +47,7 @@ function активныхОснователей() {
 }
 
 const SETTING_KEYS = ['store_name', 'site_note', 'store_address', 'store_phone', 'usd_rate',
-  'gram_price', 'work_price', 'max_discount_percent', ...LOCALE_KEYS];
+  'gram_price', 'work_price', 'max_discount_percent', 'scrap_price_585', ...LOCALE_KEYS];
 
 /*
  * Состояние резервных копий — то, что владелец должен узнать САМ, не заходя
@@ -138,6 +138,19 @@ const routes = [
         }
         body.max_discount_percent = Math.round(п * 10) / 10;
       }
+      /*
+       * Цена грамма лома 585-й пробы. Пустое поле — «лом не принимаем»:
+       * касса тогда откажет в зачёте, а не оценит золото в ноль.
+       */
+      if (body.scrap_price_585 !== undefined) {
+        const сырое = String(body.scrap_price_585).trim().replace(',', '.');
+        const ц = Number(сырое);
+        if (сырое !== '' && (!Number.isFinite(ц) || ц < 0 || ц > 1e6)) {
+          throw new ApiError(400, 'Цена грамма лома — число сом за грамм 585-й пробы');
+        }
+        body.scrap_price_585 = сырое === '' ? '' : Math.round(ц * 100) / 100;
+      }
+      const ломБыл = getSetting('scrap_price_585');
       // Курс влияет на себестоимость всего, что закупят дальше, — его смена
       // должна оставлять в журнале конкретные цифры, а не общую фразу.
       const rateBefore = getSetting('usd_rate');
@@ -149,11 +162,14 @@ const routes = [
       const пределСтал = getSetting('max_discount_percent');
       // Поднятый потолок скидок — то, о чём владелец должен вспомнить сам
       // через полгода, глядя в журнал: цифры, а не «изменены настройки».
+      const ломСтал = getSetting('scrap_price_585');
       const что = rateAfter !== rateBefore
         ? `Курс доллара: ${rateBefore || '—'} → ${rateAfter}`
         : (пределСтал !== пределБыл
           ? `Предел скидки продавца: ${пределБыл || '—'}% → ${пределСтал}%`
-          : 'Изменены настройки магазина');
+          : ломСтал !== ломБыл
+            ? `Цена грамма лома 585: ${ломБыл || '—'} → ${ломСтал || '—'}`
+            : 'Изменены настройки магазина');
       audit(session.userId, 'update', 'settings', null, что);
       return { ok: true };
     },

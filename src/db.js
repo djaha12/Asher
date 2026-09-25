@@ -183,6 +183,24 @@ CREATE TABLE IF NOT EXISTS discount_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_discount_requests_status ON discount_requests(status);
 
+-- Старое золото в зачёт покупки — акт приёма лома. Клиент приносит своё
+-- золото, его взвешивают, по пробе и цене грамма оценивают, и эта сумма
+-- идёт в оплату нового изделия. Живых денег в ящик не приходит — это зачёт,
+-- как при обмене. items — JSON [{description, fineness, weight, price, amount}].
+CREATE TABLE IF NOT EXISTS scrap_intakes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  number TEXT NOT NULL UNIQUE,          -- "Л-000012"
+  customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  sale_id INTEGER REFERENCES sales(id) ON DELETE SET NULL,
+  items TEXT NOT NULL,
+  weight REAL NOT NULL,                 -- граммы, как на весах
+  pure_weight REAL NOT NULL,            -- граммы чистого золота: вес × проба / 1000
+  amount REAL NOT NULL,                 -- оценка, в зачёт
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_scrap_sale ON scrap_intakes(sale_id);
+
 /*
  * Постоянные расходы: аренда, зарплата, коммунальные, охрана.
  *

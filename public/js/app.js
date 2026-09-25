@@ -16,6 +16,7 @@ window.App = (() => {
     { key: 'sets', title: 'Комплекты', ico: 'gift' },
     { key: 'inventory', title: 'Инвентаризация', ico: 'clipboard' },
     { key: 'labels', title: 'Ценники и бирки', ico: 'tag' },
+    { key: 'scrap', title: 'Старое золото', ico: 'exchange' },
     { section: 'Управление', admin: true },
     { key: 'finance', title: 'Финансы', ico: 'wallet', admin: true },
     { key: 'analytics', title: 'Аналитика', ico: 'chart', admin: true },

@@ -72,7 +72,9 @@ function saleDetail(id, role = 'owner') {
     delete s.cost_total;
     for (const it of items) delete it.cost;
   }
-  return { ...s, items, payments, effective_total: effective, debt };
+  // Старое золото, принятое в зачёт этого чека, — для акта и для карточки чека.
+  const scrap = require('./scrap').актПоЧеку(id);
+  return { ...s, items, payments, effective_total: effective, debt, scrap };
 }
 
 /*
@@ -234,7 +236,7 @@ function createSaleTx(body, session, opts = {}) {
     );
     const подпись = opts.paymentNote || (debt > 0 ? 'Первый взнос' : 'Оплата чека');
     if (зачёт > 0) {
-      вставить.run(customerId, saleId, зачёт, способ,
+      вставить.run(customerId, saleId, зачёт, opts.зачётСпособ || способ,
         opts.зачётПодпись || 'Зачёт по обмену', 0, session.userId, createdAt);
     }
     if (живыми > 0 || зачёт === 0) {
@@ -379,8 +381,53 @@ const routes = [
   {
     method: 'POST', path: '/api/sales',
     handler: ({ body, session }) => transaction(() => {
-      const { saleId } = createSaleTx(body, session);
-      return saleDetail(saleId, session.role);
+      const лом = require('./scrap');
+      const оценка = лом.оценить(body.scrap, session);
+      if (!оценка) {
+        const { saleId } = createSaleTx(body, session);
+        return saleDetail(saleId, session.role);
+      }
+      /*
+       * Старое золото в зачёт покупки. Оценивает сервер; зачёт не больше
+       * покупки, и это не деньги: в ящик он не ложится, как зачёт при обмене.
+       * Клиент обязателен — его имя стоит в акте приёма.
+       */
+      if (!body.customer_id) throw new ApiError(400, 'Для приёма старого золота выберите клиента — его имя будет в акте');
+      let итог = 0;
+      for (const it of Array.isArray(body.items) ? body.items : []) {
+        const p = db.prepare('SELECT retail_price FROM products WHERE id = ?').get(Number(it.product_id));
+        if (!p) throw new ApiError(400, `Изделие #${it.product_id} не найдено`);
+        итог = round2(итог + round2(p.retail_price) - round2(it.discount || 0));
+      }
+      if (оценка.сумма > итог + 0.009) {
+        throw new ApiError(400, `Старое золото оценено в ${money(оценка.сумма)} — это больше покупки ` +
+          `(${money(итог)}). Разницу деньгами система не выдаёт: добавьте изделие или примите меньше`);
+      }
+      // «Вносит сейчас» — это живые деньги; зачёт золотом добавляется к ним.
+      const живыми = body.paid === undefined || body.paid === null || body.paid === ''
+        ? round2(итог - оценка.сумма) : round2(body.paid);
+      if (живыми < 0) throw new ApiError(400, 'Оплаченная сумма не может быть отрицательной');
+      const номер = лом.nextNumber('Л', 'scrap_intakes');
+      const created = createSaleTx({ ...body, paid: round2(живыми + оценка.сумма) }, session, {
+        зачёт: оценка.сумма,
+        зачётПодпись: `Зачёт старого золота по акту ${номер}`,
+        // Зачёт золотом — не карта и не перевод, в какой бы способ ни шла доплата.
+        зачётСпособ: 'cash',
+      });
+      лом.записатьАкт(номер, оценка, {
+        customerId: Number(body.customer_id), saleId: created.saleId, saleNumber: created.number, session,
+      });
+      /*
+       * В «Операциях» приход по чеку записан на всю оплату, а живыми пришла
+       * только доплата. Зачтённое золото — покупка металла: расход, который
+       * в отчёт о прибыли не идёт (это запас, а не траты), а в ящик не лез.
+       */
+      db.prepare(
+        `INSERT INTO finance_ops (type, category, amount, note, sale_id, cash, user_id, created_at)
+         VALUES ('expense', 'Покупка лома', ?, ?, ?, 0, ?, ?)`
+      ).run(оценка.сумма, `Старое золото по акту ${номер} в зачёт чека ${created.number}`,
+        created.saleId, session.userId, nowIso());
+      return saleDetail(created.saleId, session.role);
     }),
   },
   {

@@ -66,6 +66,57 @@ window.Pages.sales = (() => {
     window.print();
   }
 
+  /*
+   * Акт приёма старого золота — два экземпляра на листе, клиенту и магазину,
+   * с весом каждой вещи, пробой, ценой грамма и подписями. Без него через
+   * месяц не доказать ни клиенту, ни себе, сколько золота приняли и почём.
+   */
+  function печатьАкта(а) {
+    const root = document.getElementById('print-root');
+    const г = w => ui.num(w, 3) + ' г';
+    const экземпляр = кому => `<div class="receipt">
+      <h2>${ui.esc(App.storeName)}</h2>
+      <div class="r-center"><b>Акт приёма № ${ui.esc(а.number)}</b></div>
+      <div class="r-center">старого золота в зачёт покупки</div>
+      <div class="r-center">${ui.dt(а.created_at)}</div>
+      <div class="r-line"></div>
+      <div class="r-kv"><b>Клиент:</b> ${ui.esc(а.customer_name || '—')}${а.customer_phone ? ', ' + ui.esc(а.customer_phone) : ''}</div>
+      <div class="r-line"></div>
+      ${а.items.map(r => `<div class="r-kv">${ui.esc(r.description || 'Лом')}, проба ${r.fineness}</div>
+        <div class="r-row"><span>${г(r.weight)} × ${ui.money(r.price)}</span><span>${ui.money(r.amount)}</span></div>`).join('')}
+      <div class="r-line"></div>
+      <div class="r-row"><span>Вес всего</span><span>${г(а.weight)}</span></div>
+      <div class="r-row"><span>Чистого золота</span><span>${г(а.pure_weight)}</span></div>
+      <div class="r-row"><b>В зачёт</b><b>${ui.money(а.amount)}</b></div>
+      ${а.sale_number ? `<div class="r-kv">в оплату покупки по чеку ${ui.esc(а.sale_number)}</div>` : ''}
+      <div class="r-line"></div>
+      <div class="r-small">Вес и проба определены при клиенте, с оценкой клиент согласен.
+        Изделия переданы магазину в зачёт покупки.</div>
+      <div class="r-sign">Сдал (клиент): ________________</div>
+      <div class="r-sign">Принял: ${ui.esc(а.user_name || '')} ____________</div>
+      <div class="r-center r-small">${кому}</div>
+    </div>`;
+    root.innerHTML = экземпляр('Экземпляр клиента') +
+      '<div class="r-cut">✂ - - - - - - - - - - - - - - - - - -</div>' + экземпляр('Экземпляр магазина');
+    window.print();
+  }
+
+  // После продажи с зачётом: и чек, и акт — отдельными кнопками.
+  function печатьПослеЗачёта(sale) {
+    const m = ui.modal({
+      title: `Продажа ${sale.number} оформлена`,
+      size: 'sm',
+      body: `<p style="margin:4px 0">Старое золото принято по акту <b>${ui.esc(sale.scrap.number)}</b>
+        на ${ui.money(sale.scrap.amount)}. Дайте клиенту чек и акт: на экземпляре магазина клиент расписывается.</p>`,
+      footer: `<button class="btn" data-act="done">Готово</button>
+        <button class="btn" data-act="receipt">${ui.icon('print')} Чек</button>
+        <button class="btn btn-primary" data-act="act">${ui.icon('print')} Акт приёма</button>`,
+    });
+    m.foot.querySelector('[data-act=done]').onclick = m.close;
+    m.foot.querySelector('[data-act=receipt]').onclick = () => printReceipt(sale);
+    m.foot.querySelector('[data-act=act]').onclick = () => печатьАкта(sale.scrap);
+  }
+
   const r2 = x => Math.round((Number(x) || 0) * 100) / 100;
 
   /*
@@ -412,8 +463,12 @@ window.Pages.sales = (() => {
               <td class="num">${s.discount_total ? '−' + ui.money(s.discount_total) : '—'}</td>
               <td class="num">${ui.money(s.total)}</td><td></td></tr></tfoot>
           </table></div>
+          ${s.scrap ? `<div class="hint-box" style="margin-top:12px">Старое золото в зачёт по акту
+            <b>${ui.esc(s.scrap.number)}</b>: ${s.scrap.items.map(r => `${ui.esc(r.description || 'лом')}
+            ${r.fineness}, ${ui.num(r.weight, 3)} г`).join('; ')} — <b>${ui.money(s.scrap.amount)}</b></div>` : ''}
           ${s.note ? `<p class="muted">Комментарий: ${ui.esc(s.note)}</p>` : ''}`,
         footer: `
+          ${s.scrap ? `<button class="btn" data-act="scrap-act">${ui.icon('print')} Акт приёма золота</button>` : ''}
           ${canReturn ? '<button class="btn btn-danger left" data-act="return" disabled>Оформить возврат</button>' : ''}
           ${canReturn ? `<button class="btn left" data-act="exchange" disabled>${ui.icon('exchange')} Обмен</button>` : ''}
           ${s.debt > 0 ? `<button class="btn btn-primary" data-act="pay">${ui.icon('money')} Принять оплату</button>` : ''}
@@ -422,6 +477,8 @@ window.Pages.sales = (() => {
           <button class="btn" data-act="print">${ui.icon('print')} Печать чека</button>
           <button class="btn" data-act="close">Закрыть</button>`,
       });
+      const актЛома = m.foot.querySelector('[data-act=scrap-act]');
+      if (актЛома) актЛома.onclick = () => печатьАкта(s.scrap);
       const паспорта = m.foot.querySelector('[data-act=passports]');
       if (паспорта) паспорта.onclick = () => Passport.изЧека(s).catch(ui.toastErr);
       const payBtn = m.foot.querySelector('[data-act=pay]');
@@ -488,11 +545,16 @@ window.Pages.sales = (() => {
 
   // ---------- Новая продажа (POS) ----------
   async function newSale(initialProduct, initialCustomer, initialSet) {
-    const ПРЕДЕЛ = App.isAdmin() ? 100 : await пределИзНастроек();
+    const [ПРЕДЕЛ, ЛОМ] = await Promise.all([
+      App.isAdmin() ? 100 : пределИзНастроек(),
+      // Цены грамма старого золота по пробам — оценку продавец видит сразу.
+      api.get('/api/scrap/prices').catch(() => ({ price_585: 0, prices: {} })),
+    ]);
     const state = {
       items: [],          // {product, discount}
       customer: null,
       payment: 'cash',
+      лом: [],            // старое золото в зачёт: {description, fineness, weight, price}
     };
 
     /*
@@ -539,6 +601,10 @@ window.Pages.sales = (() => {
         </div>
         <div id="pos-camera" class="hidden" style="margin-bottom:14px"></div>
         <div class="pos-items" id="pos-items"></div>
+        <div class="row" style="gap:8px;align-items:flex-start;flex-wrap:wrap;margin:-4px 0 12px">
+          <button type="button" class="btn btn-sm" id="pos-scrap-add">${ui.icon('exchange')} Старое золото в зачёт</button>
+          <div id="pos-scrap" class="grow" style="min-width:200px"></div>
+        </div>
         <div class="form-grid">
           <div>
             <label class="field"><span>Клиент</span>
@@ -592,7 +658,20 @@ window.Pages.sales = (() => {
         discount += it.discount;
       }
       const total = Math.round(Math.max(0, subtotal - discount) * 100) / 100;
-      return { subtotal, discount, total };
+      // Старое золото в зачёт: оценка — вес × цена грамма, как посчитает сервер.
+      const лом = state.лом.reduce((s2, r) => s2 + Math.round(r.weight * r.price), 0);
+      return { subtotal, discount, total, лом, зачёт: Math.min(лом, total) };
+    }
+
+    const граммы = w => ui.num(w, 3) + ' г';
+    function показатьЛом() {
+      const box = m.body.querySelector('#pos-scrap');
+      box.innerHTML = state.лом.map((r, i) => `
+        <div class="row" style="justify-content:space-between;gap:8px;padding:4px 0;font-size:13.5px">
+          <span>${ui.esc(r.description || 'Лом')} · ${r.fineness} · ${граммы(r.weight)} × ${ui.money(r.price)}
+            = <b>${ui.money(Math.round(r.weight * r.price))}</b></span>
+          <button type="button" class="btn btn-sm btn-danger" data-scrap-del="${i}" title="Убрать">×</button>
+        </div>`).join('');
     }
 
     function renderItems() {
@@ -636,29 +715,38 @@ window.Pages.sales = (() => {
              <button type="button" class="btn btn-sm" data-act="ask-owner" style="margin-top:4px">Попросить владельца</button>`;
       }
       discPctInput.max = App.isAdmin() ? 100 : пределЧека();
-      const { subtotal, discount, total } = calc();
+      const { subtotal, discount, total, лом, зачёт } = calc();
       // Долг: сколько остаётся за клиентом после того, что он платит сейчас.
+      // Зачёт старым золотом — тоже оплата; «вносит сейчас» — живые деньги.
+      const деньгами = Math.round((total - зачёт) * 100) / 100;
       const partial = partialCb.checked;
-      paidInput.max = total;
-      const paid = partial ? Math.min(Math.max(Number(paidInput.value) || 0, 0), total) : total;
-      const debt = Math.round((total - paid) * 100) / 100;
+      paidInput.max = деньгами;
+      const paid = partial ? Math.min(Math.max(Number(paidInput.value) || 0, 0), деньгами) : деньгами;
+      const debt = Math.round((деньгами - paid) * 100) / 100;
+      const ломДороже = лом > total + 0.009;
 
       summaryEl.innerHTML = `
         <div class="pos-total"><span>Сумма</span><span class="money">${ui.money(subtotal)}</span></div>
         ${discount ? `<div class="pos-total"><span>Скидка</span><span class="money">−${ui.money(discount)}</span></div>` : ''}
-        <div class="pos-total grand"><span>К оплате</span><span class="money">${ui.money(total)}</span></div>
+        ${лом ? `<div class="pos-total"><span>Старое золото в зачёт</span><span class="money">−${ui.money(зачёт)}</span></div>` : ''}
+        <div class="pos-total grand"><span>${лом ? 'К доплате' : 'К оплате'}</span><span class="money">${ui.money(деньгами)}</span></div>
+        ${ломДороже ? `<div class="hint-box" style="background:var(--crit-soft);border-color:var(--crit)">Золото оценено в
+          ${ui.money(лом)} — это больше покупки на ${ui.money(лом - total)}. Разницу деньгами система не выдаёт:
+          добавьте изделие или примите меньше.</div>` : ''}
         ${debt > 0 ? `
           <div class="pos-total"><span>Вносит сейчас</span><span class="money good">${ui.money(paid)}</span></div>
           <div class="pos-total"><span><b>Останется долг</b></span>
             <span class="money crit" style="font-weight:700">${ui.money(debt)}</span></div>` : ''}`;
 
       // Долг всегда числится за конкретным человеком — иначе спросить будет не с кого.
-      const needCustomer = debt > 0 && !state.customer;
-      submitBtn.disabled = !state.items.length || needCustomer;
+      // Старое золото — тоже: имя клиента стоит в акте приёма.
+      const needCustomer = (debt > 0 || state.лом.length > 0) && !state.customer;
+      submitBtn.disabled = !state.items.length || needCustomer || ломДороже;
       submitBtn.textContent = debt > 0 ? 'Оформить с долгом' : 'Оформить продажу';
       if (needCustomer) {
-        m.body.querySelector('#pos-cust-info').innerHTML =
-          '<span class="crit">Для продажи в долг выберите клиента</span>';
+        m.body.querySelector('#pos-cust-info').innerHTML = state.лом.length && !(debt > 0)
+          ? '<span class="crit">Для приёма старого золота выберите клиента — его имя будет в акте</span>'
+          : '<span class="crit">Для продажи в долг выберите клиента</span>';
       }
       state.paid = paid;
     }
@@ -823,6 +911,79 @@ window.Pages.sales = (() => {
     Pages.products.attachCustomerSearch(custInput, setCustomer);
 
     /*
+     * ---------- Старое золото в зачёт ----------
+     *
+     * Взвесили, выбрали пробу — касса сразу показывает оценку: вес × цена
+     * грамма этой пробы из Настроек. Продавец цену не меняет; владелец может
+     * (например, за сплав с припоем). Сумма идёт в зачёт покупки.
+     */
+    function добавитьЛом() {
+      if (!ЛОМ.price_585) { ui.toast('Цена грамма лома не задана — её задаёт владелец в Настройках', true); return; }
+      const пробы = Object.keys(ЛОМ.prices).map(Number).sort((a, b) => a - b);
+      const d = ui.modal({
+        title: 'Старое золото в зачёт',
+        size: 'sm',
+        body: `<form id="scrap-form">
+          <label class="field"><span>Что принесли</span>
+            <input name="description" maxlength="100" placeholder="Например: кольцо, серьги"></label>
+          <div class="form-grid">
+            <label class="field"><span>Проба</span>
+              <select name="fineness">${пробы.map(п => `<option value="${п}" ${п === 585 ? 'selected' : ''}>${п}</option>`).join('')}</select></label>
+            <label class="field"><span>Вес без камней, г</span>
+              <input name="weight" inputmode="decimal" autocomplete="off" placeholder="Например: 4,52" required></label>
+          </div>
+          ${App.isAdmin() ? `<label class="field"><span>Цена грамма, сом</span>
+            <input name="price" inputmode="decimal" autocomplete="off"></label>` : ''}
+          <div class="hint-box" id="scrap-sum" style="margin:0"></div>
+        </form>`,
+        footer: `<button class="btn" data-act="cancel">Отмена</button>
+          <button class="btn btn-primary" data-act="ok">Добавить в зачёт</button>`,
+      });
+      const f = d.body.querySelector('#scrap-form');
+      const поле = n => f.querySelector(`[name=${n}]`);
+      const число = v => Number(String(v || '').trim().replace(',', '.'));
+      const цена = () => {
+        const своя = поле('price') ? число(поле('price').value) : 0;
+        return своя > 0 ? своя : ЛОМ.prices[поле('fineness').value];
+      };
+      const пересчитать = () => {
+        if (поле('price')) поле('price').placeholder = String(ЛОМ.prices[поле('fineness').value]);
+        const вес = число(поле('weight').value);
+        d.body.querySelector('#scrap-sum').innerHTML = вес > 0
+          ? `${граммы(вес)} × ${ui.money(цена())} = <b>${ui.money(Math.round(вес * цена()))}</b>`
+          : `Цена грамма ${поле('fineness').value}-й пробы: <b>${ui.money(цена())}</b>`;
+      };
+      f.addEventListener('input', пересчитать);
+      f.addEventListener('change', пересчитать);
+      пересчитать();
+      setTimeout(() => поле('weight').focus(), 60);
+      d.foot.querySelector('[data-act=cancel]').onclick = d.close;
+      d.foot.querySelector('[data-act=ok]').onclick = () => {
+        const вес = Math.round(число(поле('weight').value) * 1000) / 1000;
+        if (!(вес > 0) || вес > 1000) { ui.toast('Введите вес в граммах, например 4,52', true); поле('weight').focus(); return; }
+        const своя = поле('price') ? число(поле('price').value) : 0;
+        state.лом.push({
+          description: поле('description').value.trim(),
+          fineness: Number(поле('fineness').value),
+          weight: вес,
+          price: цена(),
+          своя: своя > 0,
+        });
+        d.close();
+        показатьЛом();
+        renderItems();
+      };
+    }
+    m.body.querySelector('#pos-scrap-add').onclick = добавитьЛом;
+    m.body.querySelector('#pos-scrap').addEventListener('click', e => {
+      const b = e.target.closest('[data-scrap-del]');
+      if (!b) return;
+      state.лом.splice(Number(b.dataset.scrapDel), 1);
+      показатьЛом();
+      renderItems();
+    });
+
+    /*
      * ---------- Скидка по разрешению владельца ----------
      *
      * Продавец просит прямо отсюда: какие изделия и какую скидку. Владелец
@@ -939,6 +1100,10 @@ window.Pages.sales = (() => {
         payment_method: m.body.querySelector('#pos-payment').value,
         note: m.body.querySelector('#pos-note').value.trim(),
         ...(state.разрешение ? { discount_request_id: state.разрешение.id } : {}),
+        // Цену грамма сервер считает сам; свою передаём, только если её поставил владелец.
+        ...(state.лом.length ? { scrap: state.лом.map(r => ({
+          description: r.description, fineness: r.fineness, weight: r.weight, ...(r.своя ? { price: r.price } : {}),
+        })) } : {}),
       };
       if (partialCb.checked) {
         payload.paid = state.paid;
@@ -955,8 +1120,12 @@ window.Pages.sales = (() => {
         if (location.hash.includes('dashboard') || location.hash === '' || location.hash === '#/') {
           window.dispatchEvent(new HashChangeEvent('hashchange'));
         }
-        const printOk = await ui.confirmDialog('Напечатать чек?', { okLabel: 'Печать' });
-        if (printOk) printReceipt(sale);
+        // Со старым золотом клиенту нужен ещё и акт приёма — с весом и подписями.
+        if (sale.scrap) печатьПослеЗачёта(sale);
+        else {
+          const printOk = await ui.confirmDialog('Напечатать чек?', { okLabel: 'Печать' });
+          if (printOk) printReceipt(sale);
+        }
       } catch (e) {
         ui.toastErr(e);
         submitBtn.disabled = false;
@@ -994,6 +1163,7 @@ window.Pages.sales = (() => {
     title: 'Продажи',
     newSale,
     openDetail,
+    печатьАкта,
     async render(el, param) {
       el.innerHTML = `
         <div class="toolbar">

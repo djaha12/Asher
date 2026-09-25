@@ -22,7 +22,7 @@ const check = (n, c, e) => c ? (ok++, console.log('  ok  ' + n))
   : (fail++, console.log('  FAIL ' + n, e === undefined ? '' : String(JSON.stringify(e)).slice(0, 300)));
 
 const СТРАНИЦЫ = ['dashboard', 'sales', 'products', 'customers', 'debts', 'orders', 'sets', 'inventory',
-  'labels', 'finance', 'analytics', 'import', 'team', 'settings'];
+  'labels', 'scrap', 'finance', 'analytics', 'import', 'team', 'settings'];
 
 // Что вылезло за правый край — кроме того, что лежит в своей прокрутке.
 const вылезло = () => {

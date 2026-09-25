@@ -62,6 +62,7 @@ function сводкаДня(дата, tz) {
                         AND created_at BETWEEN ? AND ?`, от, до),
     долгов_погашено: сумма(`SELECT SUM(p.amount) AS s FROM payments p JOIN sales x ON x.id = p.sale_id
                               WHERE p.amount > 0 AND p.created_at BETWEEN ? AND ? AND x.created_at < ?`, от, до, от),
+    старым_золотом: сумма(`SELECT SUM(amount) AS s FROM scrap_intakes WHERE created_at BETWEEN ? AND ?`, от, до),
   };
   const неОплачено = сумма(
     `SELECT SUM(d) AS s FROM (SELECT (SELECT COALESCE(SUM(si.final_price), 0) FROM sale_items si
