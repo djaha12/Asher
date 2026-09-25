@@ -325,10 +325,23 @@ function serveMedia(req, res, rel) {
 // ---------- Сервер ----------
 
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, 'http://localhost');
-  const pathname = decodeURIComponent(url.pathname);
-
+  let pathname = String(req.url || '');
   try {
+    /*
+     * Адрес разбираем внутри try. Раньше это стояло снаружи, и одна строка
+     * вида «/%FF» — без пароля, из любой точки интернета — роняла процесс
+     * целиком: касса вставала у всех, пока служба не поднимется, а если
+     * слать такие запросы подряд — сколько угодно. Кривой адрес — это отказ
+     * «неверный адрес», а не повод падать.
+     */
+    let url;
+    try {
+      url = new URL(req.url, 'http://localhost');
+      pathname = decodeURIComponent(url.pathname);
+    } catch {
+      throw new ApiError(400, 'Неверный адрес');
+    }
+
     if (pathname.startsWith('/media/')) {
       serveMedia(req, res, pathname.slice('/media/'.length));
       return;
@@ -560,6 +573,16 @@ const server = http.createServer(async (req, res) => {
     }
     sendJson(res, 200, result ?? { ok: true });
   } catch (e) {
+    /*
+     * Ответ уже начат — например, копия отдавалась потоком, а загрузку
+     * оборвали на середине. Второй ответ поверх первого не отправить, а сама
+     * попытка бросала ошибку прямо отсюда и роняла сервер. Просто закрываем
+     * это соединение: остальные работают дальше.
+     */
+    if (res.headersSent) {
+      res.destroy();
+      return;
+    }
     if (e instanceof ApiError) {
       sendJson(res, e.status, { error: e.message });
     } else {
@@ -567,6 +590,15 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 500, { error: 'Внутренняя ошибка сервера' });
     }
   }
+});
+
+/*
+ * Последняя страховка. Ошибка, которую не поймал ни один обработчик, — ошибка
+ * в программе, и её надо видеть в журнале. Но ронять из-за неё кассу у всех
+ * продавцов сразу — несоразмерно: пусть пишется в журнал, а магазин работает.
+ */
+process.on('unhandledRejection', e => {
+  console.error(`[${new Date().toISOString()}] Необработанная ошибка:`, e);
 });
 
 auth.cleanupSessions();
