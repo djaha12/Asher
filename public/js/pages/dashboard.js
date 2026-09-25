@@ -8,11 +8,14 @@ window.Pages = window.Pages || {};
 window.Pages.dashboard = {
   title: 'Главная',
   async render(el) {
-    const [d, bd] = await Promise.all([
+    const [d, bd, касса] = await Promise.all([
       api.get('/api/dashboard?tz=' + api.tz()),
       api.get('/api/customers/occasions?days=14&today=' + new Date(Date.now() + api.tz() * 60000).toISOString().slice(0, 10)),
+      // Сданная смена и сдачи денег владельцу — если не ответило, Главная всё равно открывается.
+      api.get('/api/cash/pending').catch(() => ({ смена: null, сдачи: [] })),
     ]);
     if (!el.isConnected) return;
+    Pages.dashboard._el = el;
     const admin = App.isAdmin();
     // «1 продажа», «3 продажи», «11 продаж».
     const продаж = n => (n % 100 >= 11 && n % 100 <= 14) ? 'продаж'
@@ -38,8 +41,40 @@ window.Pages.dashboard = {
         </div>
       </div>`).join('');
 
+    /*
+     * Касса — тоже первым делом. Смену сдают, пока оба продавца у ящика:
+     * через час расхождение уже не найти. А сданные владельцу деньги
+     * подтверждает тот, кому их отдали, — и чем раньше, тем лучше.
+     */
+    const смена = касса['смена'];
+    const сменаHtml = смена ? `
+      <div class="alert-row alert-warn alert-act" id="dash-shift">
+        <div class="alert-ico">→</div>
+        <div class="grow">
+          <div class="alert-what">Смену сдаёт ${ui.esc(смена['кто'])}: в ящике ${ui.money(смена['сдано'])}</div>
+          <div class="alert-why">Сдано ${ui.dt(смена['когда'])}. Пересчитайте деньги вместе и примите смену — пока вы оба здесь,
+            любое расхождение легко найти.</div>
+        </div>
+        <button class="btn btn-sm btn-primary" id="qa-accept">Принять смену</button>
+      </div>` : '';
+    const сдачиHtml = (касса['сдачи'] || []).map(с => `
+      <div class="alert-row alert-warn alert-act" data-move="${с.id}">
+        <div class="alert-ico">?</div>
+        <div class="grow">
+          <div class="alert-what">${ui.esc(с.user_name || '—')} сдаёт из кассы ${App.user && с.other_user_id === App.user.id
+            ? 'вам' : ui.esc(с.other_name || '')} ${ui.money(с.amount)}</div>
+          <div class="alert-why">${ui.dt(с.created_at)}${с.note ? ' · ' + ui.esc(с.note) : ''}. Подтвердите, что деньги у вас, —
+            или отметьте, что не получали.</div>
+        </div>
+        <div class="alert-actions">
+          <button class="btn btn-sm btn-primary" data-move-ok="${с.id}">Деньги у меня</button>
+          <button class="btn btn-sm" data-move-no="${с.id}">Не получено</button>
+        </div>
+      </div>`).join('');
+    const наверху = сменаHtml + сдачиHtml + тревоги;
+
     el.innerHTML = `
-      ${тревоги ? `<div class="alert-box">${тревоги}</div>` : ''}
+      ${наверху ? `<div class="alert-box">${наверху}</div>` : ''}
       <div class="grid grid-4">
         <div class="big-stat accent-good">
           <div class="bs-label">Продали сегодня</div>
@@ -236,8 +271,31 @@ window.Pages.dashboard = {
     on('qa-customer', () => { App.go('#/customers'); setTimeout(() => Pages.customers.openEditor(), 100); });
     on('qa-order', () => { App.go('#/orders'); setTimeout(() => Pages.orders.openEditor(), 100); });
     on('qa-cash', () => сверкаКассы());
+    on('qa-accept', () => сверкаКассы('accept'));
+    const отметить = async (b, действие) => {
+      try {
+        await api.post(`/api/cash/moves/${b.dataset[действие === 'confirm' ? 'moveOk' : 'moveNo']}/${действие}`, {});
+        ui.toast(действие === 'confirm' ? 'Отмечено: деньги у вас' : 'Отмечено: не получено');
+        b.closest('.alert-row').remove();
+      } catch (e) { ui.toastErr(e); }
+    };
+    el.querySelectorAll('[data-move-ok]').forEach(b => { b.onclick = () => отметить(b, 'confirm'); });
+    el.querySelectorAll('[data-move-no]').forEach(b => {
+      b.onclick = async () => {
+        if (!await ui.confirmDialog('Отметить, что этих денег вы не получали? Отметка останется в истории.',
+          { danger: true, okLabel: 'Не получено' })) return;
+        отметить(b, 'dispute');
+      };
+    });
   },
 };
+
+// После сверки, сдачи смены или денег — перерисовать Главную, если она открыта:
+// своё изменение это устройство само себе не присылает.
+function перерисоватьГлавную() {
+  const el = Pages.dashboard._el;
+  if (el && el.isConnected) Pages.dashboard.render(el).catch(() => {});
+}
 
 /*
  * Сверка кассы: вечером продавец пересчитывает ящик и вводит сумму.
@@ -247,10 +305,17 @@ window.Pages.dashboard = {
  * пересчитанное. Наоборот было бы нечестно — человек подгонял бы свою цифру
  * под ожидаемую, и сверка перестала бы что-либо значить.
  */
-async function сверкаКассы() {
+async function сверкаКассы(режим = 'count') {
   let о;
   try { о = await api.get('/api/cash/expected'); }
   catch (e) { ui.toastErr(e); return; }
+  const приём = режим === 'accept';
+  const сдано = о['смена'];
+  if (приём && (!сдано || (App.user && сдано.user_id === App.user.id))) {
+    ui.toast('Принимать нечего: смену уже приняли');
+    перерисоватьГлавную();
+    return;
+  }
 
   const дв = о['движение'];
   const строка = (подпись, сумма, знак) => `
@@ -260,33 +325,54 @@ async function сверкаКассы() {
     </div>`;
 
   const m = ui.modal({
-    title: 'Сверка кассы',
+    title: приём ? 'Принять смену' : 'Сверка кассы',
     size: 'sm',
     body: `
+      ${приём ? `<div class="hint-box" style="margin-bottom:12px">Смену сдаёт <b>${ui.esc(сдано['кто'])}</b>,
+        при сдаче в ящике было <b>${ui.money(сдано['сдано'])}</b>. Пересчитайте деньги вместе и введите,
+        сколько получилось у вас.</div>` : ''}
       ${о['первая'] ? `<div class="hint-box">
         <b>Это первая сверка — сравнивать пока не с чем.</b><br>
         Система не знает, сколько денег лежало в ящике до неё. Просто пересчитайте
         и запишите — это станет началом отсчёта. Со следующего раза она уже будет
         говорить, сколько должно быть, и показывать расхождение.</div>` : `
       <div class="card" style="margin:0 0 14px">
-        ${строка('Было в ящике на прошлой сверке', о['остаток'])}
-        ${строка('Приняли от клиентов наличными', дв['продажи'], '+')}
+        ${строка(приём ? 'Было в ящике при сдаче смены' : 'Было в ящике на прошлой сверке', о['остаток'])}
+        ${дв['продажи'] || !приём ? строка('Приняли от клиентов наличными', дв['продажи'], '+') : ''}
         ${дв['возвраты'] ? строка('Вернули покупателям', дв['возвраты'], '−') : ''}
         ${дв['приход'] ? строка('Прочий приход наличными', дв['приход'], '+') : ''}
         ${дв['расход'] ? строка('Расходы наличными', дв['расход'], '−') : ''}
+        ${дв['внесли'] ? строка('Внесли размен', дв['внесли'], '+') : ''}
+        ${дв['сдали'] ? строка('Сдали владельцу', дв['сдали'], '−') : ''}
         <div class="row" style="padding:10px 0 0;font-weight:600;font-size:17px">
           <div class="grow">Должно быть в ящике</div>
-          <div class="num">${ui.money(о['ожидается'])}</div>
+          <div class="num" id="cc-expected">${ui.money(о['ожидается'])}</div>
         </div>
+      </div>`}
+      ${приём ? '' : `<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 12px">
+        <span class="muted" style="font-size:13px">Отдали деньги или внесли размен?</span>
+        <button type="button" class="btn btn-sm" data-act="to-owner">Сдать владельцу</button>
+        <button type="button" class="btn btn-sm" data-act="from-owner">Внести размен</button>
       </div>`}
       <label class="field"><span>Сколько денег в ящике на самом деле</span>
         <input type="number" step="0.01" min="0" id="cc-counted" inputmode="decimal"
                placeholder="Пересчитайте и введите"></label>
       <label class="field"><span>Заметка (необязательно)</span>
         <input type="text" id="cc-note" placeholder="Например: сдачу брали из своих"></label>
-      <div id="cc-result"></div>`,
+      ${приём ? '' : `<label class="row-tight" style="gap:8px;align-items:flex-start;font-size:14px">
+        <input type="checkbox" id="cc-handover" style="margin-top:3px">
+        <span>Сдаю смену — следующий продавец пересчитает при мне и примет</span></label>`}`,
     footer: `<button class="btn" data-act="cancel">Отмена</button>
-             <button class="btn btn-primary" id="cc-save">Записать</button>`,
+             <button class="btn btn-primary" id="cc-save">${приём ? 'Принять смену' : 'Записать'}</button>`,
+  });
+  m.foot.querySelector('[data-act=cancel]').onclick = m.close;
+  // Деньги владельцу или размен — отдельным окном, потом сверка заново:
+  // «должно быть» после них другое.
+  m.body.querySelectorAll('[data-act=to-owner], [data-act=from-owner]').forEach(b => {
+    b.onclick = () => {
+      m.close();
+      деньгиВладельцу(b.dataset.act === 'to-owner' ? 'to_owner' : 'from_owner', () => сверкаКассы());
+    };
   });
 
   const поле = m.body.querySelector('#cc-counted');
@@ -295,12 +381,15 @@ async function сверкаКассы() {
   m.foot.querySelector('#cc-save').onclick = async () => {
     const сумма = поле.value.trim();
     if (сумма === '') { ui.toast('Введите, сколько денег в ящике'); поле.focus(); return; }
+    const галка = m.body.querySelector('#cc-handover');
     try {
       const r = await api.post('/api/cash/count', {
         counted: Number(сумма),
         note: m.body.querySelector('#cc-note').value.trim(),
+        ...(приём ? { accept: true } : { kind: галка && галка.checked ? 'handover' : 'count' }),
       });
       m.close();
+      перерисоватьГлавную();
       /*
        * Результат показываем отдельным окном, а не всплывающей подписью:
        * расхождение в кассе — это то, что человек должен прочитать и понять,
@@ -309,8 +398,22 @@ async function сверкаКассы() {
       const первая = r['первая'];
       const плохо = r['разница'] < 0;
       const ровно = r['разница'] === 0;
-      ui.modal({
-        title: первая ? 'Начало отсчёта' : ровно ? 'Касса сошлась' : плохо ? 'Недостача' : 'Излишек',
+      const вид = r['вид'];
+      const заголовок = вид === 'accept' ? (ровно ? 'Смена принята' : 'Смена принята с расхождением')
+        : вид === 'handover' ? (ровно || первая ? 'Смена сдана' : плохо ? 'Смена сдана — недостача' : 'Смена сдана — излишек')
+          : первая ? 'Начало отсчёта' : ровно ? 'Касса сошлась' : плохо ? 'Недостача' : 'Излишек';
+      const пояснение = первая
+        ? 'Это начало отсчёта. Со следующей сверки система будет сама считать, сколько должно быть в ящике, и показывать расхождение.'
+        : вид === 'accept'
+          ? `При сдаче было ${ui.money(r['сдано'])}, должно быть ${ui.money(r['ожидалось'])}, у вас ${ui.money(r['пересчитано'])}.
+             ${ровно ? 'Всё сошлось — смена ваша.'
+               : 'Разберитесь сейчас, пока оба здесь: пересчитайте ещё раз вместе. Расхождение записано.'}`
+          : `В ящике ${ui.money(r['пересчитано'])}, ожидалось ${ui.money(r['ожидалось'])}.
+             ${ровно ? 'Так и должно быть.'
+               : плохо ? 'Денег меньше, чем должно. Проверьте: не забыли ли записать расход, всё ли пробили.'
+                 : 'Денег больше, чем должно. Обычно это непробитая продажа или сдача, которую не отдали.'}`;
+      const итог = ui.modal({
+        title: заголовок,
         size: 'sm',
         body: `
           <div class="alert-row ${ровно ? 'alert-warn' : классТревоги(плохо)}"
@@ -320,20 +423,63 @@ async function сверкаКассы() {
               <div class="alert-what" style="${ровно ? 'color:var(--good)' : ''}">
                 ${первая ? `Записано: ${ui.money(r['пересчитано'])}`
                   : ровно ? 'Всё до копейки' : `Разница ${ui.money(Math.abs(r['разница']))}`}</div>
-              <div class="alert-why">
-                ${первая
-                  ? 'Это начало отсчёта. Со следующей сверки система будет сама считать, сколько должно быть в ящике, и показывать расхождение.'
-                  : `В ящике ${ui.money(r['пересчитано'])}, ожидалось ${ui.money(r['ожидалось'])}.
-                     ${ровно ? 'Так и должно быть.'
-                       : плохо ? 'Денег меньше, чем должно. Проверьте: не забыли ли записать расход, всё ли пробили.'
-                         : 'Денег больше, чем должно. Обычно это непробитая продажа или сдача, которую не отдали.'}`}
-              </div>
+              <div class="alert-why">${пояснение}</div>
             </div>
           </div>
+          ${вид === 'handover' ? `<p class="form-hint">Следующий продавец увидит на Главной «Принять смену»
+            и пересчитает деньги при вас.</p>` : ''}
           <p class="form-hint">Запись сохранена и видна владельцу в Финансах и в журнале действий.
             Исправить её нельзя — если ошиблись, сделайте сверку заново.</p>`,
         footer: '<button class="btn btn-primary" data-act="cancel">Понятно</button>',
       });
+      итог.foot.querySelector('[data-act=cancel]').onclick = итог.close;
+    } catch (e) { ui.toastErr(e); }
+  };
+}
+
+/*
+ * Сдать владельцу / внести размен.
+ *
+ * Это не расход и не доход: деньги не ушли из магазина, а перешли из ящика
+ * в руки владельца (или обратно). Раньше выемку записывали расходом, и отчёт
+ * о прибыли каждый вечер «терял» дневную выручку. Сдачу подтверждает тот,
+ * кому отдали: у него на Главной появится «Деньги у меня / Не получено».
+ */
+async function деньгиВладельцу(вид, после) {
+  let кому = [];
+  try { кому = (await api.get('/api/cash/receivers')).items; }
+  catch (e) { ui.toastErr(e); return; }
+  const сдать = вид === 'to_owner';
+  const я = App.user ? App.user.id : 0;
+  const сам = App.isAdmin();
+  const m = ui.modal({
+    title: сдать ? 'Сдать деньги владельцу' : 'Внести размен',
+    size: 'sm',
+    body: `<form id="cm-form">
+      <label class="field"><span>Сумма *</span>
+        <input type="number" name="amount" min="1" step="1" inputmode="decimal" required></label>
+      <label class="field"><span>${сдать ? 'Кому отдали' : 'Кто внёс'}</span>
+        <select name="other_user_id">${кому.map(u => `<option value="${u.id}" ${u.id === я ? 'selected' : ''}>${
+          ui.esc(u.name)}${u.id === я ? ' (я)' : ''} — ${u.role === 'owner' ? 'основатель' : 'бухгалтер'}</option>`).join('')}</select></label>
+      <label class="field"><span>Заметка</span><input name="note" maxlength="300" placeholder="необязательно"></label>
+      <p class="form-hint" style="margin:0">${сдать
+        ? `Это не расход: в отчёте о прибыли деньги не пропадут. ${сам ? '' : 'Тот, кому отдали, подтвердит у себя, что получил.'}`
+        : 'Деньги на сдачу от владельца. Это не доход — просто в ящике станет больше.'}</p>
+    </form>`,
+    footer: `<button class="btn" data-act="cancel">Отмена</button>
+      <button class="btn btn-primary" data-act="ok">${сдать ? 'Сдать' : 'Внести'}</button>`,
+  });
+  const form = m.body.querySelector('#cm-form');
+  m.foot.querySelector('[data-act=cancel]').onclick = () => { m.close(); if (после) после(); };
+  m.foot.querySelector('[data-act=ok]').onclick = async () => {
+    if (!form.reportValidity()) return;
+    const v = ui.formValues(form);
+    try {
+      const r = await api.post('/api/cash/moves', { kind: вид, amount: v.amount, other_user_id: v.other_user_id, note: v.note });
+      ui.toast(сдать ? (r.status === 'pending' ? 'Записано. Ждёт подтверждения того, кому отдали' : 'Записано') : 'Размен записан');
+      m.close();
+      перерисоватьГлавную();
+      if (после) после();
     } catch (e) { ui.toastErr(e); }
   };
 }

@@ -641,6 +641,7 @@ window.Pages.settings = (() => {
     login_failed: 'неудачный вход', logout_all: 'завершение всех сеансов',
     backup: 'скачана резервная копия', backup_failed: 'копия не удалась',
     discount: 'скидка сверх предела', cash_count: 'сверка кассы',
+    cash_move: 'сдача денег / размен', cash_move_check: 'получение денег',
     device_first: 'первое устройство доверено', device_new: 'вход с незнакомого устройства',
     device_approve: 'устройство разрешено', device_deny: 'устройство отклонено',
   };

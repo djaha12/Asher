@@ -141,6 +141,28 @@ CREATE TABLE IF NOT EXISTS cash_counts (
 );
 CREATE INDEX IF NOT EXISTS idx_cash_counts_created ON cash_counts(created_at);
 
+-- Деньги, которые вышли из ящика или вошли в него мимо продаж и расходов:
+-- выручку сдали владельцу, владелец внёс размен. Это не расход и не доход —
+-- деньги не ушли из магазина, а перешли из ящика в руки владельца. Поэтому
+-- они отдельно от finance_ops и в отчёт о прибыли не попадают.
+--   to_owner   — сдали владельцу (бухгалтеру): в ящике стало меньше
+--   from_owner — внесли размен: в ящике стало больше
+-- Сдачу подтверждает тот, кому отдали: «получил» или «не получал».
+CREATE TABLE IF NOT EXISTS cash_moves (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL CHECK (kind IN ('to_owner','from_owner')),
+  amount REAL NOT NULL,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  other_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','confirmed','disputed')),
+  checked_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  checked_at TEXT,
+  check_note TEXT DEFAULT '',
+  note TEXT DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cash_moves_created ON cash_moves(created_at);
+
 /*
  * Постоянные расходы: аренда, зарплата, коммунальные, охрана.
  *
@@ -670,6 +692,17 @@ function migrate() {
   // о котором клиент не знает, лежит в сейфе неделями.
   addColumn('service_orders', 'ready_at', 'TEXT');
   addColumn('service_orders', 'notified_at', 'TEXT');
+
+  /*
+   * Сдача смены. Уходящий продавец пересчитывает ящик — это сверка вида
+   * «handover». Следующий пересчитывает при нём и принимает — сверка вида
+   * «accept», со ссылкой на сданную. Раньше смену передавали на словах,
+   * и недостача, найденная вечером, не принадлежала никому: «утром так было».
+   */
+  addColumn('cash_counts', 'kind', `TEXT NOT NULL DEFAULT 'count'`);
+  addColumn('cash_counts', 'handover_id', 'INTEGER REFERENCES cash_counts(id) ON DELETE SET NULL');
+  addColumn('cash_counts', 'accepted_by', 'INTEGER REFERENCES users(id) ON DELETE SET NULL');
+  addColumn('cash_counts', 'accepted_at', 'TEXT');
 
   /*
    * Изделия без точки продаж: они числятся в общем складе, но не попадают

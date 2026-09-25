@@ -329,7 +329,10 @@ window.Pages.finance = (() => {
    * держит в голове, что тут от чего отнимали.
    */
   async function renderCash(box) {
-    const { items } = await api.get('/api/cash/counts?limit=100');
+    const [{ items }, { items: сдачи }] = await Promise.all([
+      api.get('/api/cash/counts?limit=100'),
+      api.get('/api/cash/moves?limit=100'),
+    ]);
     if (!box.isConnected) return;
 
     if (!items.length) {
@@ -363,10 +366,32 @@ window.Pages.finance = (() => {
       <div class="card">
         <h3 class="card-title">Все сверки</h3>
         <div id="cash-table"></div>
+      </div>
+      <div class="card">
+        <h3 class="card-title">Сдано владельцу и размен</h3>
+        <p class="muted" style="margin-top:0">Не расход и не доход: деньги перешли из ящика в руки владельца
+          или обратно. В отчёт о прибыли не попадают. Сдачу подтверждает тот, кому отдали.</p>
+        <div id="cash-moves"></div>
       </div>`;
+
+    /*
+     * Что это была за сверка. Сдача смены без приёма — повод спросить:
+     * смену бросили, никто её не пересчитал.
+     */
+    const что = r => {
+      if (r.kind === 'handover') {
+        return r.accepted_name ? `Сдача смены<div class="dim" style="font-size:12px">принял(а) ${ui.esc(r.accepted_name)}</div>`
+          : 'Сдача смены<div class="warn" style="font-size:12px">никто не принял</div>';
+      }
+      if (r.kind === 'accept') {
+        return `Приём смены<div class="dim" style="font-size:12px">у ${ui.esc(r.handover_user_name || '—')}, сдано ${ui.money(r.handover_counted)}</div>`;
+      }
+      return 'Сверка';
+    };
 
     box.querySelector('#cash-table').innerHTML = ui.table([
       { title: 'Когда', render: r => ui.dt(r.created_at) },
+      { title: 'Что', render: что },
       { title: 'Кто считал', render: r => ui.esc(r.user_name || '—') },
       { title: 'Должно быть', cls: 'num', render: r => ui.money(r.expected) },
       { title: 'В ящике', cls: 'num', render: r => ui.money(r.counted) },
@@ -378,6 +403,23 @@ window.Pages.finance = (() => {
       } },
       { title: 'Заметка', render: r => ui.esc(r.note || '') },
     ], items, { empty: 'Сверок ещё не было' });
+
+    const статус = r => r.status === 'confirmed'
+      ? `<span class="good">получено</span>${r.checked_name && r.checked_by !== r.user_id
+        ? `<div class="dim" style="font-size:12px">${ui.esc(r.checked_name)}, ${ui.dt(r.checked_at)}</div>` : ''}`
+      : r.status === 'disputed'
+        ? `<span class="crit">не получено</span><div class="dim" style="font-size:12px">${ui.esc(r.checked_name || '')}${
+          r.check_note ? ' — ' + ui.esc(r.check_note) : ''}</div>`
+        : '<span class="warn">ждёт подтверждения</span>';
+    box.querySelector('#cash-moves').innerHTML = ui.table([
+      { title: 'Когда', render: r => ui.dt(r.created_at) },
+      { title: 'Что', render: r => r.kind === 'to_owner' ? 'Сдано из кассы' : 'Внесён размен' },
+      { title: 'Кто записал', render: r => ui.esc(r.user_name || '—') },
+      { title: 'Кому / от кого', render: r => ui.esc(r.other_name || '—') },
+      { title: 'Сумма', cls: 'num strong', render: r => (r.kind === 'to_owner' ? '−' : '+') + ui.money(r.amount) },
+      { title: 'Отметка', render: статус },
+      { title: 'Заметка', render: r => ui.esc(r.note || '') },
+    ], сдачи, { empty: 'Денег из кассы ещё не сдавали' });
   }
 
   return {

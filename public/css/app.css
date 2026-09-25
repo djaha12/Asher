@@ -1093,3 +1093,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 .alert-bad .alert-what { color: var(--crit); }
 .alert-warn .alert-what { color: var(--warn); }
 .alert-why { color: var(--muted); font-size: 13px; margin-top: 2px; line-height: 1.5; }
+/* Тревога с кнопками: на телефоне кнопки уходят на свою строку, а не за край */
+.alert-row.alert-act { flex-wrap: wrap; }
+.alert-row.alert-act .grow { flex: 1 1 200px; min-width: 0; }
+.alert-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
