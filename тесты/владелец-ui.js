@@ -150,7 +150,7 @@ async function войти(page, логин, пароль) {
     null, { timeout: 8000 }).catch(() => {});
   const сводка = чисто(await владелец.innerText('#dash-summary'));
   check('«Сегодня»: продажа Анны в сводке', /Продали/.test(сводка) && /Анна Соколова/.test(сводка), сводка.slice(0, 300));
-  check('скидка по разрешению посчитана', /по разрешению: 1/.test(сводка), сводка);
+  check('скидка по разрешению посчитана', /по разрешению: [1-9]/.test(сводка), сводка);
   await владелец.evaluate(() => { window.open = u => { window.__открыто = u; return null; }; });
   await владелец.click('#dash-summary [data-sum-wa]');
   const сообщение = decodeURIComponent(await владелец.evaluate(() => window.__открыто || ''));

@@ -258,10 +258,12 @@ function createSaleTx(body, session, opts = {}) {
    */
   if (разрешение) require('./discounts').израсходовать(разрешение.id, saleId);
   if (сверхПредела.length) {
-    const кто = разрешение && разрешение.decided_by
-      ? (db.prepare('SELECT name FROM users WHERE id = ?').get(разрешение.decided_by) || {}).name : '';
+    // Кто разрешил — должностью; имя разрешившего — в его строке «Разрешена скидка … для …».
+    const роль = разрешение && разрешение.decided_by
+      ? (db.prepare('SELECT role FROM users WHERE id = ?').get(разрешение.decided_by) || {}).role : '';
+    const чьё = роль === 'owner' ? ' по разрешению основателя' : роль ? ' по разрешению бухгалтера' : '';
     audit(session.userId, 'discount', 'sale', saleId,
-      `${number}: скидка сверх предела ${пределПроцентов}%${кто ? ` по разрешению: ${кто}` : ''} — ${сверхПредела.join(', ')}`);
+      `${number}: скидка сверх предела ${пределПроцентов}%${чьё} — ${сверхПредела.join(', ')}`);
   }
   return { saleId, number, total, paid, debt };
 }

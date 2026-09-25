@@ -112,8 +112,11 @@ async function main() {
     { items: [{ product_id: серьги, discount: 1000 }], payment_method: 'cash', discount_request_id: запрос });
   check('второй раз то же разрешение не работает', r.status === 400 && /использовано/.test(r.data.error), r.data);
   const журнал = (await админ.зов('GET', '/api/audit?action=discount&limit=5')).data.items;
-  check('в журнале: скидка сверх предела по разрешению, кто разрешил',
-    журнал.some(x => x.details.includes(чек.number) && /по разрешению: Администратор/.test(x.details)), журнал.slice(0, 2));
+  check('в журнале: скидка сверх предела по разрешению основателя',
+    журнал.some(x => x.details.includes(чек.number) && /по разрешению основателя/.test(x.details)), журнал.slice(0, 2));
+  const разрешения = (await админ.зов('GET', '/api/audit?action=discount_approve&limit=5')).data.items;
+  check('а кто именно разрешил — в его строке журнала', разрешения.some(x => x.user_name === 'Администратор'
+    && /для Анна Соколова/.test(x.details)), разрешения.slice(0, 2));
 
   const серьги2 = await изделие(3, 50000);
   r = await анна.зов('POST', '/api/discount-requests', { items: [{ product_id: серьги2, discount: 20000 }] });

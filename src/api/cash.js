@@ -339,9 +339,13 @@ const routes = [
          VALUES (?,?,?,?,?,?,?,?,?)`
       ).run(вид, сумма, session.userId, другой, сразу ? 'confirmed' : 'pending',
         сразу ? session.userId : null, сразу ? ts : null, String(body.note || '').slice(0, 300), ts);
+      // Кому — должностью: основателю или бухгалтеру. Имя — в Финансах, в списке сдач.
+      const роль = (db.prepare('SELECT role FROM users WHERE id = ?').get(другой) || {}).role;
+      const кому = другой === session.userId ? 'себе' : роль === 'owner' ? 'основателю' : 'бухгалтеру';
+      const отКого = роль === 'owner' ? 'основателя' : 'бухгалтера';
       audit(session.userId, 'cash_move', 'finance', Number(info.lastInsertRowid),
-        вид === 'to_owner' ? `Сдано из кассы ${money(сумма)} → ${имя(другой)}${сразу ? '' : ' (ждёт подтверждения)'}`
-          : `Внесён размен в кассу ${money(сумма)} от ${имя(другой)}`);
+        вид === 'to_owner' ? `Сдано из кассы ${money(сумма)} ${кому}${сразу ? '' : ' (ждёт подтверждения)'}`
+          : `Внесён размен в кассу ${money(сумма)} от ${отКого}`);
       return { id: Number(info.lastInsertRowid), status: сразу ? 'confirmed' : 'pending' };
     },
   },

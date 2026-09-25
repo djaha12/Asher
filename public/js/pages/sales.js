@@ -711,7 +711,7 @@ window.Pages.sales = (() => {
       if (подсказка) {
         подсказка.innerHTML = App.isAdmin()
           ? ''
-          : `Больше ${пределЧека()}% — по разрешению владельца.
+          : `Больше ${пределЧека()}% проводит владелец — или разрешает вам на этот чек.
              <button type="button" class="btn btn-sm" data-act="ask-owner" style="margin-top:4px">Попросить владельца</button>`;
       }
       discPctInput.max = App.isAdmin() ? 100 : пределЧека();
