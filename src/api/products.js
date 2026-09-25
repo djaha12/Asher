@@ -426,7 +426,8 @@ const routes = [
       ).get(Number(params.id));
       if (!p) throw new ApiError(404, 'Изделие не найдено');
       const history = db.prepare(
-        `SELECT si.*, s.number AS sale_number, s.created_at AS sale_date, cu.name AS customer_name
+        `SELECT si.*, s.number AS sale_number, s.created_at AS sale_date, cu.name AS customer_name,
+                cu.phone AS customer_phone
          FROM sale_items si JOIN sales s ON s.id = si.sale_id
          LEFT JOIN customers cu ON cu.id = s.customer_id
          WHERE si.product_id = ? ORDER BY s.created_at DESC`

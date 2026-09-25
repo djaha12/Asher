@@ -524,6 +524,44 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 .kanban-card .kc-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .kanban-card .kc-actions svg { width: 14px; height: 14px; vertical-align: -2px; }
 
+/* ---------- Паспорт изделия ---------- */
+/* minmax(0, 1fr): иначе широкая таблица вставок растягивает лист за край экрана телефона */
+.pp-preview { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.passport {
+  background: #fff; color: #1a1a1a; border: 1px solid #d8d2c4; border-radius: 10px;
+  padding: 18px 20px; max-width: 560px; width: 100%; margin: 0 auto; box-sizing: border-box;
+  font-size: 13px; line-height: 1.45;
+}
+.passport .pp-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  flex-wrap: wrap; border-bottom: 2px solid #b8975a; padding-bottom: 8px; margin-bottom: 12px; }
+.passport .pp-store { font-size: 17px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.passport .pp-title { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: #8a6d3b; }
+.passport .pp-main { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+.passport .pp-photo { width: 170px; max-width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; border: 1px solid #e5e0d4; }
+.passport .pp-info { flex: 1 1 220px; min-width: 0; }
+.passport .pp-name { font-size: 16px; font-weight: 700; }
+.passport .pp-sku { color: #6b6b6b; font-size: 12px; margin-bottom: 6px; }
+.passport .pp-kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; }
+.passport .pp-kv dt { color: #6b6b6b; }
+.passport .pp-kv dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.passport .pp-gems { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 12px; }
+.passport .pp-gems th, .passport .pp-gems td { border-bottom: 1px solid #e5e0d4; padding: 4px 6px; text-align: left; }
+.passport .pp-gems th { color: #6b6b6b; font-weight: 600; }
+.passport .pp-cert { display: flex; gap: 12px; align-items: center; margin-top: 12px; padding: 8px 10px;
+  border: 1px dashed #b8975a; border-radius: 8px; }
+.passport .pp-sale { margin-top: 12px; padding-top: 8px; border-top: 1px solid #e5e0d4; }
+.passport .pp-foot { display: flex; gap: 12px; align-items: center; margin-top: 14px; padding-top: 10px; border-top: 1px solid #e5e0d4; }
+.passport .pp-qr { flex: none; width: 64px; height: 64px; }
+.passport .pp-qr svg { width: 100%; height: 100%; display: block; }
+.passport .pp-small { font-size: 11px; color: #6b6b6b; }
+@media (max-width: 480px) {
+  .passport .pp-gems { display: block; overflow-x: auto; }
+}
+@media print {
+  .print-root .passport { width: 140mm; max-width: 140mm; border-color: #999; margin: 0 auto; }
+  .print-root .pp-break { break-after: page; page-break-after: always; height: 0; }
+}
+
 /* Фото при приёме в ремонт */
 .order-photos { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .order-photos img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); display: block; }

@@ -417,9 +417,13 @@ window.Pages.sales = (() => {
           ${canReturn ? '<button class="btn btn-danger left" data-act="return" disabled>Оформить возврат</button>' : ''}
           ${canReturn ? `<button class="btn left" data-act="exchange" disabled>${ui.icon('exchange')} Обмен</button>` : ''}
           ${s.debt > 0 ? `<button class="btn btn-primary" data-act="pay">${ui.icon('money')} Принять оплату</button>` : ''}
+          ${s.items.some(i => !i.returned) ? `<button class="btn" data-act="passports">${ui.icon('certificate')} Паспорт${
+            s.items.filter(i => !i.returned).length > 1 ? 'а' : ''} изделия</button>` : ''}
           <button class="btn" data-act="print">${ui.icon('print')} Печать чека</button>
           <button class="btn" data-act="close">Закрыть</button>`,
       });
+      const паспорта = m.foot.querySelector('[data-act=passports]');
+      if (паспорта) паспорта.onclick = () => Passport.изЧека(s).catch(ui.toastErr);
       const payBtn = m.foot.querySelector('[data-act=pay]');
       if (payBtn) payBtn.onclick = () => {
         m.close();

@@ -204,6 +204,7 @@ window.Pages.products = (() => {
         footer: `
           ${admin ? `<button class="btn btn-danger left" data-act="delete">Удалить</button>` : ''}
           <button class="btn" data-act="label">${ui.icon('tag')} Бирка</button>
+          <button class="btn" data-act="passport">${ui.icon('certificate')} Паспорт</button>
           ${p.status !== 'written_off'
             ? `<button class="btn" data-act="share">${ui.icon('whatsapp')} Клиенту</button>` : ''}
           ${stores.length > 1 && p.status !== 'sold'
@@ -224,12 +225,15 @@ window.Pages.products = (() => {
       renderCerts(m.body.querySelector('#prod-certs'), p, admin);
 
       m.foot.addEventListener('click', async e => {
-        const act = e.target.dataset && e.target.dataset.act;
+        // closest: нажатие приходится и на значок внутри кнопки, а не только на её текст.
+        const btn = e.target.closest('[data-act]');
+        const act = btn && btn.dataset.act;
         if (!act) return;
         try {
           if (act === 'edit') { m.close(); openEditor(p, onChange); }
           if (act === 'sell') { m.close(); Pages.sales.newSale(p); }
           if (act === 'label') Pages.labels.printOne(p);
+          if (act === 'passport') Passport.изИзделия(p);
           if (act === 'share') shareDialog(p);
           if (act === 'move') { m.close(); moveDialog(p, onChange); }
           if (act === 'reserve') { m.close(); reserveDialog(p, onChange); }
