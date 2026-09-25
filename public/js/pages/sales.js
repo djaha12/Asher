@@ -103,6 +103,7 @@ window.Pages.sales = (() => {
     const m = ui.modal({
       title: `Обмен по чеку ${s.number}`,
       size: 'lg',
+      грязно: () => newItems.length > 0 || ui.естьВведённое(m.body),
       body: `
         <div class="hint-box">
           Клиент возвращает: ${chosen.map(i => `<strong>${ui.esc(i.name)}</strong>`).join(', ')}
@@ -458,6 +459,9 @@ window.Pages.sales = (() => {
     const m = ui.modal({
       title: 'Новая продажа',
       size: 'lg',
+      // Набранный чек — список изделий, а не поля: поиск после каждого
+      // изделия снова пуст, и без этой проверки окно считалось бы пустым.
+      грязно: () => state.items.length > 0 || ui.естьВведённое(m.body),
       body: `
         <div class="row" style="margin-bottom:14px;flex-wrap:nowrap">
           <div class="rel grow">
@@ -803,6 +807,7 @@ window.Pages.sales = (() => {
 
       filters = { period: '30', payment_method: '', search: '' };
       const doRefresh = () => refresh(el).catch(ui.toastErr);
+      App.обновлятьТак(el, () => refresh(el));
       Pages._salesRefresh = doRefresh;
       el.querySelector('#sf-search').addEventListener('input', ui.debounce(e => { filters.search = e.target.value.trim(); doRefresh(); }));
       el.querySelector('#sf-period').addEventListener('change', e => { filters.period = e.target.value; doRefresh(); });

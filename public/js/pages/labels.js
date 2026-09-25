@@ -217,6 +217,9 @@ window.Pages.labels = (() => {
       </div>`;
 
     const doRefresh = () => refreshList(filters).catch(ui.toastErr);
+    // Отмеченные бирки переживают обновление по чужому изменению: раньше
+    // двадцать отметок пропадали, стоило коллеге что-то продать.
+    App.обновлятьТак(el, () => refreshList(filters));
     el.querySelector('#lb-search').addEventListener('input', ui.debounce(e => {
       filters.search = e.target.value.trim();
       doRefresh();

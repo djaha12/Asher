@@ -182,7 +182,30 @@ window.ui = (() => {
   // ---------- Модальные окна ----------
   const modalRoot = () => document.getElementById('modal-root');
 
-  function modal({ title, body, footer, size, onClose }) {
+  /*
+   * Есть ли в окне то, что человек успел ввести. Сравниваем с тем, с чем
+   * окно открылось: подставленное заранее (имя из поиска, цена изделия)
+   * введённым не считается.
+   */
+  function естьВведённое(root) {
+    for (const el of root.querySelectorAll('input, textarea, select')) {
+      if (el.type === 'hidden' || el.disabled) continue;
+      if (el.type === 'checkbox' || el.type === 'radio') {
+        if (el.checked !== el.defaultChecked) return true;
+      } else if (el.tagName === 'SELECT') {
+        if ([...el.options].some(o => o.selected !== o.defaultSelected)) return true;
+      } else if (el.value !== el.defaultValue) return true;
+    }
+    return false;
+  }
+
+  /*
+   * грязно — своя проверка «есть ли что терять» для окон, где введённое
+   * живёт не в полях: чек в кассе копится списком изделий, а поле поиска
+   * после каждого изделия снова пустое. Вместо «да» можно вернуть строку —
+   * тогда она и будет вопросом перед закрытием.
+   */
+  function modal({ title, body, footer, size, onClose, грязно }) {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     overlay.innerHTML = `
@@ -214,21 +237,39 @@ window.ui = (() => {
     const escHandler = e => {
       if (e.key === 'Escape' && overlay === modalRoot().lastElementChild) close();
     };
-    overlay.addEventListener('mousedown', e => { if (e.target === overlay) close(); });
+    /*
+     * Нажатие мимо окна — самое частое случайное движение на телефоне:
+     * задели край экрана, листая. Раньше окно закрывалось молча, и вместе
+     * с ним пропадали набранный чек или накладная на двадцать строк. Теперь
+     * пустое окно закрывается как раньше, а заполненное — только после
+     * вопроса. Крестик и Esc — действия нарочные, их не переспрашиваем.
+     */
+    let спрашиваем = false;
+    overlay.addEventListener('mousedown', async e => {
+      if (e.target !== overlay || спрашиваем) return;
+      const есть = грязно ? грязно() : естьВведённое(bodyEl);
+      if (!есть) { close(); return; }
+      спрашиваем = true;
+      // Окно может задать свой вопрос: «ключ второй раз не покажется».
+      const вопрос = typeof есть === 'string' ? есть : 'Закрыть окно? Введённое не сохранится.';
+      const да = await confirmDialog(вопрос, { danger: true, okLabel: 'Закрыть', cancelLabel: 'Вернуться' });
+      спрашиваем = false;
+      if (да) close();
+    });
     overlay.querySelector('.modal-close').addEventListener('click', close);
     document.addEventListener('keydown', escHandler);
     modalRoot().appendChild(overlay);
     return { overlay, body: bodyEl, foot: footEl, close };
   }
 
-  function confirmDialog(text, { danger = false, okLabel = 'Подтвердить' } = {}) {
+  function confirmDialog(text, { danger = false, okLabel = 'Подтвердить', cancelLabel = 'Отмена' } = {}) {
     return new Promise(resolve => {
       const m = modal({
         title: 'Подтверждение',
         size: 'sm',
         body: `<p style="margin:4px 0 8px">${esc(text)}</p>`,
         footer: `
-          <button class="btn" data-act="cancel">Отмена</button>
+          <button class="btn" data-act="cancel">${esc(cancelLabel)}</button>
           <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" data-act="ok">${esc(okLabel)}</button>`,
         onClose: () => resolve(false),
       });
@@ -427,7 +468,8 @@ window.ui = (() => {
 
   return { esc, icon, money, moneyRich, num, dt, dateOnly, monthName, badge, L, modal, confirmDialog, toast, toastErr,
     table, bindRows, formValues, debounce, currentTheme, applyTheme, toggleTheme, lightbox,
-    barcodeSvg, photoUrl, highlight, whatsappLink, normalizePhone, sourcePicker, bindSourcePicker, locale: loc };
+    barcodeSvg, photoUrl, highlight, whatsappLink, normalizePhone, sourcePicker, bindSourcePicker,
+    естьВведённое, locale: loc };
 })();
 
 // Тему применяем сразу при загрузке, до первого кадра — чтобы не мигало белым.

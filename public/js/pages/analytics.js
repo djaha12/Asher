@@ -179,6 +179,7 @@ window.Pages.analytics = (() => {
         period = chip.dataset.p;
         load(el).catch(ui.toastErr);
       });
+      App.обновлятьТак(el, () => load(el));
       await load(el);
     },
   };

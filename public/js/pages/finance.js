@@ -414,10 +414,12 @@ window.Pages.finance = (() => {
         <div id="fin-body"></div>`;
 
       const body = el.querySelector('#fin-body');
-      const show = async () => {
+      // тихо — обновление по чужому изменению: без «Загрузка…», чтобы
+      // таблица не мигала у бухгалтера каждый раз, когда продавец что-то продал.
+      const show = async (тихо) => {
         el.querySelector('#fin-toolbar').classList.toggle('hidden', tab !== 'ops');
         el.querySelector('#fin-toolbar-pnl').classList.toggle('hidden', tab !== 'pnl');
-        body.innerHTML = '<div class="empty"><p>Загрузка…</p></div>';
+        if (!тихо) body.innerHTML = '<div class="empty"><p>Загрузка…</p></div>';
         try {
           if (tab === 'ops') await renderOps(body);
           else if (tab === 'regular') await renderRegular(body);
@@ -439,6 +441,8 @@ window.Pages.finance = (() => {
       el.querySelector('#ff-expense').addEventListener('click', () => opDialog('expense', show));
 
       tab = 'ops'; period = '30'; typeFilter = '';
+      // Вкладка, период и тип живут в самой странице — обновляем только таблицу.
+      App.обновлятьТак(el, () => show(true));
       await show();
     },
   };

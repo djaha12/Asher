@@ -10,6 +10,10 @@ window.Pages = window.Pages || {};
 window.Pages.debts = (() => {
   let tab = 'customers';
   let pageEl = null;   // корень страницы — чтобы перерисовать её целиком после изменений
+  // Поиск и «только просроченные» живут здесь, а не во вкладке: вкладка
+  // перерисовывается, когда кто-то принял оплату, и отбор сбрасываться не должен.
+  let поиск = '';
+  let толькоПросроченные = false;
 
   function reload() { if (pageEl && pageEl.isConnected) render(pageEl).catch(ui.toastErr); }
 
@@ -42,8 +46,9 @@ window.Pages.debts = (() => {
       </div>
 
       <div class="toolbar">
-        <input type="text" class="input search" id="d-search" placeholder="Поиск по имени или телефону…" autocomplete="off">
-        <button class="chip" id="d-overdue">Только просроченные</button>
+        <input type="text" class="input search" id="d-search" placeholder="Поиск по имени или телефону…"
+          autocomplete="off" value="${ui.esc(поиск)}">
+        <button class="chip ${толькоПросроченные ? 'active' : ''}" id="d-overdue">Только просроченные</button>
         <div class="spacer"></div>
         <button class="btn btn-primary" id="d-pay">${ui.icon('money')} Принять оплату</button>
       </div>
@@ -78,26 +83,24 @@ window.Pages.debts = (() => {
       });
     }
 
-    let onlyOverdue = false;
-    let search = '';
     function apply() {
-      const q = search.toLowerCase();
+      const q = поиск.toLowerCase();
       filtered = items.filter(r =>
-        (!onlyOverdue || r.overdue_debt > 0) &&
+        (!толькоПросроченные || r.overdue_debt > 0) &&
         (!q || String(r.customer_name).toLowerCase().includes(q) || String(r.customer_phone).includes(q)));
       draw();
     }
 
     host.querySelector('#d-search').addEventListener('input', ui.debounce(e => {
-      search = e.target.value.trim();
+      поиск = e.target.value.trim();
       apply();
     }));
     host.querySelector('#d-overdue').addEventListener('click', e => {
-      onlyOverdue = e.target.classList.toggle('active');
+      толькоПросроченные = e.target.classList.toggle('active');
       apply();
     });
     host.querySelector('#d-pay').addEventListener('click', () => pickCustomerAndPay());
-    draw();
+    apply();
   }
 
   // Карточка должника: что именно висит и вся история платежей.
@@ -483,10 +486,15 @@ window.Pages.debts = (() => {
     });
 
     const body = el.querySelector('#d-body');
-    try {
+    const показать = async () => {
       if (tab === 'customers') await renderCustomers(body);
       else if (tab === 'suppliers') await renderSuppliers(body);
       else await renderConsignment(body);
+    };
+    // По чужому изменению — только содержимое вкладки, без «Загрузка…».
+    App.обновлятьТак(el, показать);
+    try {
+      await показать();
     } catch (e) {
       body.innerHTML = `<div class="empty"><div class="empty-ico">◇</div><p>${ui.esc(e.message)}</p></div>`;
     }

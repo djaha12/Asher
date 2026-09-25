@@ -228,6 +228,7 @@ window.Pages.orders = (() => {
         <div id="orders-cancelled" style="margin-top:12px"></div>`;
       const doRefresh = () => { if (el.isConnected) refresh(el).catch(ui.toastErr); };
       Pages._ordersRefresh = doRefresh;
+      App.обновлятьТак(el, () => refresh(el));
       el.querySelector('#of-add').addEventListener('click', () => openEditor(null, doRefresh));
       el.querySelector('#of-archive').addEventListener('change', e => { showArchive = e.target.checked; doRefresh(); });
       await refresh(el);

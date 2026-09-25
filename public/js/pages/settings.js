@@ -954,6 +954,7 @@ window.Pages.settings = (() => {
     const адрес = `${location.origin}/api/backup/download?key=${ключ}`;
     const m = ui.modal({
       title: 'Ключ для ежедневных копий',
+      грязно: () => 'Закрыть? Второй раз система этот ключ не покажет.',
       body: `
         <p class="muted" style="margin-top:0"><b>Запишите его сейчас.</b> Второй раз система его
           не покажет — она не хранит его в открытом виде.</p>
@@ -1012,12 +1013,26 @@ window.Pages.settings = (() => {
           if (key === 'me') renderMyPassword(body);
         } catch (e) { body.innerHTML = `<div class="empty"><p>${ui.esc(e.message)}</p></div>`; }
       };
+      let открыта = tabs[0][0];
       el.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
         el.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
         t.classList.add('active');
-        show(t.dataset.tab);
+        открыта = t.dataset.tab;
+        show(открыта);
       }));
-      await show(tabs[0][0]);
+      /*
+       * По чужому изменению обновляем только списки, которые и правда
+       * меняются без нас: сотрудников и устройства, ждущие разрешения.
+       * Раньше страница перерисовывалась целиком и выбрасывала на первую
+       * вкладку — владелец, ждавший на «Безопасности» новый телефон продавца,
+       * оказывался в «Магазине». Вкладки с формами не трогаем вовсе: там
+       * могла быть недописанная настройка.
+       */
+      App.обновлятьТак(el, async () => {
+        if (открыта === 'security') await renderSecurity(body);
+        else if (открыта === 'users') await renderUsers(body);
+      });
+      await show(открыта);
     },
   };
 })();

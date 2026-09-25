@@ -1161,6 +1161,7 @@ window.Pages.products = (() => {
       filters = { search: '', status: '', category_id: '', metal: '', store_id: '', has_photo: '', sort: 'new', ownership: '' };
       const doRefresh = () => { if (el.isConnected) refresh(el).catch(ui.toastErr); };
       Pages._prodRefresh = doRefresh;
+      App.обновлятьТак(el, () => refresh(el));
 
       el.querySelector('#pf-search').addEventListener('input', ui.debounce(e => { filters.search = e.target.value.trim(); doRefresh(); }));
       el.querySelector('#pf-cat').addEventListener('change', e => { filters.category_id = e.target.value; doRefresh(); });

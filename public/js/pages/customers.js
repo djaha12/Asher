@@ -137,6 +137,7 @@ window.Pages.customers = (() => {
       filters = { search: '', source: '' };
       const doRefresh = () => { if (el.isConnected) refresh(el).catch(ui.toastErr); };
       Pages._custRefresh = doRefresh;
+      App.обновлятьТак(el, () => refresh(el));
       el.querySelector('#cf-search').addEventListener('input', ui.debounce(e => { filters.search = e.target.value.trim(); doRefresh(); }));
       el.querySelector('#cf-source').addEventListener('change', e => { filters.source = e.target.value; doRefresh(); });
       el.querySelector('#cf-add').addEventListener('click', () => openEditor(null, doRefresh));

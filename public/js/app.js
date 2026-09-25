@@ -101,7 +101,13 @@ window.App = (() => {
       document.getElementById('user-avatar').textContent = (App.user.name || '?')[0].toUpperCase();
       renderNav();
       renderMobileNav();
-      route();
+      /*
+       * Точка отсчёта изменений — до первой отрисовки. Раньше её запоминал
+       * первый опрос, через пять секунд после входа, и всё, что коллеги
+       * сохранили за эти секунды, экран пропускал до следующего изменения:
+       * проданное кольцо так и висело «в наличии».
+       */
+      спроситьИзменения().finally(route);
     },
 
     /*
@@ -117,6 +123,14 @@ window.App = (() => {
     canSee: item => (!item.admin || App.isAdmin()) && (!item.owner || App.isOwner()),
 
     go(hash) { location.hash = hash; },
+
+    /*
+     * Страница говорит, как обновить у неё одни данные, когда коллега что-то
+     * сохранил: fn() перечитывает список с текущими фильтрами. Без этого
+     * страница перерисовывается целиком и сбрасывает поиск и фильтры.
+     * el — её контейнер: чужая, уже закрытая страница себя не заявит.
+     */
+    обновлятьТак(el, fn) { своёОбновление = { el, fn }; },
   };
 
   function renderNav() {
@@ -204,6 +218,9 @@ window.App = (() => {
   }
 
   let текущийКлюч = '';
+  // Как текущая страница обновляет одни данные, без перерисовки целиком:
+  // { el, fn }. Заявляет сама страница через App.обновлятьТак().
+  let своёОбновление = null;
 
   async function route() {
     if (!App.user) return;
@@ -234,6 +251,7 @@ window.App = (() => {
     const el = document.createElement('div');
     el.innerHTML = '<div class="empty"><p>Загрузка…</p></div>';
     host.replaceChildren(el);
+    своёОбновление = null;   // новая страница заявит своё, если умеет
     try {
       await page.render(el, param);
     } catch (e) {
@@ -559,12 +577,28 @@ window.App = (() => {
    */
   async function тихоОбновить() {
     if (!App.user) return;
-    const { key, param } = currentRoute();
+    /*
+     * Страница, которая умеет обновить одни данные, так и делает: поиск,
+     * фильтры, вкладка и отмеченные бирки остаются как были. Раньше страница
+     * перерисовывалась целиком, и всё это сбрасывалось всякий раз, когда
+     * коллега что-то сохранял, — продавец заново выбирал металл и точку,
+     * а двадцать отмеченных бирок пропадали.
+     */
+    if (своёОбновление && своёОбновление.el.isConnected) {
+      try { await своёОбновление.fn(); } catch { /* не вышло — попробуем в следующий раз */ }
+      return;
+    }
+    const { key } = currentRoute();
     const page = Pages[key] || Pages.dashboard;
     const host = document.getElementById('page');
     if (!host) return;
     const свежий = document.createElement('div');
-    try { await page.render(свежий, param); } catch { return; }  // не вышло — не трогаем экран
+    /*
+     * Без номера из адреса. «#/customers/123» открывает карточку при переходе,
+     * а при тихой перерисовке открыл бы её снова — уже закрытую, посреди
+     * работы, каждый раз, когда кто-то что-то сохранил.
+     */
+    try { await page.render(свежий); } catch { return; }  // не вышло — не трогаем экран
     const прокрутка = window.scrollY;
     host.replaceChildren(свежий);
     window.scrollTo(0, прокрутка);
