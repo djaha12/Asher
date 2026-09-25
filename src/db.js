@@ -615,6 +615,11 @@ function migrate() {
    */
   addColumn('payments', 'in_till', 'INTEGER NOT NULL DEFAULT 1');
 
+  // Откуда пришёл клиент: Instagram, WhatsApp, сарафанное радио… Ключи —
+  // в src/customer-sources.js. У всех прежних клиентов пусто: откуда они
+  // пришли, никто не записывал, и выдумывать это за владельца нельзя.
+  addColumn('customers', 'source', `TEXT NOT NULL DEFAULT ''`);
+
   /*
    * Изделия без точки продаж: они числятся в общем складе, но не попадают
    * ни в остатки точки, ни в инвентаризацию — пересчёт всегда идёт по точке.

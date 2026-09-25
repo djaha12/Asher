@@ -312,6 +312,44 @@ const routes = [
     },
   },
   {
+    /*
+     * Откуда приходят клиенты: сколько новых пришло за период из каждого
+     * источника и сколько денег за тот же период принесли клиенты оттуда.
+     * Деньги считаются по всем клиентам источника, а не только по новым:
+     * покупательница из Instagram, пришедшая второй раз, — тоже заслуга
+     * Instagram.
+     */
+    method: 'GET', path: '/api/analytics/by-source', admin: true,
+    handler: ({ query }) => {
+      const { cond, args } = rangeCond(query);
+      const where = cond.length ? 'AND ' + cond.join(' AND ') : '';
+      const money = db.prepare(
+        `SELECT c.source AS source, COUNT(DISTINCT s.id) AS sales_count,
+                COALESCE(SUM(si.final_price), 0) AS revenue
+         FROM sale_items si JOIN sales s ON s.id = si.sale_id JOIN customers c ON c.id = s.customer_id
+         WHERE si.returned = 0 ${where}
+         GROUP BY c.source`
+      ).all(...args);
+      const cc = rangeCond(query, 'created_at');
+      const fresh = db.prepare(
+        `SELECT source, COUNT(*) AS new_customers FROM customers
+         ${cc.cond.length ? 'WHERE ' + cc.cond.join(' AND ') : ''}
+         GROUP BY source`
+      ).all(...cc.args);
+      const rows = new Map();
+      const row = key => {
+        if (!rows.has(key)) rows.set(key, { source: key, new_customers: 0, sales_count: 0, revenue: 0 });
+        return rows.get(key);
+      };
+      for (const r of fresh) row(r.source).new_customers = r.new_customers;
+      for (const r of money) Object.assign(row(r.source), { sales_count: r.sales_count, revenue: round2(r.revenue) });
+      // «Не отмечено» — в самый конец: это не источник, а пробел в записях.
+      const items = [...rows.values()].sort((a, b) =>
+        (a.source === '') - (b.source === '') || b.new_customers - a.new_customers || b.revenue - a.revenue);
+      return { items };
+    },
+  },
+  {
     method: 'GET', path: '/api/analytics/by-seller', admin: true,
     handler: ({ query }) => {
       const { cond, args } = rangeCond(query);

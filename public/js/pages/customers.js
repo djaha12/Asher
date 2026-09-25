@@ -2,7 +2,8 @@
 window.Pages = window.Pages || {};
 
 window.Pages.customers = (() => {
-  let filters = { search: '' };
+  let filters = { search: '', source: '' };
+  const sourceName = key => ui.L.source[key] || key;
 
   let refreshSeq = 0;
   async function refresh(el) {
@@ -15,6 +16,7 @@ window.Pages.customers = (() => {
     listEl.innerHTML = ui.table([
       { title: 'Клиент', render: r => `<span class="strong">${ui.esc(r.name)}</span>` },
       { title: 'Телефон', render: r => `<span class="mono">${ui.esc(r.phone || '—')}</span>` },
+      { title: 'Откуда', render: r => r.source ? ui.esc(sourceName(r.source)) : '<span class="dim">—</span>' },
       { title: 'Скидка', cls: 'num', render: r => r.discount ? r.discount + '%' : '—' },
       { title: 'Покупок', cls: 'num', render: r => r.purchases || 0 },
       { title: 'Сумма покупок', cls: 'num strong', render: r => ui.money(r.total_spent) },
@@ -34,6 +36,7 @@ window.Pages.customers = (() => {
             <dl class="kv">
               <dt>Телефон</dt><dd class="mono">${ui.esc(c.phone || '—')}</dd>
               <dt>E-mail</dt><dd>${ui.esc(c.email || '—')}</dd>
+              <dt>Откуда пришёл</dt><dd>${c.source ? ui.esc(sourceName(c.source)) : '—'}</dd>
               <dt>Памятные даты</dt><dd>${nextDates || '—'}</dd>
               <dt>Размер кольца</dt><dd>${ui.esc(c.ring_size || '—')}</dd>
             </dl>
@@ -82,6 +85,7 @@ window.Pages.customers = (() => {
           <label class="field"><span>Телефон</span><input name="phone" value="${ui.esc(c.phone || '')}" placeholder="0555 12-34-56"></label>
           <label class="field"><span>E-mail</span><input name="email" type="email" value="${ui.esc(c.email || '')}"></label>
         </div>
+        ${ui.sourcePicker(c.source || '')}
         <div class="form-grid">
           <label class="field"><span>День рождения</span><input name="birthday" type="date" value="${ui.esc(c.birthday || '')}"></label>
           <label class="field"><span>Годовщина (свадьба и т.п.)</span><input name="anniversary" type="date" value="${ui.esc(c.anniversary || '')}"></label>
@@ -97,6 +101,7 @@ window.Pages.customers = (() => {
         <button class="btn btn-primary" data-act="save">${isNew ? 'Добавить клиента' : 'Сохранить'}</button>`,
     });
     const form = m.body.querySelector('#cust-form');
+    ui.bindSourcePicker(form);
     m.foot.querySelector('[data-act=cancel]').onclick = m.close;
     m.foot.querySelector('[data-act=save]').onclick = async () => {
       if (!form.reportValidity()) return;
@@ -118,16 +123,22 @@ window.Pages.customers = (() => {
       el.innerHTML = `
         <div class="toolbar">
           <input type="text" class="input search" id="cf-search" placeholder="Поиск: имя, телефон, e-mail…" autocomplete="off">
+          <select class="input" id="cf-source" aria-label="Откуда пришёл">
+            <option value="">Откуда: все</option>
+            ${Object.entries(ui.L.source).map(([k, v]) => `<option value="${k}">${ui.esc(v)}</option>`).join('')}
+            <option value="none">Не отмечено</option>
+          </select>
           <div class="spacer"></div>
           ${App.isAdmin() ? '<a class="btn" href="/api/export/customers" download>Экспорт CSV</a>' : ''}
           <button class="btn btn-primary" id="cf-add">${ui.icon('plus')} Новый клиент</button>
         </div>
         <div id="cust-list"></div>`;
 
-      filters = { search: '' };
+      filters = { search: '', source: '' };
       const doRefresh = () => { if (el.isConnected) refresh(el).catch(ui.toastErr); };
       Pages._custRefresh = doRefresh;
       el.querySelector('#cf-search').addEventListener('input', ui.debounce(e => { filters.search = e.target.value.trim(); doRefresh(); }));
+      el.querySelector('#cf-source').addEventListener('change', e => { filters.source = e.target.value; doRefresh(); });
       el.querySelector('#cf-add').addEventListener('click', () => openEditor(null, doRefresh));
       await refresh(el);
       if (param) openDetail(Number(param), doRefresh);

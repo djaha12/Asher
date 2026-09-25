@@ -137,7 +137,42 @@ window.ui = (() => {
     orderType: { repair: 'Ремонт', custom: 'Изготовление', engraving: 'Гравировка', resize: 'Изм. размера', cleaning: 'Чистка', appraisal: 'Оценка' },
     orderStatus: { accepted: 'Принят', in_progress: 'В работе', ready: 'Готов', delivered: 'Выдан', cancelled: 'Отменён' },
     orderStatusBadge: { accepted: 'info', in_progress: 'warn', ready: 'good', delivered: 'gray', cancelled: 'crit' },
+    // Откуда пришёл клиент. Тот же список на сервере — src/customer-sources.js;
+    // проверка «откуда-test» следит, чтобы они не разошлись.
+    source: { instagram: 'Instagram', whatsapp: 'WhatsApp', referral: 'Сарафанное радио', tiktok: 'TikTok', maps: '2ГИС', walk_in: 'Проходили мимо', other: 'Другое' },
   };
+
+  /*
+   * «Откуда пришёл» — подпись и сразу под ней кнопки: Instagram, WhatsApp,
+   * сарафанное радио… Кнопки, а не выпадающий список: у прилавка это одно
+   * нажатие вместо трёх, и все варианты видны сразу. Повторное нажатие
+   * снимает выбор — ошиблись, передумали. Значение уезжает скрытым полем,
+   * поэтому formValues() забирает его вместе с остальной формой.
+   */
+  function sourcePicker(current = '') {
+    return `<div class="field src-field"><span>Откуда пришёл</span>
+      <div class="chip-row src-picker" role="group" aria-label="Откуда пришёл">
+        ${Object.entries(L.source).map(([k, v]) => `<button type="button" class="chip${k === current ? ' active' : ''}"
+          data-src="${k}" aria-pressed="${k === current}">${esc(v)}</button>`).join('')}
+      </div>
+      <input type="hidden" name="source" value="${esc(current)}">
+    </div>`;
+  }
+  function bindSourcePicker(root) {
+    const field = root.querySelector('.src-field');
+    if (!field) return;
+    const input = field.querySelector('input[name=source]');
+    field.querySelector('.src-picker').addEventListener('click', e => {
+      const chip = e.target.closest('.chip[data-src]');
+      if (!chip) return;
+      input.value = chip.dataset.src === input.value ? '' : chip.dataset.src;
+      field.querySelectorAll('.chip[data-src]').forEach(c => {
+        const on = c.dataset.src === input.value;
+        c.classList.toggle('active', on);
+        c.setAttribute('aria-pressed', String(on));
+      });
+    });
+  }
   function badge(kind, value) {
     const label = (L[kind] && L[kind][value]) || value || '—';
     const tone = (L[kind + 'Badge'] && L[kind + 'Badge'][value]) || 'gray';
@@ -392,7 +427,7 @@ window.ui = (() => {
 
   return { esc, icon, money, moneyRich, num, dt, dateOnly, monthName, badge, L, modal, confirmDialog, toast, toastErr,
     table, bindRows, formValues, debounce, currentTheme, applyTheme, toggleTheme, lightbox,
-    barcodeSvg, photoUrl, highlight, whatsappLink, normalizePhone, locale: loc };
+    barcodeSvg, photoUrl, highlight, whatsappLink, normalizePhone, sourcePicker, bindSourcePicker, locale: loc };
 })();
 
 // Тему применяем сразу при загрузке, до первого кадра — чтобы не мигало белым.

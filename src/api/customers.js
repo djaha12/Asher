@@ -1,9 +1,10 @@
 'use strict';
 const { db, nowIso, round2, audit, getSetting, видитВсё } = require('../db');
 const { ApiError } = require('./util');
+const { SOURCES } = require('../customer-sources');
 
 const FIELDS = ['name', 'phone', 'email', 'birthday', 'anniversary', 'discount',
-  'ring_size', 'preferences', 'notes'];
+  'ring_size', 'preferences', 'notes', 'source'];
 
 // «2020-13-45» не пройдёт: проверяем, что дата существует в календаре
 function isValidDate(s) {
@@ -32,6 +33,14 @@ function validateCustomer(body, { partial = false, role = 'owner' } = {}) {
   for (const f of ['birthday', 'anniversary']) {
     if (out[f] && !isValidDate(out[f])) {
       throw new ApiError(400, 'Дата должна быть реальной датой в формате ГГГГ-ММ-ДД');
+    }
+  }
+  // Только из списка: слово, набранное как попало, рассыпало бы аналитику
+  // на «инста», «Инстаграм» и «Instagram». Пусто — значит «не отмечено».
+  if (body.source !== undefined) {
+    out.source = String(body.source || '').trim();
+    if (out.source && !Object.hasOwn(SOURCES, out.source)) {
+      throw new ApiError(400, 'Неизвестно, откуда пришёл клиент: выберите из списка');
     }
   }
   if (body.discount !== undefined) {
@@ -66,6 +75,12 @@ const routes = [
         cond.push('(nlower(c.name) LIKE ? OR c.phone LIKE ? OR nlower(c.email) LIKE ?)');
         const s = `%${String(query.search).toLowerCase()}%`;
         args.push(s, s, s);
+      }
+      // «none» — клиенты, у которых источник не отмечен
+      if (query.source === 'none') cond.push(`c.source = ''`);
+      else if (Object.hasOwn(SOURCES, query.source || '')) {
+        cond.push('c.source = ?');
+        args.push(query.source);
       }
       const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
       const rows = db.prepare(

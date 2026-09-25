@@ -19,7 +19,7 @@ window.Pages.analytics = (() => {
     const q = new URLSearchParams({ tz: api.tz() });
     if (from) { q.set('from', from); q.set('to', to); }
     const group = !period || Number(period) > 120 ? 'month' : 'day';
-    const [summary, revenue, byCat, byMetal, topProducts, topCustomers, bySeller, byPayment, stock] = await Promise.all([
+    const [summary, revenue, byCat, byMetal, topProducts, topCustomers, bySeller, byPayment, bySource, stock] = await Promise.all([
       api.get('/api/analytics/summary?' + q),
       api.get('/api/analytics/revenue?' + q + '&group=' + group),
       api.get('/api/analytics/by-category?' + q),
@@ -28,6 +28,7 @@ window.Pages.analytics = (() => {
       api.get('/api/analytics/top-customers?' + q + '&limit=10'),
       api.get('/api/analytics/by-seller?' + q),
       api.get('/api/analytics/by-payment?' + q),
+      api.get('/api/analytics/by-source?' + q),
       api.get('/api/analytics/stock'),
     ]);
     if (my !== loadSeq || !el.isConnected) return; // период уже сменился
@@ -82,6 +83,21 @@ window.Pages.analytics = (() => {
       <div class="grid grid-2" style="margin-top:16px">
         <div class="card mb0"><h3 class="card-title">Продавцы</h3><div id="an-sellers"></div></div>
         <div class="card mb0"><h3 class="card-title">Способы оплаты</h3><div id="an-payment"></div></div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <h3 class="card-title">Откуда приходят клиенты</h3>
+        ${ui.table([
+          { title: 'Откуда', render: r => r.source ? ui.esc(ui.L.source[r.source] || r.source) : '<span class="dim">Не отмечено</span>' },
+          { title: 'Новых', cls: 'num', render: r => r.new_customers },
+          // Три колонки, а не четыре: на телефоне четвёртая уезжала за край,
+          // и прятался как раз главный столбец — деньги.
+          { title: 'Выручка', cls: 'num strong', render: r => `${ui.money(r.revenue)}
+            <div class="dim" style="font-size:11px;font-weight:400">${r.sales_count} прод.</div>` },
+        ], bySource.items, { empty: 'Нет клиентов и продаж за период' })}
+        <p class="muted" style="margin:10px 0 0;font-size:12.5px">Новые — клиенты, заведённые за период. Выручка —
+          от всех клиентов из этого источника, включая пришедших раньше. Отмечайте, откуда пришёл человек, когда
+          заводите его в кассе — иначе он попадёт в «Не отмечено».</p>
       </div>
 
       <h2 class="section-title">Склад</h2>

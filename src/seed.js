@@ -78,9 +78,14 @@ const MID_M = ['Сергеевич', 'Александрович', 'Владим
 const PREFS = ['Белое золото, бриллианты', 'Классика, жемчуг', 'Розовое золото, минимализм', 'Крупные камни, статусные вещи',
   'Крупные караты', 'Чистота от VS1', 'Классические огранки', 'Винтажный стиль', ''];
 
+// Откуда пришли: у ювелирного в Бишкеке чаще всего Instagram и совет знакомых.
+// Пустые тоже есть — так выглядит настоящая база, где отмечали не всегда.
+const SOURCES_POOL = ['instagram', 'instagram', 'instagram', 'instagram', 'referral', 'referral',
+  'referral', 'whatsapp', 'whatsapp', 'tiktok', 'maps', 'walk_in', 'walk_in', 'other', ''];
+
 const insCust = db.prepare(
-  `INSERT INTO customers (name, phone, email, birthday, anniversary, discount, ring_size, preferences, notes, created_at)
-   VALUES (?,?,?,?,?,?,?,?,?,?)`
+  `INSERT INTO customers (name, phone, email, birthday, anniversary, discount, ring_size, preferences, notes, source, created_at)
+   VALUES (?,?,?,?,?,?,?,?,?,?,?)`
 );
 const customers = [];
 for (let i = 0; i < 26; i++) {
@@ -95,7 +100,7 @@ for (let i = 0; i < 26; i++) {
     chance(0.5) ? `client${i + 1}@${pick(['mail.ru', 'gmail.com'])}` : '',
     birthday, anniversary, chance(0.3) ? pick([3, 5, 7, 10]) : 0,
     female && chance(0.7) ? pick(['15,5', '16', '16,5', '17', '17,5', '18']) : '',
-    pick(PREFS), '', isoDaysAgo(ri(30, 400)));
+    pick(PREFS), '', pick(SOURCES_POOL), isoDaysAgo(ri(30, 400)));
   customers.push(Number(info.lastInsertRowid));
 }
 

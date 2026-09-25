@@ -1,6 +1,7 @@
 'use strict';
 const { db, nowIso, round2, audit, transaction } = require('../db');
 const { ApiError } = require('./util');
+const { SOURCES } = require('../customer-sources');
 
 // ---------- Разбор CSV ----------
 
@@ -424,8 +425,9 @@ const routes = [
          FROM customers c ORDER BY c.id`
       ).all();
       csvResponse(res, 'клиенты.csv', toCsv(
-        ['Имя', 'Телефон', 'E-mail', 'Дата рождения', 'Скидка %', 'Сумма покупок', 'Заметки'],
-        rows.map(r => [r.name, r.phone, r.email, r.birthday, r.discount, r.total_spent, r.notes])
+        ['Имя', 'Телефон', 'E-mail', 'Дата рождения', 'Скидка %', 'Откуда пришёл', 'Сумма покупок', 'Заметки'],
+        rows.map(r => [r.name, r.phone, r.email, r.birthday, r.discount,
+          SOURCES[r.source] || r.source, r.total_spent, r.notes])
       ));
     },
   },

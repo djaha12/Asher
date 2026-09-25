@@ -624,6 +624,10 @@ window.Pages.products = (() => {
    * Спрашиваем только имя и телефон: остальное — размер кольца, день рождения,
    * предпочтения — дозаполняется потом, когда есть время. Требовать это
    * в момент продажи значит получить в базе «Ааа» и «000».
+   *
+   * Исключение — «откуда пришёл». Это одно нажатие и не обязательно, но
+   * спросить надо именно сейчас: человек стоит у прилавка и помнит, где нас
+   * увидел, а «потом» этого не вспомнит уже никто.
    */
   function newCustomerDialog(набрано, onDone) {
     /*
@@ -645,6 +649,7 @@ window.Pages.products = (() => {
           <input name="name" required value="${ui.esc(имя)}" placeholder="Айгуль Осмонова"></label>
         <label class="field"><span>Телефон</span>
           <input name="phone" value="${ui.esc(телефон)}" placeholder="0700 495 253"></label>
+        ${ui.sourcePicker()}
         <p class="form-hint">Остальное — размер кольца, день рождения, заметки —
           можно дозаполнить потом в разделе «Клиенты». Сейчас важно не задерживать
           человека у прилавка.</p>
@@ -653,13 +658,15 @@ window.Pages.products = (() => {
         <button class="btn btn-primary" data-act="ok">Завести и выбрать</button>`,
     });
     const form = m.body.querySelector('#nc-form');
+    ui.bindSourcePicker(form);
     setTimeout(() => form.querySelector(имя ? '[name=phone]' : '[name=name]').focus(), 50);
     m.foot.querySelector('[data-act=cancel]').onclick = m.close;
     m.foot.querySelector('[data-act=ok]').onclick = async () => {
       if (!form.reportValidity()) return;
       const v = ui.formValues(form);
       try {
-        const { id } = await api.post('/api/customers', { name: v.name.trim(), phone: v.phone.trim() });
+        const { id } = await api.post('/api/customers',
+          { name: v.name.trim(), phone: v.phone.trim(), source: v.source });
         ui.toast('Клиент заведён');
         m.close();
         onDone({ id, name: v.name.trim(), phone: v.phone.trim(), discount: 0 });
