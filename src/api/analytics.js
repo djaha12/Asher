@@ -34,7 +34,97 @@ function periodStats(from, to) {
     returns: round2(s.returns), avg_check: avg };
 }
 
+/*
+ * Сводка за день — то, что владелец хочет знать утром о вчерашнем: сколько
+ * продали и кто, как платили, сошлась ли касса, какие скидки дали сверх
+ * обычного, что с ремонтом и кто новый. Одним экраном и одним сообщением —
+ * чтобы не собирать это по пяти разделам.
+ */
+function сводкаДня(дата, tz) {
+  const полночь = new Date(дата + 'T00:00:00Z').getTime() - tz * 60000;
+  const от = new Date(полночь).toISOString();
+  const до = new Date(полночь + 86400000 - 1).toISOString();
+  const одно = (sql, ...a) => db.prepare(sql).get(...a);
+  const сумма = (sql, ...a) => round2(одно(sql, ...a).s || 0);
+
+  const продажи = periodStats(от, до);
+  const возвраты = одно(
+    `SELECT COUNT(*) AS n, COALESCE(SUM(final_price), 0) AS s FROM sale_items
+      WHERE returned = 1 AND returned_at BETWEEN ? AND ?`, от, до);
+  // Деньги, которые правда пришли: наличные — только те, что легли в ящик
+  // (зачёт изделия при обмене — не деньги), карта и перевод — все.
+  const оплаты = {
+    наличными: сумма(`SELECT SUM(amount) AS s FROM payments WHERE method = 'cash' AND in_till = 1 AND amount > 0
+                        AND created_at BETWEEN ? AND ?`, от, до),
+    картой: сумма(`SELECT SUM(amount) AS s FROM payments WHERE method = 'card' AND amount > 0
+                     AND created_at BETWEEN ? AND ?`, от, до),
+    переводом: сумма(`SELECT SUM(amount) AS s FROM payments WHERE method = 'transfer' AND amount > 0
+                        AND created_at BETWEEN ? AND ?`, от, до),
+    долгов_погашено: сумма(`SELECT SUM(p.amount) AS s FROM payments p JOIN sales x ON x.id = p.sale_id
+                              WHERE p.amount > 0 AND p.created_at BETWEEN ? AND ? AND x.created_at < ?`, от, до, от),
+  };
+  const неОплачено = сумма(
+    `SELECT SUM(d) AS s FROM (SELECT (SELECT COALESCE(SUM(si.final_price), 0) FROM sale_items si
+                                       WHERE si.sale_id = x.id AND si.returned = 0) - x.paid AS d
+                              FROM sales x WHERE x.created_at BETWEEN ? AND ?) WHERE d > 0.009`, от, до);
+  const продавцы = db.prepare(
+    `SELECT COALESCE(u.name, '—') AS name, COUNT(DISTINCT x.id) AS чеков,
+            COALESCE(SUM(CASE WHEN si.returned = 0 THEN si.final_price END), 0) AS выручка
+       FROM sales x JOIN sale_items si ON si.sale_id = x.id LEFT JOIN users u ON u.id = x.user_id
+      WHERE x.created_at BETWEEN ? AND ? GROUP BY x.user_id ORDER BY выручка DESC`
+  ).all(от, до).map(r => ({ ...r, выручка: round2(r.выручка) }));
+
+  const сверки = db.prepare(
+    `SELECT c.kind, c.difference, u.name AS кто FROM cash_counts c LEFT JOIN users u ON u.id = c.user_id
+      WHERE c.created_at BETWEEN ? AND ? ORDER BY c.id`
+  ).all(от, до);
+  const касса = {
+    сверок: сверки.length,
+    недостача: round2(сверки.filter(c => c.difference < -0.009).reduce((a, c) => a + c.difference, 0)),
+    излишек: round2(сверки.filter(c => c.difference > 0.009).reduce((a, c) => a + c.difference, 0)),
+    расхождения: сверки.filter(c => Math.abs(c.difference) > 0.009)
+      .map(c => ({ кто: c.кто || '—', вид: c.kind, разница: round2(c.difference) })),
+    сдано_владельцу: сумма(`SELECT SUM(amount) AS s FROM cash_moves WHERE kind = 'to_owner'
+                              AND created_at BETWEEN ? AND ?`, от, до),
+    не_получено: сумма(`SELECT SUM(amount) AS s FROM cash_moves WHERE status = 'disputed'
+                          AND created_at BETWEEN ? AND ?`, от, до),
+    смен_без_приёма: одно(`SELECT COUNT(*) AS n FROM cash_counts WHERE kind = 'handover' AND accepted_at IS NULL
+                             AND created_at BETWEEN ? AND ?`, от, до).n,
+  };
+  const скидки = {
+    сверх_предела: одно(`SELECT COUNT(*) AS n FROM audit_log WHERE action = 'discount'
+                           AND created_at BETWEEN ? AND ?`, от, до).n,
+    по_разрешению: одно(`SELECT COUNT(*) AS n FROM discount_requests WHERE status = 'used'
+                           AND decided_at BETWEEN ? AND ?`, от, до).n,
+  };
+  const ремонт = {
+    принято: одно('SELECT COUNT(*) AS n FROM service_orders WHERE accepted_at BETWEEN ? AND ?', от, до).n,
+    выдано: одно('SELECT COUNT(*) AS n FROM service_orders WHERE delivered_at BETWEEN ? AND ?', от, до).n,
+  };
+  const клиенты = {
+    новых: одно('SELECT COUNT(*) AS n FROM customers WHERE created_at BETWEEN ? AND ?', от, до).n,
+  };
+  return {
+    дата,
+    продажи: { чеков: продажи.sales_count, выручка: продажи.revenue, средний: продажи.avg_check,
+      прибыль: продажи.profit, скидки: продажи.discounts, изделий: продажи.items_sold },
+    возвраты: { штук: возвраты.n, сумма: round2(возвраты.s) },
+    оплаты, не_оплачено: неОплачено, продавцы, касса, скидки, ремонт, клиенты,
+  };
+}
+
 const routes = [
+  {
+    // Сводка за день. По умолчанию — вчера по часам магазина.
+    method: 'GET', path: '/api/summary/day', admin: true,
+    handler: ({ query }) => {
+      const tz = Number(query.tz) || 0;
+      const сегодня = new Date(Date.now() + tz * 60000).toISOString().slice(0, 10);
+      const вчера = new Date(new Date(сегодня + 'T00:00:00Z').getTime() - 86400000).toISOString().slice(0, 10);
+      const дата = /^\d{4}-\d{2}-\d{2}$/.test(String(query.date || '')) ? String(query.date) : вчера;
+      return сводкаДня(дата, tz);
+    },
+  },
   {
     method: 'GET', path: '/api/dashboard',
     handler: ({ query, session }) => {
@@ -195,14 +285,18 @@ const routes = [
             делать: 'Освободите место на диске.',
           });
         }
-        const ждут = db.prepare('SELECT COUNT(*) AS c FROM devices WHERE approved = 0').get().c;
-        if (ждут > 0) {
-          тревоги.push({
-            уровень: 'внимание',
-            что: ждут === 1 ? 'Одно устройство просится войти' : `Устройств просится войти: ${ждут}`,
-            почему: 'Пока не разрешите, человек не сможет работать. Если это не ваш сотрудник — не разрешайте',
-            делать: 'Настройки → Безопасность → Устройства.',
-          });
+        /*
+         * Кто просится войти с нового устройства — поимённо, с кодом, чтобы
+         * разрешить прямо отсюда одним нажатием. Раньше здесь было «одно
+         * устройство просится войти» и путь через Настройки → Безопасность,
+         * а продавец всё это время стоял у прилавка и не мог работать.
+         */
+        const ждут = require('../auth').pendingDevices();
+        if (ждут.length) {
+          result.устройства = ждут.map(d => ({
+            id: d.id, code: d.code, name: d.name, user_name: d.user_name, role: d.role,
+            created_at: d.created_at, last_ip: d.last_ip,
+          }));
         }
         /*
          * Постоянные расходы, срок которых подошёл, а записи нет. Это не сбой

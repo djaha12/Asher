@@ -163,6 +163,26 @@ CREATE TABLE IF NOT EXISTS cash_moves (
 );
 CREATE INDEX IF NOT EXISTS idx_cash_moves_created ON cash_moves(created_at);
 
+-- Скидка сверх предела — по разрешению владельца на один чек. Продавец
+-- просит из кассы, владелец отвечает со своего телефона. Разрешение — только
+-- этому продавцу, только на эти изделия и не больше этой скидки, один раз
+-- и недолго: иначе однажды выпрошенное «да» работало бы вечно.
+--   items — JSON [{product_id, discount}]: сколько скидки просили на изделие
+CREATE TABLE IF NOT EXISTS discount_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+  items TEXT NOT NULL,
+  note TEXT DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending','approved','denied','used','cancelled')),
+  decided_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  decided_at TEXT,
+  sale_id INTEGER REFERENCES sales(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_discount_requests_status ON discount_requests(status);
+
 /*
  * Постоянные расходы: аренда, зарплата, коммунальные, охрана.
  *

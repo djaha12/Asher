@@ -57,11 +57,20 @@ window.App = (() => {
        */
       const fromLink = /[#&?]login=([a-z0-9._-]{1,30})/i.exec(location.hash || '');
       const userInput = document.getElementById('login-username');
+      /*
+       * Курсор ставим, только если человек ещё никуда не нажал. Иначе пароль,
+       * который уже начали вводить (или подставил телефон), уезжал в поле
+       * логина: «adminadmin123» в логине и пустой пароль.
+       */
+      const поставитьКурсор = поле => setTimeout(() => {
+        const где = document.activeElement;
+        if (!где || где === document.body) поле.focus();
+      }, 50);
       if (fromLink) {
         userInput.value = fromLink[1].toLowerCase();
-        setTimeout(() => document.getElementById('login-password').focus(), 50);
+        поставитьКурсор(document.getElementById('login-password'));
       } else {
-        setTimeout(() => userInput.focus(), 50);
+        поставитьКурсор(userInput);
       }
       // Подсказка про admin/admin123 видна только пока пароль стандартный.
       const hint = document.getElementById('login-hint');

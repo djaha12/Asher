@@ -8,11 +8,15 @@ window.Pages = window.Pages || {};
 window.Pages.dashboard = {
   title: 'Главная',
   async render(el) {
-    const [d, bd, касса] = await Promise.all([
+    const админ = App.isAdmin();
+    const [d, bd, касса, скидкиЖдут, сводка] = await Promise.all([
       api.get('/api/dashboard?tz=' + api.tz()),
       api.get('/api/customers/occasions?days=14&today=' + new Date(Date.now() + api.tz() * 60000).toISOString().slice(0, 10)),
       // Сданная смена и сдачи денег владельцу — если не ответило, Главная всё равно открывается.
       api.get('/api/cash/pending').catch(() => ({ смена: null, сдачи: [] })),
+      админ ? api.get('/api/discount-requests?status=pending').catch(() => ({ items: [] })) : { items: [] },
+      админ ? api.get(`/api/summary/day?tz=${api.tz()}${Pages.dashboard._день ? '&date=' + Pages.dashboard._день : ''}`)
+        .catch(() => null) : null,
     ]);
     if (!el.isConnected) return;
     Pages.dashboard._el = el;
@@ -71,10 +75,48 @@ window.Pages.dashboard = {
           <button class="btn btn-sm" data-move-no="${с.id}">Не получено</button>
         </div>
       </div>`).join('');
-    const наверху = сменаHtml + сдачиHtml + тревоги;
+    /*
+     * Продавец просит скидку сверх предела — у прилавка ждёт клиент.
+     * Поэтому это самое первое, что видит владелец, с кнопками прямо здесь.
+     */
+    const скидкиHtml = (скидкиЖдут.items || []).map(з => `
+      <div class="alert-row alert-warn alert-act" data-dr="${з.id}">
+        <div class="alert-ico">%</div>
+        <div class="grow">
+          <div class="alert-what">${ui.esc(з.user_name)} просит скидку ${ui.money(з.total_discount)}${
+            з.customer_name ? ' для ' + ui.esc(з.customer_name) : ''}</div>
+          <div class="alert-why">${з.items.map(i => `${ui.esc(i.name)}: ${ui.money(i.price)}, скидка ${ui.money(i.discount)}
+            (${ui.num(i.percent, 1)}%)`).join('; ')}${з.note ? `. «${ui.esc(з.note)}»` : ''}</div>
+        </div>
+        <div class="alert-actions">
+          <button class="btn btn-sm btn-primary" data-dr-ok="${з.id}">Разрешить</button>
+          <button class="btn btn-sm" data-dr-no="${з.id}">Отказать</button>
+        </div>
+      </div>`).join('');
+    /*
+     * Новое устройство — поимённо и с кодом. Сотрудник видит тот же код
+     * у себя на экране: совпал — разрешайте одним нажатием. Раньше путь
+     * лежал через Настройки → Безопасность, а человек стоял и ждал.
+     */
+    const устройстваHtml = (d['устройства'] || []).map(у => `
+      <div class="alert-row alert-warn alert-act" data-dev="${у.id}">
+        <div class="alert-ico">?</div>
+        <div class="grow">
+          <div class="alert-what">${ui.esc(у.user_name)} просится войти с нового устройства</div>
+          <div class="alert-why">Код <b>${ui.esc(у.code)}</b>${у.name ? ' · ' + ui.esc(у.name) : ''} · ${ui.dt(у.created_at)}${
+            у.last_ip ? ' · ' + ui.esc(у.last_ip) : ''}. Спросите у сотрудника код с его экрана: совпал — разрешайте.
+            Не ваш сотрудник — отклоните.</div>
+        </div>
+        <div class="alert-actions">
+          <button class="btn btn-sm btn-primary" data-dev-ok="${у.id}">Разрешить</button>
+          <button class="btn btn-sm" data-dev-no="${у.id}">Отклонить</button>
+        </div>
+      </div>`).join('');
+    const наверху = скидкиHtml + устройстваHtml + сменаHtml + сдачиHtml + тревоги;
 
     el.innerHTML = `
       ${наверху ? `<div class="alert-box">${наверху}</div>` : ''}
+      ${сводка ? сводкаHtml(сводка) : ''}
       <div class="grid grid-4">
         <div class="big-stat accent-good">
           <div class="bs-label">Продали сегодня</div>
@@ -280,6 +322,43 @@ window.Pages.dashboard = {
       } catch (e) { ui.toastErr(e); }
     };
     el.querySelectorAll('[data-move-ok]').forEach(b => { b.onclick = () => отметить(b, 'confirm'); });
+    // Ответ на запрос скидки и разрешение устройства — одним нажатием, строка уходит.
+    const ответить = async (b, путь, текст) => {
+      b.disabled = true;
+      try {
+        await api.post(путь, {});
+        ui.toast(текст);
+        b.closest('.alert-row').remove();
+      } catch (e) { b.disabled = false; ui.toastErr(e); }
+    };
+    el.querySelectorAll('[data-dr-ok]').forEach(b => {
+      b.onclick = () => ответить(b, `/api/discount-requests/${b.dataset.drOk}/approve`, 'Скидка разрешена — у продавца она встанет в чек сама');
+    });
+    el.querySelectorAll('[data-dr-no]').forEach(b => {
+      b.onclick = () => ответить(b, `/api/discount-requests/${b.dataset.drNo}/deny`, 'Отказано — продавец увидит это в кассе');
+    });
+    el.querySelectorAll('[data-dev-ok]').forEach(b => {
+      b.onclick = () => ответить(b, `/api/devices/${b.dataset.devOk}/approve`, 'Устройство разрешено — сотрудник войдёт сам');
+    });
+    el.querySelectorAll('[data-dev-no]').forEach(b => {
+      b.onclick = async () => {
+        if (!await ui.confirmDialog('Отклонить это устройство? Если это чужой человек, все его входы закроются сразу.',
+          { danger: true, okLabel: 'Отклонить' })) return;
+        ответить(b, `/api/devices/${b.dataset.devNo}/deny`, 'Устройство отклонено');
+      };
+    });
+    // Сводка: вчера или сегодня, и отправить сообщением.
+    el.querySelectorAll('[data-sum]').forEach(b => {
+      b.onclick = () => {
+        Pages.dashboard._день = b.dataset.sum === 'today'
+          ? new Date(Date.now() + api.tz() * 60000).toISOString().slice(0, 10) : '';
+        перерисоватьГлавную();
+      };
+    });
+    const отправитьСводку = el.querySelector('[data-sum-wa]');
+    if (отправитьСводку && сводка) {
+      отправитьСводку.onclick = () => window.open('https://wa.me/?text=' + encodeURIComponent(сводкаТекст(сводка)), '_blank', 'noopener');
+    }
     el.querySelectorAll('[data-move-no]').forEach(b => {
       b.onclick = async () => {
         if (!await ui.confirmDialog('Отметить, что этих денег вы не получали? Отметка останется в истории.',
@@ -289,6 +368,63 @@ window.Pages.dashboard = {
     });
   },
 };
+
+/*
+ * Сводка за день для владельца: утром — за вчера, вечером можно глянуть
+ * «сегодня». Только то, что стоит прочесть: нули не показываем.
+ */
+function строкиСводки(с) {
+  const п = с['продажи'];
+  const о = с['оплаты'];
+  const к = с['касса'];
+  const чеков = n => `${n} ${n % 10 === 1 && n % 100 !== 11 ? 'чек' : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14)) ? 'чека' : 'чеков'}`;
+  const деньги = [о['наличными'] && `наличными ${ui.money(о['наличными'])}`, о['картой'] && `картой ${ui.money(о['картой'])}`,
+    о['переводом'] && `переводом ${ui.money(о['переводом'])}`].filter(Boolean).join(' · ');
+  const касса = к['сверок']
+    ? (к['расхождения'].length
+      ? к['расхождения'].map(р => `${р['разница'] < 0 ? 'недостача' : 'излишек'} ${ui.money(Math.abs(р['разница']))} (${р['кто']}${
+        р['вид'] === 'accept' ? ', приём смены' : р['вид'] === 'handover' ? ', сдача смены' : ''})`).join('; ')
+      : `${к['сверок']} ${к['сверок'] === 1 ? 'сверка' : 'сверки'} — всё сошлось`)
+    : '';
+  return [
+    ['Продали', п['чеков'] ? `${ui.money(п['выручка'])}, ${чеков(п['чеков'])} (средний ${ui.money(п['средний'])})` : 'продаж не было', !п['чеков']],
+    ['Заработали', п['чеков'] ? ui.money(п['прибыль']) : ''],
+    ['Деньги пришли', деньги],
+    ['Погашено долгов', о['долгов_погашено'] ? ui.money(о['долгов_погашено']) : ''],
+    ['Не оплачено из этих чеков', с['не_оплачено'] ? ui.money(с['не_оплачено']) : ''],
+    ['Возвраты', с['возвраты']['штук'] ? `${с['возвраты']['штук']} на ${ui.money(с['возвраты']['сумма'])}` : ''],
+    ['Продавцы', с['продавцы'].map(x => `${x.name} — ${чеков(x['чеков'])}, ${ui.money(x['выручка'])}`).join('; ')],
+    ['Касса', касса, к['недостача'] < 0],
+    ['Смену никто не принял', к['смен_без_приёма'] ? String(к['смен_без_приёма']) : '', true],
+    ['Сдано владельцу', к['сдано_владельцу'] ? ui.money(к['сдано_владельцу']) + (к['не_получено'] ? ` (не получено: ${ui.money(к['не_получено'])})` : '') : '', к['не_получено'] > 0],
+    ['Скидки сверх предела', с['скидки']['сверх_предела'] ? `${с['скидки']['сверх_предела']}${
+      с['скидки']['по_разрешению'] ? ` (по разрешению: ${с['скидки']['по_разрешению']})` : ''}` : ''],
+    ['Ремонт', с['ремонт']['принято'] || с['ремонт']['выдано'] ? `принято ${с['ремонт']['принято']}, выдано ${с['ремонт']['выдано']}` : ''],
+    ['Новых клиентов', с['клиенты']['новых'] ? String(с['клиенты']['новых']) : ''],
+  ].filter(([, v]) => v);
+}
+
+function сводкаHtml(с) {
+  const сегодня = new Date(Date.now() + api.tz() * 60000).toISOString().slice(0, 10);
+  const заСегодня = с['дата'] === сегодня;
+  return `<div class="card" id="dash-summary" style="margin-bottom:18px">
+    <div class="row" style="justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+      <h3 class="card-title" style="margin:0">Сводка за ${заСегодня ? 'сегодня' : 'вчера'}, ${ui.dateOnly(с['дата'])}</h3>
+      <div class="row-tight" style="gap:6px;flex-wrap:wrap">
+        <button class="btn btn-sm ${заСегодня ? '' : 'active'}" data-sum="yesterday">Вчера</button>
+        <button class="btn btn-sm ${заСегодня ? 'active' : ''}" data-sum="today">Сегодня</button>
+        <button class="btn btn-sm" data-sum-wa>${ui.icon('whatsapp')} Отправить</button>
+      </div>
+    </div>
+    <dl class="kv summary-kv">${строкиСводки(с).map(([k, v, тревожно]) =>
+      `<dt>${k}</dt><dd class="${тревожно ? 'crit' : ''}">${ui.esc(v)}</dd>`).join('')}</dl>
+  </div>`;
+}
+
+function сводкаТекст(с) {
+  return [`${App.storeName || ''} — сводка за ${ui.dateOnly(с['дата'])}`.trim(),
+    ...строкиСводки(с).map(([k, v]) => `${k}: ${v}`)].join('\n');
+}
 
 // После сверки, сдачи смены или денег — перерисовать Главную, если она открыта:
 // своё изменение это устройство само себе не присылает.

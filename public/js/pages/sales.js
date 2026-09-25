@@ -503,20 +503,30 @@ window.Pages.sales = (() => {
      * там скидка вытекает из цены комплекта, которую назначил тот же владелец,
      * и сервер сверяет её со своей раскладкой.
      */
-    function максСкидка(it) {
-      const цена = Number(it.product.retail_price) || 0;
-      if (App.isAdmin() || it.setId) return цена;
+    function обычнаяСкидка(it) {
       const личная = state.customer ? Number(state.customer.discount) || 0 : 0;
-      return Math.round(цена * Math.max(ПРЕДЕЛ, личная)) / 100;
+      return Math.round((Number(it.product.retail_price) || 0) * Math.max(ПРЕДЕЛ, личная)) / 100;
+    }
+    function максСкидка(it) {
+      if (App.isAdmin() || it.setId) return Number(it.product.retail_price) || 0;
+      // Разрешение владельца на этот чек поднимает потолок — ровно до разрешённого.
+      const разрешено = state.разрешение ? state.разрешение.скидки.get(it.product.id) : undefined;
+      return разрешено !== undefined ? Math.max(обычнаяСкидка(it), разрешено) : обычнаяСкидка(it);
     }
     const пределЧека = () => Math.max(ПРЕДЕЛ,
       state.customer ? Number(state.customer.discount) || 0 : 0);
 
     let выключитьКамеру = null;
+    let опрос = null;   // ждём ответа владельца на запрос скидки
     const m = ui.modal({
       title: 'Новая продажа',
       size: 'lg',
-      onClose: () => { if (выключитьКамеру) выключитьКамеру(); },
+      onClose: () => {
+        if (выключитьКамеру) выключитьКамеру();
+        if (опрос) clearInterval(опрос);
+        // Касса закрыта — запрос владельцу больше не нужен: пусть не отвечает впустую.
+        if (state.запрос && state.запрос.status === 'pending') api.del('/api/discount-requests/' + state.запрос.id).catch(() => {});
+      },
       // Набранный чек — список изделий, а не поля: поиск после каждого
       // изделия снова пуст, и без этой проверки окно считалось бы пустым.
       грязно: () => state.items.length > 0 || ui.естьВведённое(m.body),
@@ -550,6 +560,7 @@ window.Pages.sales = (() => {
             <span class="form-hint" id="pos-disc-hint"></span></label>
           <label class="field"><span>Комментарий</span><input type="text" id="pos-note"></label>
         </div>
+        <div id="pos-approval" class="hidden" style="margin:-4px 0 12px"></div>
 
         <label class="row-tight" style="cursor:pointer;margin-bottom:10px">
           <input type="checkbox" id="pos-partial" style="width:20px;height:20px;cursor:pointer">
@@ -596,6 +607,7 @@ window.Pages.sales = (() => {
         itemsEl.innerHTML = state.items.map((it, i) => {
           const макс = максСкидка(it);
           const упёрся = !App.isAdmin() && !it.setId && it.discount >= макс - 0.009 && макс > 0;
+          const поРазрешению = !App.isAdmin() && !it.setId && it.discount > обычнаяСкидка(it) + 0.009;
           // Продажа ниже закупочной — забота владельца: продавец закупочную
           // не видит, и говорить ему о ней здесь нельзя. Поле приходит только
           // в ответах администратору, поэтому строка сама собой не покажется.
@@ -607,7 +619,8 @@ window.Pages.sales = (() => {
               <div class="pi-name">${ui.esc(it.product.name)}</div>
               <div class="pi-sub">${ui.esc(it.product.sku)}${it.product.metal ? ' · ' + ui.esc(it.product.metal) : ''}${it.product.status === 'reserved' ? ' · <b>из резерва</b>' : ''}${
                 убыток ? ' · <b class="crit">ниже закупочной</b>' : ''}${
-                упёрся ? ' · <span class="warn">предел скидки</span>' : ''}</div>
+                поРазрешению ? ' · <span class="good">по разрешению владельца</span>'
+                  : упёрся ? ' · <span class="warn">предел скидки</span>' : ''}</div>
             </div>
             <div class="num money">${ui.money(it.product.retail_price)}</div>
             <input type="number" class="input" data-i="${i}" min="0" max="${макс}" step="1" value="${it.discount || ''}" placeholder="скидка">
@@ -619,7 +632,8 @@ window.Pages.sales = (() => {
       if (подсказка) {
         подсказка.innerHTML = App.isAdmin()
           ? ''
-          : `Больше ${пределЧека()}% проводит владелец`;
+          : `Больше ${пределЧека()}% — по разрешению владельца.
+             <button type="button" class="btn btn-sm" data-act="ask-owner" style="margin-top:4px">Попросить владельца</button>`;
       }
       discPctInput.max = App.isAdmin() ? 100 : пределЧека();
       const { subtotal, discount, total } = calc();
@@ -655,8 +669,10 @@ window.Pages.sales = (() => {
       const it = state.items[Number(i)];
       const набрано = Math.max(Number(e.target.value) || 0, 0);
       const макс = максСкидка(it);
+      // Сколько хотели — запомним: в запросе владельцу это и будет предложено.
+      it.хочет = набрано > макс + 0.009 ? набрано : undefined;
       if (набрано > макс + 0.009 && !App.isAdmin()) {
-        ui.toast(`Скидка больше ${пределЧека()}% — её проводит владелец`, true);
+        ui.toast(`Скидка больше ${пределЧека()}% — нажмите «Попросить владельца»`, true);
       }
       it.discount = Math.min(набрано, макс);
       renderItems();
@@ -675,7 +691,10 @@ window.Pages.sales = (() => {
       const pct = Math.min(набрано, потолок);
       if (набрано > потолок) {
         discPctInput.value = pct;
-        ui.toast(`Скидка на чек больше ${потолок}% — её проводит владелец`, true);
+        ui.toast(`Скидка на чек больше ${потолок}% — нажмите «Попросить владельца»`, true);
+      }
+      for (const it of state.items) {
+        if (!it.setId) it.хочет = набрано > потолок ? Math.round(it.product.retail_price * набрано) / 100 : undefined;
       }
       for (const it of state.items) {
         // Комплект пришёл со своей раскладкой от владельца — процент на чек
@@ -803,6 +822,112 @@ window.Pages.sales = (() => {
     }
     Pages.products.attachCustomerSearch(custInput, setCustomer);
 
+    /*
+     * ---------- Скидка по разрешению владельца ----------
+     *
+     * Продавец просит прямо отсюда: какие изделия и какую скидку. Владелец
+     * видит запрос у себя на Главной. Касса тем временем работает дальше,
+     * а ответ приходит сам: разрешили — скидка встаёт в чек, отказали —
+     * так и написано. Разрешение — на этот чек и только на эти изделия.
+     */
+    function показатьЗапрос() {
+      const box = m.body.querySelector('#pos-approval');
+      const з = state.запрос;
+      box.classList.toggle('hidden', !з);
+      if (!з) { box.innerHTML = ''; return; }
+      box.innerHTML = з.status === 'pending'
+        ? `<div class="hint-box" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+             <span>Запрос скидки отправлен владельцу — ждём ответа…</span>
+             <button type="button" class="btn btn-sm" data-act="dr-cancel">Отменить запрос</button></div>`
+        : з.status === 'approved'
+          ? `<div class="hint-box" style="background:var(--good-soft);border-color:var(--good)">✓ Скидка разрешена${
+              з.decided_by_name ? ': ' + ui.esc(з.decided_by_name) : ''}. Действует на этот чек.</div>`
+          : з.status === 'denied'
+            ? `<div class="hint-box" style="background:var(--crit-soft);border-color:var(--crit)">Скидку сверх ${пределЧека()}%
+                не разрешили${з.decided_by_name ? ' (' + ui.esc(з.decided_by_name) + ')' : ''}.</div>`
+            : '';
+      const отмена = box.querySelector('[data-act=dr-cancel]');
+      if (отмена) отмена.onclick = async () => {
+        clearInterval(опрос); опрос = null;
+        await api.del('/api/discount-requests/' + з.id).catch(() => {});
+        state.запрос = null;
+        показатьЗапрос();
+      };
+    }
+
+    function ждатьОтвета() {
+      if (опрос) clearInterval(опрос);
+      опрос = setInterval(async () => {
+        let з;
+        try { з = await api.get('/api/discount-requests/' + state.запрос.id); } catch { return; }
+        if (з.status === 'pending') return;
+        clearInterval(опрос); опрос = null;
+        state.запрос = з;
+        if (з.status === 'approved') {
+          state.разрешение = { id: з.id, скидки: new Map(з.items.map(i => [i.product_id, i.discount])) };
+          for (const it of state.items) {
+            if (state.разрешение.скидки.has(it.product.id)) { it.discount = state.разрешение.скидки.get(it.product.id); it.хочет = undefined; }
+          }
+          ui.toast('Владелец разрешил скидку — она уже в чеке');
+          renderItems();
+        } else if (з.status === 'denied') {
+          ui.toast('Скидку сверх предела не разрешили', true);
+        }
+        показатьЗапрос();
+      }, 2500);
+    }
+
+    function попроситьВладельца() {
+      const позиции = state.items.filter(it => !it.setId);
+      if (!позиции.length) { ui.toast('Сначала добавьте изделия в чек', true); return; }
+      const d = ui.modal({
+        title: 'Попросить скидку у владельца',
+        size: 'sm',
+        body: `<p class="muted" style="margin:0 0 8px;font-size:13.5px">Владелец увидит запрос у себя на Главной
+            и ответит. Разрешение — только на этот чек.</p>
+          ${позиции.map((it, k) => `
+            <div class="row" style="gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)">
+              <div class="grow" style="min-width:0">
+                <div style="font-weight:600">${ui.esc(it.product.name)}</div>
+                <div class="muted" style="font-size:12.5px">${ui.money(it.product.retail_price)}
+                  · <span data-pct="${k}"></span></div>
+              </div>
+              <input class="input" type="number" min="0" step="1" data-k="${k}" style="width:120px"
+                value="${Math.round(it.хочет !== undefined ? it.хочет : it.discount) || ''}" placeholder="скидка, сом">
+            </div>`).join('')}
+          <label class="field" style="margin-top:12px"><span>Почему (владелец это увидит)</span>
+            <input id="dr-note" maxlength="300" placeholder="Например: постоянная клиентка, берёт гарнитур"></label>`,
+        footer: `<button class="btn" data-act="cancel">Отмена</button>
+          <button class="btn btn-primary" data-act="send">Отправить владельцу</button>`,
+      });
+      const поля = [...d.body.querySelectorAll('[data-k]')];
+      const проценты = () => поля.forEach(поле => {
+        const it = позиции[Number(поле.dataset.k)];
+        const pct = it.product.retail_price > 0 ? (Number(поле.value) || 0) * 100 / it.product.retail_price : 0;
+        d.body.querySelector(`[data-pct="${поле.dataset.k}"]`).textContent = `${ui.num(pct, 1)}%`;
+      });
+      поля.forEach(поле => поле.addEventListener('input', проценты));
+      проценты();
+      d.foot.querySelector('[data-act=cancel]').onclick = d.close;
+      d.foot.querySelector('[data-act=send]').onclick = async () => {
+        const items = поля.map(поле => ({ product_id: позиции[Number(поле.dataset.k)].product.id,
+          discount: Math.max(Number(поле.value) || 0, 0) }));
+        try {
+          state.запрос = await api.post('/api/discount-requests', {
+            items, customer_id: state.customer ? state.customer.id : null,
+            note: d.body.querySelector('#dr-note').value.trim(),
+          });
+          state.разрешение = null;
+          d.close();
+          показатьЗапрос();
+          ждатьОтвета();
+        } catch (e) { ui.toastErr(e); }
+      };
+    }
+    m.body.addEventListener('click', e => {
+      if (e.target.closest('[data-act=ask-owner]')) { e.preventDefault(); попроситьВладельца(); }
+    });
+
     m.foot.querySelector('[data-act=cancel]').onclick = m.close;
     submitBtn.onclick = async () => {
       const { total } = calc();
@@ -813,6 +938,7 @@ window.Pages.sales = (() => {
         })),
         payment_method: m.body.querySelector('#pos-payment').value,
         note: m.body.querySelector('#pos-note').value.trim(),
+        ...(state.разрешение ? { discount_request_id: state.разрешение.id } : {}),
       };
       if (partialCb.checked) {
         payload.paid = state.paid;

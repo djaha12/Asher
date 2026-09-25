@@ -136,6 +136,8 @@ function checkDevice(user, ключ, { ip = '', name = '' } = {}) {
    */
   audit(user.id, 'device_new', 'user', user.id,
     `Вход с незнакомого устройства (код ${code})${ip ? `, адрес ${ip}` : ''} — ждёт разрешения`);
+  // Главная у владельца обновится сама: он увидит просьбу, не перезагружая страницу.
+  require('./changes').bump('devices', '');
   return { state: 'ждёт', device: db.prepare('SELECT * FROM devices WHERE id = ?').get(info.lastInsertRowid) };
 }
 
