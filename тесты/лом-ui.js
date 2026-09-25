@@ -66,6 +66,9 @@ async function войти(page, логин, пароль) {
   // Точка отсчёта кассы — чтобы увидеть, сколько легло в ящик.
   await зов('POST', '/api/cash/count', { counted: (await зов('GET', '/api/cash/expected')).data.ожидается || 0 });
   const былоВЯщике = (await зов('GET', '/api/cash/expected')).data.ожидается;
+  // Склад лома до продажи: в общем прогоне золото могли принимать и раньше.
+  const граммы585 = async () => ((await зов('GET', '/api/scrap')).data.stock.find(x => x.fineness === 585) || {}).weight || 0;
+  const было585 = await граммы585();
 
   console.log('=== 1. Касса: кольцо в зачёт ===');
   await page.click('#btn-quick-sale');
@@ -128,7 +131,10 @@ async function войти(page, логин, пароль) {
   await page.waitForSelector('#scrap-list');
   await page.waitForTimeout(500);
   const раздел = чисто(await page.innerText('#page'));
-  check('в разделе — 585-я проба и её граммы', /585 проба\s*4,5 г/.test(раздел), раздел.slice(0, 300));
+  const стало585 = await граммы585();
+  check('на складе 585-й прибавилось ровно 4,5 г', Math.abs(стало585 - было585 - 4.5) < 0.0005, [было585, стало585]);
+  const показано = чисто(await page.evaluate(w => ui.num(w, 3), стало585));
+  check('в разделе — 585-я проба и её граммы, как на складе', раздел.includes(`585 проба ${показано} г`), раздел.slice(0, 300));
   check('и акт в списке, с чеком', раздел.includes(чек.scrap.number) && раздел.includes(чек.number));
   await снимок(page, { path: `${OUT}/раздел.png`, fullPage: true });
 
