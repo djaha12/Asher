@@ -150,8 +150,11 @@ window.Pages.dashboard = {
         <div class="big-stat">
           <div class="bs-label">Товара на складе</div>
           <div class="bs-value">${admin ? ui.moneyRich(d.stock.retail_value) : ui.num(d.stock.count) + ' шт'}</div>
-          <div class="bs-sub">${ui.num(d.stock.count)} изделий · <b>${ui.num(d.stock.weight)} г</b>
+          <div class="bs-sub">${ui.num(d.stock.count)} ${изделий(d.stock.count)} · <b>${ui.num(d.stock.weight)} г</b>
             ${d.reserved ? ` · ${d.reserved} в резерве` : ''}</div>
+          ${admin && d.stock.no_price ? `<a class="bs-sub warn" id="qa-no-price" href="#/products/incomplete"
+            style="display:inline-block;margin-top:6px;text-decoration:underline">без цены: ${d.stock.no_price}
+            ${изделий(d.stock.no_price)} — в сумму не входят, дописать</a>` : ''}
         </div>
       </div>
 

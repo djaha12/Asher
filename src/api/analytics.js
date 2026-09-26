@@ -144,7 +144,8 @@ const routes = [
 
       const stock = db.prepare(
         `SELECT COUNT(*) AS cnt, COALESCE(SUM(retail_price),0) AS retail, COALESCE(SUM(purchase_price),0) AS cost,
-                COALESCE(SUM(weight),0) AS weight
+                COALESCE(SUM(weight),0) AS weight,
+                COALESCE(SUM(CASE WHEN retail_price <= 0 THEN 1 ELSE 0 END), 0) AS no_price
          FROM products WHERE status IN ('in_stock','reserved')`
       ).get();
       // Склад в граммах по металлам — для ювелира это такой же понятный
@@ -231,6 +232,8 @@ const routes = [
         today, month,
         stock: {
           count: Number(stock.cnt), retail_value: round2(stock.retail), cost_value: round2(stock.cost),
+          // Без цены — в сумму склада не входят; владелец видит, сколько их, и дописывает.
+          no_price: Number(stock.no_price),
           weight: round2(stock.weight), by_metal: stockByMetal.map(m => ({
             ...m, weight: round2(m.weight), retail: round2(m.retail),
           })),

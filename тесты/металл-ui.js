@@ -134,6 +134,21 @@ async function войти(page, логин, пароль) {
     check('строка «Без металла» с Главной ушла', !/Без металла/.test(чисто(await владелец.textContent('#app'))));
   }
 
+  console.log('\n=== 4б. «Без цены» на Главной ведёт в «Не заполнены» ===');
+  await владелец.goto(BASE + '/#/dashboard');
+  await владелец.waitForSelector('#qa-no-price', { timeout: 10000 }).catch(() => {});
+  const безЦены = await владелец.$('#qa-no-price');
+  const текстБезЦены = безЦены ? чисто(await безЦены.textContent()) : '';
+  check('на Главной видно, сколько изделий без цены и что они не в сумме',
+    /без цены: \d+ издел/.test(текстБезЦены) && /в сумму не входят/.test(текстБезЦены), текстБезЦены);
+  if (безЦены) {
+    await безЦены.click();
+    await владелец.waitForSelector('#pf-chips [data-incomplete].active', { timeout: 8000 }).catch(() => {});
+    check('нажали — каталог сразу с отбором «Не заполнены»', Boolean(await владелец.$('#pf-chips [data-incomplete].active')));
+    await владелец.waitForTimeout(800);
+    check('и в нём наше изделие без цены', чисто(await владелец.textContent('#prod-list')).includes(МЕТКА + '-ж'));
+  }
+
   console.log('\n=== 5. Приёмка: в строках металл и проба стоят ===');
   await владелец.setViewportSize({ width: 1400, height: 950 });
   await владелец.goto(BASE + '/#/products');

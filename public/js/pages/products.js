@@ -1368,6 +1368,13 @@ window.Pages.products = (() => {
       el.querySelector('#pf-add').addEventListener('click', () => openEditor(null, doRefresh));
       const приёмка = el.querySelector('#pf-receipt');
       if (приёмка) приёмка.addEventListener('click', () => receiptDialog(doRefresh));
+      // «#/products/incomplete» — сразу с отбором «Не заполнены»: так на него
+      // ведёт строка «без цены» с Главной.
+      if (param === 'incomplete') {
+        filters.incomplete = '1';
+        el.querySelector('#pf-chips [data-incomplete]').classList.add('active');
+        param = null;
+      }
       await refresh(el);
       if (param) openDetail(Number(param), () => refresh(el));
     },
