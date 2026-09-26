@@ -618,6 +618,11 @@ window.Pages.sales = (() => {
                 <option value="cash">Наличные</option><option value="card">Карта</option>
                 <option value="transfer">Перевод</option><option value="installment">Рассрочка</option>
               </select></label>
+            <label class="field hidden" id="pos-first-wrap"><span>Первый взнос внесли</span>
+              <select id="pos-first">
+                <option value="cash">Наличными</option><option value="card">Картой</option>
+                <option value="transfer">Переводом</option>
+              </select></label>
           </div>
         </div>
         <div class="form-grid">
@@ -795,6 +800,8 @@ window.Pages.sales = (() => {
     discPctInput.addEventListener('input', ui.debounce(applyPctDiscount, 350));
     m.body.querySelector('#pos-payment').addEventListener('change', e => {
       state.payment = e.target.value;
+      // Рассрочка — договорённость о долге; сам взнос платят чем-то конкретным.
+      m.body.querySelector('#pos-first-wrap').classList.toggle('hidden', e.target.value !== 'installment');
       // «Рассрочка» почти всегда означает частичную оплату — включаем поля сразу.
       if (e.target.value === 'installment' && !partialCb.checked) {
         partialCb.checked = true;
@@ -1098,6 +1105,8 @@ window.Pages.sales = (() => {
           product_id: it.product.id, discount: it.discount, set_id: it.setId || null,
         })),
         payment_method: m.body.querySelector('#pos-payment').value,
+        ...(m.body.querySelector('#pos-payment').value === 'installment'
+          ? { first_payment_method: m.body.querySelector('#pos-first').value } : {}),
         note: m.body.querySelector('#pos-note').value.trim(),
         ...(state.разрешение ? { discount_request_id: state.разрешение.id } : {}),
         // Цену грамма сервер считает сам; свою передаём, только если её поставил владелец.

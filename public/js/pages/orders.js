@@ -11,6 +11,14 @@ window.Pages.orders = (() => {
   let showArchive = false;
 
   const граммы = w => (Number(w) > 0 ? ui.num(w, 3) + ' г' : '');
+  /*
+   * Чем платят. Раньше любая оплата заказа записывалась наличными, и оплата
+   * картой вечером превращалась в недостачу в сверке кассы: система ждала
+   * в ящике деньги, которые ушли на банковский счёт.
+   */
+  const выборСпособа = (имя, подпись) => `<label class="field"><span>${подпись}</span>
+    <select ${имя}><option value="cash">Наличные</option><option value="card">Карта</option>
+      <option value="transfer">Перевод</option></select></label>`;
   const остаток = o => Math.max(0, (o.final_price || o.estimate) - o.paid);
   const открыт = o => o.status === 'accepted' || o.status === 'in_progress';
 
@@ -314,6 +322,7 @@ window.Pages.orders = (() => {
       body: `<label class="field"><span>Итоговая стоимость *</span>
           <input type="number" id="dlv-price" min="0" step="1" value="${o.estimate || ''}"></label>
         <p class="muted" style="margin-top:0">Оплачено: ${ui.money(o.paid)}. Остаток будет записан как оплата при выдаче.</p>
+        ${выборСпособа('id="dlv-method"', 'Чем доплачивают')}
         ${o.weight ? `<p class="hint-box" style="margin:0">Вес при приёме: <b>${граммы(o.weight)}</b>. Взвесьте изделие при клиенте.</p>` : ''}`,
       footer: `<button class="btn" data-act="cancel">Отмена</button>
         <button class="btn btn-primary" data-act="ok">Выдать</button>`,
@@ -324,7 +333,9 @@ window.Pages.orders = (() => {
       try {
         await api.put('/api/orders/' + o.id, { final_price: price });
         const rest = Math.max(0, price - o.paid);
-        if (rest > 0) await api.post(`/api/orders/${o.id}/payment`, { amount: rest });
+        if (rest > 0) {
+          await api.post(`/api/orders/${o.id}/payment`, { amount: rest, method: m.body.querySelector('#dlv-method').value });
+        }
         await api.post(`/api/orders/${o.id}/status`, { status: 'delivered' });
         ui.toast('Заказ выдан 🎉');
         m.close(); onChange && onChange();
@@ -337,6 +348,7 @@ window.Pages.orders = (() => {
       title: 'Оплата по заказу ' + o.number,
       size: 'sm',
       body: `<label class="field"><span>Сумма *</span><input type="number" id="pay-amount" min="1" step="1"></label>
+        ${выборСпособа('id="pay-method"', 'Чем платят')}
         <p class="muted" style="margin-top:0">Уже оплачено: ${ui.money(o.paid)}</p>`,
       footer: `<button class="btn" data-act="cancel">Отмена</button>
         <button class="btn btn-primary" data-act="ok">Принять оплату</button>`,
@@ -344,7 +356,10 @@ window.Pages.orders = (() => {
     m.foot.querySelector('[data-act=cancel]').onclick = m.close;
     m.foot.querySelector('[data-act=ok]').onclick = async () => {
       try {
-        await api.post(`/api/orders/${o.id}/payment`, { amount: Number(m.body.querySelector('#pay-amount').value) });
+        await api.post(`/api/orders/${o.id}/payment`, {
+          amount: Number(m.body.querySelector('#pay-amount').value),
+          method: m.body.querySelector('#pay-method').value,
+        });
         ui.toast('Оплата принята');
         m.close(); onChange && onChange();
       } catch (e) { ui.toastErr(e); }
@@ -388,6 +403,7 @@ window.Pages.orders = (() => {
           ${isNew ? '<label class="field"><span>Предоплата</span><input name="prepayment" type="number" min="0" step="1"></label>' : ''}
           <label class="field"><span>Срок готовности</span><input name="due_date" type="date" value="${ui.esc(o.due_date || '')}"></label>
         </div>
+        ${isNew ? выборСпособа('name="method"', 'Чем внесли предоплату') : ''}
         <label class="field"><span>Заметка</span><input name="note" value="${ui.esc(o.note || '')}"></label>
         ${isNew ? `<div class="field"><span>Фото при приёме</span>
           <div class="order-photos" id="ord-new-photos">
@@ -430,7 +446,7 @@ window.Pages.orders = (() => {
         item: v.item, weight: v.weight, stones: v.stones, defects: v.defects,
         customer_id: customer ? customer.id : null,
       };
-      if (isNew) payload.prepayment = v.prepayment;
+      if (isNew) { payload.prepayment = v.prepayment; payload.method = v.method; }
       сохранить.disabled = true;
       try {
         if (!isNew) {

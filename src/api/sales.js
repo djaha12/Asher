@@ -229,7 +229,15 @@ function createSaleTx(body, session, opts = {}) {
      */
     const зачёт = round2(Math.min(opts.зачёт || 0, paid));
     const живыми = round2(paid - зачёт);
-    const способ = payment === 'installment' ? 'cash' : payment;
+    /*
+     * Рассрочка — это договорённость о долге, а не способ платежа. Первый
+     * взнос вносят наличными, картой или переводом, и касса спрашивает как.
+     * Раньше он всегда записывался наличными: взнос картой сверка ждала
+     * в ящике, и вечером выходила недостача, которой не было.
+     */
+    const способ = payment === 'installment'
+      ? (['cash', 'card', 'transfer'].includes(body.first_payment_method) ? body.first_payment_method : 'cash')
+      : payment;
     const вставить = db.prepare(
       `INSERT INTO payments (customer_id, sale_id, amount, method, note, in_till, user_id, created_at)
        VALUES (?,?,?,?,?,?,?,?)`
