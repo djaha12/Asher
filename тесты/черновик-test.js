@@ -11,7 +11,9 @@ require('./устройство');   // проверки называют себ
  *   — такие изделия собирает фильтр «Не заполнены»; заполнили — ушли из него;
  *   — без цены изделие не продаётся: за ноль оно из кассы не уйдёт;
  *   — стереть артикул у заведённого изделия нельзя;
- *   — в приёмке обязательна только закупка: из неё складывается долг.
+ *   — в приёмке тоже ничего не обязательно; долг поставщику складывается
+ *     из указанных закупочных, строка без закупки в него не входит;
+ *   — изделие без закупки владелец находит в «Не заполнены».
  */
 const BASE = process.env.BASE || 'http://127.0.0.1:3122';
 
@@ -77,9 +79,9 @@ async function main() {
   let список = await незаполненные();
   check('все три — в «Не заполнены»', [первое.id, второе.id, отАнны].every(id => список.includes(id)), список.length);
   r = await админ.зов('PUT', '/api/products/' + первое.id, {
-    name: 'Кольцо «Дописали потом»', retail_price: 45000, metal: 'Белое золото', weight: 3.2,
+    name: 'Кольцо «Дописали потом»', retail_price: 45000, purchase_price: 30000, metal: 'Белое золото', weight: 3.2,
   });
-  check('дописали название, цену, металл и вес', r.status === 200, r.data);
+  check('дописали название, цены, металл и вес', r.status === 200, r.data);
   список = await незаполненные();
   check('заполненное ушло из «Не заполнены»', !список.includes(первое.id) && список.includes(второе.id));
   r = await админ.зов('PUT', '/api/products/' + второе.id, { sku: '' });
@@ -98,7 +100,7 @@ async function main() {
   r = await анна.зов('POST', '/api/sales', { items: [{ product_id: первое.id }], payment_method: 'cash' });
   check('с ценой — продаётся как обычно', r.status === 200 && r.data.total === 45000, r.data);
 
-  console.log('\n=== 4. Приёмка: обязательна только закупка ===');
+  console.log('\n=== 4. Приёмка: обязательных полей нет ===');
   const поставщик = (await админ.зов('POST', '/api/suppliers', { name: 'Поставщик черновиков ' + process.pid })).data.id;
   const долг = async () => ((await админ.зов('GET', '/api/debts/suppliers')).data.items || [])
     .find(s => s.id === поставщик) || { balance: 0 };
@@ -115,8 +117,26 @@ async function main() {
     нашиАртикулы.filter(p => p.name === 'Без названия').length === 2 && нашиАртикулы.some(p => p.name === 'Серьги'),
     нашиАртикулы.map(p => p.name));
   check('долг поставщику — ровно закупка: 17 500', Math.abs((await долг()).balance - 17500) < 0.01, (await долг()).balance);
-  r = await админ.зов('POST', '/api/receipts', { supplier_id: поставщик, items: [{ name: 'Без закупки' }] });
-  check('строка без закупки — отказ: из неё складывается долг', r.status === 400 && /закупочная/.test(r.data.error), r.data);
+  r = await админ.зов('POST', '/api/receipts', {
+    supplier_id: поставщик, items: [{ name: 'Без закупки' }, { purchase_price: 1000 }],
+  });
+  check('строка без закупки и цены продажи принята', r.status === 200, r.data);
+  check('в долг вошла только указанная закупка: 18 500', Math.abs((await долг()).balance - 18500) < 0.01, (await долг()).balance);
+  const безЗакупки = (await админ.зов('GET', '/api/products?search=' + encodeURIComponent('Без закупки'))).data.items
+    .find(p => p.supplier_id === поставщик);
+  check('закупка у неё — ноль', безЗакупки && безЗакупки.purchase_price === 0, безЗакупки);
+  check('владелец видит её в «Не заполнены»', (await незаполненные()).includes(безЗакупки && безЗакупки.id));
+  r = await админ.зов('POST', '/api/receipts', { supplier_id: поставщик, items: [{ name: 'Совсем без закупки' }] });
+  check('накладная вовсе без закупок принята, долг не вырос', r.status === 200
+    && Math.abs((await долг()).balance - 18500) < 0.01, [r.data, (await долг()).balance]);
+  r = await админ.зов('POST', '/api/receipts', { supplier_id: поставщик, items: [{ purchase_price: -10 }] });
+  check('отрицательная закупка — отказ', r.status === 400 && /отрицательной/.test(r.data.error), r.data);
+
+  console.log('\n=== 4б. Продавец: закупку не видит — и в «Не заполнены» из-за неё не попадает ===');
+  await админ.зов('PUT', '/api/products/' + безЗакупки.id, { retail_price: 9000, metal: 'Золото', weight: 2 });
+  const уАнны = ((await анна.зов('GET', '/api/products?incomplete=1&limit=2000')).data.items || []).map(p => p.id);
+  check('у продавца заполненное по его полям изделие не числится незаполненным', !уАнны.includes(безЗакупки.id));
+  check('а у владельца — числится, пока нет закупки', (await незаполненные()).includes(безЗакупки.id));
 
   console.log('\n=== 5. Явный артикул — как раньше ===');
   r = await админ.зов('POST', '/api/products', { sku: второе.sku });

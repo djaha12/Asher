@@ -26,6 +26,7 @@
  */
 const { db, nowIso, round2, money, audit, transaction, getSetting } = require('../db');
 const { ApiError } = require('./util');
+const металл = require('../металл');
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -45,7 +46,8 @@ function закупочная(строка, курсПоУмолчанию) {
   if (валюта === 'USD') {
     const вВалюте = round2(строка.purchase_price_orig);
     const курс = round2(строка.purchase_rate) || курсПоУмолчанию;
-    if (!(вВалюте > 0)) throw new ApiError(400, 'Укажите закупочную цену в долларах');
+    if (вВалюте < 0) throw new ApiError(400, 'Закупочная цена не может быть отрицательной');
+    if (!(вВалюте > 0)) return { сумма: 0, валюта: '', вВалюте: 0, курс: 0 };   // допишут потом
     if (!(курс > 0)) throw new ApiError(400, 'Укажите курс доллара — без него закупочную не посчитать');
     return { сумма: round2(вВалюте * курс), валюта: 'USD', вВалюте, курс };
   }
@@ -136,10 +138,11 @@ const routes = [
       for (const [i, строка] of строки.entries()) {
         const номер = i + 1;
         /*
-         * Артикул, название и цену продажи можно дописать потом, как и в
-         * карточке изделия (products.js): не указан артикул — выдаём следующий
-         * по порядку, название — «Без названия». Закупочная остаётся
-         * обязательной: из неё складывается долг поставщику по накладной.
+         * Обязательных полей нет, как и в карточке изделия (products.js): не
+         * указан артикул — выдаём следующий по порядку, название — «Без
+         * названия». Закупку и цену продажи дописывают потом; долг поставщику
+         * складывается из указанных закупочных, строка без закупки в него не
+         * входит.
          */
         const { следующийАртикул, БЕЗ_НАЗВАНИЯ } = require('./products');
         let sku = String(строка.sku || '').trim();
@@ -152,9 +155,7 @@ const routes = [
         const name = String(строка.name || '').trim() || БЕЗ_НАЗВАНИЯ;
 
         const закуп = закупочная(строка, курсПоУмолчанию);
-        if (!(закуп.сумма > 0)) {
-          throw new ApiError(400, `Строка ${номер}: закупочная цена должна быть больше нуля`);
-        }
+        if (закуп.сумма < 0) throw new ApiError(400, `Строка ${номер}: закупочная цена не может быть отрицательной`);
         const retail = round2(строка.retail_price);
         if (retail < 0) throw new ApiError(400, `Строка ${номер}: цена продажи не может быть отрицательной`);
 
@@ -162,8 +163,8 @@ const routes = [
           sku, name, закуп, retail,
           barcode: String(строка.barcode || '').trim(),
           category_id: строка.category_id ? Number(строка.category_id) : null,
-          metal: String(строка.metal || '').trim(),
-          fineness: String(строка.fineness || '').trim().slice(0, 10),
+          metal: металл.правильноеНаписание(строка.metal, [металл.поУмолчанию().metal]),
+          fineness: металл.праваяПроба(строка.fineness),
           weight: Math.max(0, числоИлиНоль(строка.weight)),
           size: String(строка.size || '').trim(),
           carat: Math.max(0, Math.round(числоИлиНоль(строка.carat) * 1000) / 1000),

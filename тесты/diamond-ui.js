@@ -25,8 +25,16 @@ const check = (n, c, e) => c ? (ok++, console.log('  ok  ' + n))
   if (stone) console.log('     пример:', (await stone.textContent()).trim());
   await p.screenshot({ path: `${OUT}/14-каталог-бриллианты.png` });
 
-  // карточка изделия: открываем демо-изделие, а не то, что осталось от других тестов
-  await p.fill('#pf-search', 'AS-'); await p.waitForTimeout(1600);
+  /*
+   * Карточка изделия: открываем демо-изделие с пробой, а не то, что осталось
+   * от других тестов. Искать просто «AS-» и брать первое нельзя: изделию,
+   * заведённому без артикула, выдаётся следующий номер той же серии, и первым
+   * оказывается чужой черновик без металла (черновик-test).
+   */
+  const демо = (await p.evaluate(() => api.get('/api/products?search=AS-&limit=1000'))).items
+    .find(x => /^AS-\d+$/.test(x.sku) && x.fineness === '750' && x.name !== 'Без названия');
+  check('демо-изделие с пробой 750 нашлось', Boolean(демо));
+  await p.fill('#pf-search', демо ? демо.sku : 'AS-'); await p.waitForTimeout(1600);
   const card = await p.$('.pcard');
   await card.click(); await p.waitForTimeout(1400);
   const body = await p.$eval('.modal-body', el => el.innerText);

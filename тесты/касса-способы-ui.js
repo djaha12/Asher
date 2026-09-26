@@ -18,6 +18,13 @@ const check = (имя, усл, доп) => {
   else { fail++; провалы.push(имя); console.log('  FAIL ' + имя, доп === undefined ? '' : String(доп).slice(0, 260)); }
 };
 const МЕТКА = 'СУИ' + process.pid;
+/*
+ * Имя клиентки — без цифр. Поиск клиента сверяет цифры запроса с телефонами,
+ * и «Айжан СУИ347» находил демо-клиентку с телефоном …513-47-23 и её личной
+ * скидкой 5% — рассрочка выходила не на ту сумму. Цифры номера процесса
+ * заменяем буквами: имя остаётся своим для каждого прогона.
+ */
+const КЛИЕНТКА = 'Айжан СУИ' + String(process.pid).replace(/\d/g, ц => 'абвгдежзик'[ц]);
 const ВЕРХ = '#modal-root > .modal-overlay:last-child';
 
 let cookie = '';
@@ -46,7 +53,7 @@ async function войти(page, логин, пароль) {
     body: JSON.stringify({ username: 'admin', password: 'admin123' }),
   });
   cookie = (вход.headers.get('set-cookie') || '').split(';')[0];
-  await зов('POST', '/api/customers', { name: `Айжан ${МЕТКА}` });
+  await зов('POST', '/api/customers', { name: КЛИЕНТКА });
   await зов('POST', '/api/products', {
     sku: `${МЕТКА}-1`, name: 'Колье в рассрочку', metal: 'Золото', retail_price: 30000, purchase_price: 10000,
   });
@@ -117,7 +124,7 @@ async function войти(page, логин, пароль) {
   await page.selectOption('#pos-first', 'card');
   await page.fill('#pos-paid', '10000');
   await page.fill('#pos-due', '2030-01-01');
-  await page.fill('#pos-customer', `Айжан ${МЕТКА}`);
+  await page.fill('#pos-customer', КЛИЕНТКА);
   await page.waitForTimeout(1200);
   const клиентка = await page.$('.search-results .sr-item[data-i]');
   if (клиентка) await клиентка.dispatchEvent('mousedown');

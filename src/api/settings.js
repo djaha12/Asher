@@ -5,6 +5,7 @@ const копия = require('../копия');
 const { ApiError } = require('./util');
 const { changePassword, passwordProblem, destroyUserSessions, countUserSessions } = require('../auth');
 const { PRESETS, LOCALE_KEYS, presetFor } = require('../locale');
+const металл = require('../металл');
 
 /*
  * usd_rate — курс доллара для закупки: поставщики часто считают в валюте,
@@ -46,8 +47,14 @@ function активныхОснователей() {
   return Number(db.prepare(`SELECT COUNT(*) AS c FROM users WHERE role = 'owner' AND active = 1`).get().c);
 }
 
+/*
+ * default_metal и default_fineness — что стоит в новом изделии и в строках
+ * приёмки, пока их не поменяли (металл.js). Не заданы — белое золото 750;
+ * стёрты — не подставляем ничего.
+ */
 const SETTING_KEYS = ['store_name', 'site_note', 'store_address', 'store_phone', 'usd_rate',
-  'gram_price', 'work_price', 'max_discount_percent', 'scrap_price_585', ...LOCALE_KEYS];
+  'gram_price', 'work_price', 'max_discount_percent', 'scrap_price_585',
+  'default_metal', 'default_fineness', ...LOCALE_KEYS];
 
 /*
  * Состояние резервных копий — то, что владелец должен узнать САМ, не заходя
@@ -98,7 +105,7 @@ const routes = [
     method: 'GET', path: '/api/settings',
     handler: ({ session }) => {
       const out = {};
-      for (const k of SETTING_KEYS) out[k] = getSetting(k);
+      for (const k of SETTING_KEYS) out[k] = getSetting(k, металл.ПО_УМОЛЧАНИЮ[k] ?? '');
       /*
        * Курс закупки — часть закупочной кухни: зная его и цену в долларах,
        * закупочную считают в уме. Продавцу настройки нужны только ради валюты
@@ -150,6 +157,10 @@ const routes = [
         }
         body.scrap_price_585 = сырое === '' ? '' : Math.round(ц * 100) / 100;
       }
+      if (body.default_metal !== undefined) {
+        body.default_metal = металл.правильноеНаписание(body.default_metal).slice(0, 60);
+      }
+      if (body.default_fineness !== undefined) body.default_fineness = металл.праваяПроба(body.default_fineness);
       const ломБыл = getSetting('scrap_price_585');
       // Курс влияет на себестоимость всего, что закупят дальше, — его смена
       // должна оставлять в журнале конкретные цифры, а не общую фразу.

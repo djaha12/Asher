@@ -1,5 +1,6 @@
 'use strict';
 const { db, round2, getSetting, видитВсё } = require('../db');
+const металл = require('../металл');
 
 function tzMod(query) {
   const tz = Number(query.tz) || 0;
@@ -148,13 +149,21 @@ const routes = [
       ).get();
       // Склад в граммах по металлам — для ювелира это такой же понятный
       // показатель, как деньги: сколько золота лежит в витрине.
+      /*
+       * metal_raw и fineness_raw — как записано на самом деле, fix — во что
+       * превратит группу кнопка «исправить» (металл.js): без металла — в
+       * металл по умолчанию, опечатку — в привычное написание.
+       */
+      const умолч = металл.поУмолчанию();
       const stockByMetal = db.prepare(
-        `SELECT CASE WHEN metal = '' THEN 'Без металла'
+        `SELECT CASE WHEN COALESCE(metal, '') = ''
+                     THEN 'Без металла' || CASE WHEN COALESCE(fineness, '') = '' THEN '' ELSE ', проба ' || fineness END
                      ELSE TRIM(metal || ' ' || COALESCE(fineness, '')) END AS metal,
+                COALESCE(metal, '') AS metal_raw, COALESCE(fineness, '') AS fineness_raw,
                 COUNT(*) AS cnt, COALESCE(SUM(weight),0) AS weight, COALESCE(SUM(retail_price),0) AS retail
          FROM products WHERE status IN ('in_stock','reserved')
-         GROUP BY metal, fineness ORDER BY weight DESC`
-      ).all();
+         GROUP BY COALESCE(metal, ''), COALESCE(fineness, '') ORDER BY weight DESC`
+      ).all().map(m => ({ ...m, fix: металл.исправление(m.metal_raw, m.fineness_raw, умолч) }));
       const reserved = db.prepare(`SELECT COUNT(*) AS cnt FROM products WHERE status = 'reserved'`).get();
       const customers = db.prepare('SELECT COUNT(*) AS cnt FROM customers').get();
       const activeOrders = db.prepare(

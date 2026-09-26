@@ -2,6 +2,7 @@
 const { db, nowIso, round2, audit, видитВсё } = require('../db');
 const { ApiError } = require('./util');
 const { listImages, listCertificates, removeFiles } = require('./images');
+const металл = require('../металл');
 
 const PRODUCT_FIELDS = ['sku', 'barcode', 'name', 'category_id', 'metal', 'weight', 'size', 'gems',
   'gem_summary', 'purchase_price', 'retail_price', 'supplier_id', 'status', 'reserved_for',
@@ -204,9 +205,13 @@ function validateProduct(body, { partial = false, existing = null } = {}) {
   if (body.barcode !== undefined) out.barcode = String(body.barcode || '').trim();
   if (body.category_id !== undefined) out.category_id = toId(body.category_id, 'категория');
   if (body.supplier_id !== undefined) out.supplier_id = toId(body.supplier_id, 'поставщик');
-  if (body.metal !== undefined) out.metal = String(body.metal || '').trim();
+  // «Белое золоти» и «белое золото» сохраняем как «Белое золото» — иначе на
+  // Главной одно и то же золото расползается на несколько строк (металл.js).
+  if (body.metal !== undefined) {
+    out.metal = металл.правильноеНаписание(body.metal, [металл.поУмолчанию().metal]);
+  }
   // Проба и характеристики главного бриллианта — отдельные поля изделия.
-  if (body.fineness !== undefined) out.fineness = String(body.fineness || '').trim().slice(0, 10);
+  if (body.fineness !== undefined) out.fineness = металл.праваяПроба(body.fineness);
   if (body.color !== undefined) out.color = String(body.color || '').trim().toUpperCase().slice(0, 12);
   if (body.clarity !== undefined) out.clarity = String(body.clarity || '').trim().toUpperCase().slice(0, 12);
   if (body.carat !== undefined) {
@@ -366,8 +371,10 @@ const routes = [
       if (query.store_id) { cond.push('p.store_id = ?'); args.push(Number(query.store_id)); }
       if (query.ownership) { cond.push('p.ownership = ?'); args.push(query.ownership); }
       // «Не заполнены» — заведены второпях: без названия, цены, металла или веса.
+      // Владелец видит закупку, поэтому ему сюда же попадают изделия без неё.
       if (query.incomplete === '1') {
-        cond.push(`(p.name = ? OR p.retail_price <= 0 OR COALESCE(p.metal, '') = '' OR COALESCE(p.weight, 0) <= 0)`);
+        const безЗакупки = видитВсё(session.role) ? ' OR COALESCE(p.purchase_price, 0) <= 0' : '';
+        cond.push(`(p.name = ? OR p.retail_price <= 0 OR COALESCE(p.metal, '') = '' OR COALESCE(p.weight, 0) <= 0${безЗакупки})`);
         args.push(БЕЗ_НАЗВАНИЯ);
       }
       if (query.has_photo === '1') cond.push('EXISTS (SELECT 1 FROM product_images pi WHERE pi.product_id = p.id)');
@@ -442,6 +449,30 @@ const routes = [
     // Какой артикул выдадим, если оставить поле пустым, — форма показывает его подсказкой.
     method: 'GET', path: '/api/products/next-sku',
     handler: () => ({ sku: следующийАртикул() }),
+  },
+  {
+    /*
+     * Кнопка на Главной: изделия без металла или с опечаткой в нём получают
+     * правильные металл и пробу разом, а не по одной карточке. Что именно
+     * станет, сервер считает сам — тем же правилом, по которому Главная
+     * показала кнопку, — а приложение присылает только, какую группу править.
+     * Правим все изделия группы, и проданные тоже: металл — это правда об
+     * изделии, и в отчётах по проданному он нужен так же.
+     */
+    method: 'POST', path: '/api/products/fix-metal', admin: true,
+    handler: ({ body, session }) => {
+      const был = String(body.metal ?? ''), была = String(body.fineness ?? '');
+      const станет = металл.исправление(был, была, металл.поУмолчанию());
+      if (!станет) throw new ApiError(400, 'Здесь исправлять нечего');
+      const r = db.prepare(
+        `UPDATE products SET metal = ?, fineness = ?
+          WHERE COALESCE(metal, '') = ? AND COALESCE(fineness, '') = ?`
+      ).run(станет.metal, станет.fineness, был, была);
+      const что = [был || 'без металла', была].filter(Boolean).join(' ');
+      audit(session.userId, 'update', 'product', null,
+        `Металл «${что}» → «${[станет.metal, станет.fineness].filter(Boolean).join(' ')}» у изделий: ${r.changes}`);
+      return { updated: Number(r.changes), ...станет };
+    },
   },
   {
     method: 'GET', path: '/api/products/meta',

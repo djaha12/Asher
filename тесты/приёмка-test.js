@@ -135,7 +135,7 @@ async function main() {
     supplier_id: поставщик.id,
     items: [
       { sku: МЕТКА + '-ok', name: 'Хорошая строка', purchase_price: 50000, retail_price: 80000 },
-      { sku: МЕТКА + '-bad', name: 'Плохая строка', purchase_price: 0, retail_price: 80000 },
+      { sku: МЕТКА + '-bad', name: 'Плохая строка', purchase_price: -5, retail_price: 80000 },
     ],
   });
   check('накладная с ошибкой отклонена', сбой.status === 400, сбой.data);
@@ -149,10 +149,10 @@ async function main() {
   const мусор = (тело, что) => админ.зов('POST', '/api/receipts', { supplier_id: поставщик.id, ...тело })
     .then(r => check(что, r.status === 400, r.data));
   await мусор({ items: [] }, 'пустая накладная — отказ');
-  // Без артикула, названия и цены продажи строка теперь принимается — их
-  // дописывают потом (это проверяет черновик-test). Без закупки — нет: из неё долг.
-  await мусор({ items: [{ sku: МЕТКА + '-y', name: 'Без закупки', retail_price: 2 }] },
-    'изделие без закупочной цены — отказ');
+  // Пустые артикул, название и цены строка принимает — их дописывают потом
+  // (это проверяет черновик-test). Отрицательную закупку — нет.
+  await мусор({ items: [{ sku: МЕТКА + '-y', name: 'Минус', purchase_price: -1, retail_price: 2 }] },
+    'отрицательная закупочная цена — отказ');
   await мусор({ items: [
     { sku: МЕТКА + '-z', name: 'Один', purchase_price: 1, retail_price: 2 },
     { sku: МЕТКА + '-z', name: 'Тот же артикул', purchase_price: 1, retail_price: 2 },

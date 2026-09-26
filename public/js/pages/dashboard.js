@@ -26,8 +26,15 @@ window.Pages.dashboard = {
       : n % 10 === 1 ? 'продажа' : (n % 10 >= 2 && n % 10 <= 4) ? 'продажи' : 'продаж';
     const debts = d.debts || { customers_owe: 0, overdue: 0, debtors_count: 0, top: [] };
 
-    // Разбивка склада по металлам — показываем три самых весомых.
-    const metals = (d.stock.by_metal || []).filter(m => m.weight > 0).slice(0, 3);
+    // Разбивка склада по металлам — показываем три самых весомых. Владельцу
+    // ещё и то, что можно исправить одной кнопкой: изделия без металла и с
+    // опечаткой в нём, даже если они легче или вовсе без веса.
+    const всеМеталлы = d.stock.by_metal || [];
+    const metals = всеМеталлы.filter(m => m.weight > 0).slice(0, 3);
+    if (admin) for (const m of всеМеталлы) if (m.fix && !metals.includes(m)) metals.push(m);
+    const изделий = n => (n % 100 >= 11 && n % 100 <= 14) ? 'изделий'
+      : n % 10 === 1 ? 'изделие' : (n % 10 >= 2 && n % 10 <= 4) ? 'изделия' : 'изделий';
+    const металлИПроба = f => [f.metal, f.fineness].filter(Boolean).join(' ');
 
     /*
      * Тревоги — самым первым, до денег.
@@ -193,11 +200,13 @@ window.Pages.dashboard = {
 
           ${metals.length ? `<div class="card">
             <h3 class="card-title">Склад по металлам</h3>
-            ${metals.map(m => `
+            ${metals.map((m, i) => `
               <div class="row" style="padding:9px 0;border-bottom:1px solid var(--line)">
                 <div class="grow">
                   <div style="font-weight:600">${ui.esc(m.metal)}</div>
-                  <div class="muted" style="font-size:13px">${m.cnt} изделий</div>
+                  <div class="muted" style="font-size:13px">${m.cnt} ${изделий(m.cnt)}</div>
+                  ${admin && m.fix ? `<button class="btn btn-sm" data-fix-metal="${i}" style="margin-top:6px">
+                    ${m.metal_raw ? 'Исправить на' : 'Проставить'} «${ui.esc(металлИПроба(m.fix))}»</button>` : ''}
                 </div>
                 <div style="text-align:right">
                   <div class="big-money">${ui.num(m.weight)} г</div>
@@ -322,6 +331,27 @@ window.Pages.dashboard = {
       } catch (e) { ui.toastErr(e); }
     };
     el.querySelectorAll('[data-move-ok]').forEach(b => { b.onclick = () => отметить(b, 'confirm'); });
+    /*
+     * «Без металла» и опечатки вроде «Белое золоти» — одной кнопкой всей
+     * группе, а не по карточке. Что станет, сервер считает сам тем же правилом.
+     */
+    el.querySelectorAll('[data-fix-metal]').forEach(b => {
+      b.onclick = async () => {
+        const m = metals[Number(b.dataset.fixMetal)];
+        const станет = металлИПроба(m.fix);
+        const вопрос = m.metal_raw
+          ? `Исправить «${металлИПроба({ metal: m.metal_raw, fineness: m.fineness_raw })}» на «${станет}»?`
+          : `Проставить «${станет}» всем изделиям без металла${m.fineness_raw ? ` с пробой ${m.fineness_raw}` : ''}?`;
+        if (!await ui.confirmDialog(вопрос + ' На витрине таких: ' + m.cnt
+          + '. Если какое-то из них другое, поправьте его потом в карточке.', { okLabel: 'Да, исправить' })) return;
+        b.disabled = true;
+        try {
+          const r = await api.post('/api/products/fix-metal', { metal: m.metal_raw, fineness: m.fineness_raw });
+          ui.toast(`Готово: «${станет}» у ${r.updated} ${изделий(r.updated)}`);
+          Pages.dashboard.render(el);
+        } catch (e) { ui.toastErr(e); b.disabled = false; }
+      };
+    });
     // Ответ на запрос скидки и разрешение устройства — одним нажатием, строка уходит.
     const ответить = async (b, путь, текст) => {
       b.disabled = true;

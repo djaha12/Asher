@@ -64,6 +64,21 @@ window.Pages.settings = (() => {
                 У каждого изделия курс запоминается на момент закупки, поэтому смена курса
                 не меняет себестоимость и прибыль прошлых месяцев.</p>
 
+              <h4 style="margin:18px 0 10px">Новое изделие</h4>
+              <div class="form-grid">
+                <label class="field"><span>Металл</span>
+                  <input name="default_metal" list="st-metal-list" placeholder="не подставлять"
+                    value="${ui.esc(s.default_metal || '')}"></label>
+                <label class="field"><span>Проба</span>
+                  <input name="default_fineness" inputmode="numeric" placeholder="не подставлять"
+                    value="${ui.esc(s.default_fineness || '')}"></label>
+              </div>
+              <datalist id="st-metal-list"><option>Белое золото</option><option>Жёлтое золото</option>
+                <option>Красное золото</option></datalist>
+              <p class="form-hint">Сразу стоят в новом изделии и в строках приёмки — вписывать
+                каждый раз не нужно. У отдельного изделия их можно поменять. Сотрите, если
+                подставлять ничего не надо.</p>
+
               <h4 style="margin:18px 0 10px">Цена от грамма</h4>
               <div class="form-grid">
                 <label class="field"><span>Цена грамма золота 750</span>

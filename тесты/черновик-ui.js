@@ -67,16 +67,23 @@ async function войти(page, логин, пароль) {
   const подсказка = await page.getAttribute('#prod-form [name=sku]', 'placeholder');
   const будет = (await зов('GET', '/api/products/next-sku')).data.sku;
   check('в поле артикула видно, какой выдадим', подсказка.includes(будет) && /выдадим сами/.test(подсказка), подсказка);
-  check('подсказка: можно дописать потом, без цены не продаётся',
-    /Обязательных полей нет/.test(чисто(await page.textContent('#prod-form'))));
+  const текстФормы = чисто(await page.textContent('#prod-form'));
+  check('подсказка: цену можно дописать потом, без неё не продаётся',
+    /Обязательных полей нет/.test(текстФормы) && /камни и цену дописать потом/.test(текстФормы), текстФормы.slice(0, 300));
+  const подсказкаФормы = чисто(await page.textContent('#prod-form .form-hint'));
+  check('в подсказке продавцу — ни слова о закупке', /Обязательных полей нет/.test(подсказкаФормы)
+    && !/закуп/i.test(подсказкаФормы), подсказкаФормы);
+  check('штрихкода в форме нет', !(await page.$('#prod-form [name=barcode]')) && !/Штрихкод/.test(текстФормы));
   await снимок(page, { path: `${OUT}/форма.png` });
   await page.click(`${ВЕРХ} [data-act=save]`);
   await page.waitForTimeout(1500);
   const карточка = чисто(await page.textContent(`${ВЕРХ} .modal-body`).catch(() => ''));
   check('сохранилось и открылась карточка «Без названия»',
     /Без названия/.test(await page.textContent(`${ВЕРХ} .modal-head`).catch(() => '')), await page.textContent(`${ВЕРХ} .modal-head`).catch(() => ''));
-  check('в карточке — чего не хватает', /Не заполнено: название, цена, металл, вес/.test(карточка), карточка.slice(0, 200));
+  // Металл и проба стоят в форме сами (металл-ui), так что их в списке нет.
+  check('в карточке — чего не хватает', /Не заполнено: название, цена, вес/.test(карточка), карточка.slice(0, 200));
   check('и что без цены касса не продаст', /касса его не продаст/.test(карточка));
+  check('пустой штрихкод в карточке не показан', !/Штрихкод/.test(карточка));
   await снимок(page, { path: `${OUT}/карточка.png` });
   const заведено = (await зов('GET', '/api/products?search=' + encodeURIComponent(будет))).data.items[0];
   check('на сервере: артикул тот, что обещали', заведено && заведено.sku === будет, заведено && заведено.sku);
@@ -111,7 +118,7 @@ async function войти(page, логин, пароль) {
   await page.waitForTimeout(300);
 
   console.log('\n=== 4. Дописали цену — продаётся ===');
-  await зов('PUT', '/api/products/' + заведено.id, { name: 'Подвеска «Дописали»', retail_price: 12000, metal: 'Золото', weight: 1.5 });
+  await зов('PUT', '/api/products/' + заведено.id, { name: 'Подвеска «Дописали»', retail_price: 12000, purchase_price: 8000, metal: 'Золото', weight: 1.5 });
   const после = (await зов('GET', '/api/products?incomplete=1&limit=2000')).data.items.map(p => p.id);
   check('заполненное ушло из «Не заполнены»', !после.includes(заведено.id));
   await page.goto(BASE + '/#/dashboard');

@@ -7,6 +7,12 @@ window.Pages.products = (() => {
   // Цена грамма и работа: заполнены — в форме появляется расчёт цены от веса.
   let gramPrice = 0, workPrice = 0;
   let meta = { metals: [], fineness: [], colors: [], clarities: [] };
+  /*
+   * Металл и проба нового изделия — настоящими значениями, а не серой
+   * подсказкой: подсказка выглядела заполненным полем, и изделия уходили
+   * «без металла». Меняются в «Настройках»; до ответа сервера — белое золото 750.
+   */
+  let умолч = { metal: 'Белое золото', fineness: '750' };
 
   /*
    * Дом торгует только бриллиантами в золоте 750-й пробы, поэтому подсказки
@@ -56,6 +62,9 @@ window.Pages.products = (() => {
     usdRate = settings.usd_rate || '';
     gramPrice = Number(settings.gram_price) || 0;
     workPrice = Number(settings.work_price) || 0;
+    if (settings.default_metal !== undefined) {
+      умолч = { metal: settings.default_metal || '', fineness: settings.default_fineness || '' };
+    }
     meta = { metals: m.metals || [], fineness: m.fineness || [],
       colors: m.colors || [], clarities: m.clarities || [] };
   }
@@ -131,6 +140,7 @@ window.Pages.products = (() => {
       !(Number(r.retail_price) > 0) && 'цена',
       !r.metal && 'металл',
       !(Number(r.weight) > 0) && 'вес',
+      App.isAdmin() && !(Number(r.purchase_price) > 0) && 'закупка',
     ].filter(Boolean);
   }
 
@@ -182,7 +192,7 @@ window.Pages.products = (() => {
             <div>
               <dl class="kv">
                 <dt>Артикул</dt><dd class="mono strong">${ui.esc(p.sku)}</dd>
-                <dt>Штрихкод</dt><dd class="mono">${ui.esc(p.barcode || '—')}</dd>
+                ${p.barcode ? `<dt>Штрихкод</dt><dd class="mono">${ui.esc(p.barcode)}</dd>` : ''}
                 <dt>Категория</dt><dd>${ui.esc(p.category_name || '—')}</dd>
                 <dt>Металл</dt><dd>${ui.esc(metalLabel(p) || '—')}</dd>
                 <dt>Бриллиант</dt><dd>${stoneLabel(p)
@@ -731,8 +741,8 @@ window.Pages.products = (() => {
       <tr data-row>
         <td><input class="input" name="sku" placeholder="AS-00123" style="min-width:110px"></td>
         <td><input class="input" name="name" placeholder="Кольцо с бриллиантом" style="min-width:160px"></td>
-        <td><input class="input" name="metal" placeholder="Белое золото" style="min-width:110px"></td>
-        <td><input class="input" name="fineness" placeholder="750" style="width:64px"></td>
+        <td><input class="input" name="metal" value="${ui.esc(умолч.metal)}" list="metal-list" placeholder="Белое золото" style="min-width:110px"></td>
+        <td><input class="input" name="fineness" value="${ui.esc(умолч.fineness)}" list="fineness-list" placeholder="750" style="width:64px"></td>
         <td><input class="input" name="weight" type="number" step="0.01" min="0" placeholder="4.2" style="width:76px"></td>
         <td><input class="input" name="purchase_price" type="number" step="0.01" min="0" placeholder="закупка" style="width:110px"></td>
         <td><input class="input" name="retail_price" type="number" step="1" min="0" placeholder="продажа" style="width:110px"></td>
@@ -743,6 +753,7 @@ window.Pages.products = (() => {
       title: 'Приёмка товара от поставщика',
       size: 'lg',
       body: `
+        ${DATALISTS()}
         <form id="rc-form">
           <div class="form-grid">
             <label class="field"><span>Поставщик *</span>
@@ -764,11 +775,12 @@ window.Pages.products = (() => {
         <div class="table-wrap" style="max-height:44vh;overflow:auto">
           <table class="tbl"><thead><tr>
             <th>Артикул</th><th>Наименование</th><th>Металл</th><th>Проба</th>
-            <th>Вес, г</th><th>Закупка *</th><th>Цена продажи</th><th></th>
+            <th>Вес, г</th><th>Закупка</th><th>Цена продажи</th><th></th>
           </tr></thead><tbody id="rc-rows"></tbody></table>
         </div>
-        <p class="form-hint">Обязательна только закупка — из неё складывается долг поставщику.
-          Артикул не указан — выдадим следующий по порядку; название и цену продажи можно дописать потом.</p>
+        <p class="form-hint">Обязательных полей нет: артикул не указан — выдадим следующий по порядку;
+          название, закупку и цену продажи можно дописать потом. Долг поставщику складывается
+          из указанных закупочных — строку без закупки в него не запишем.</p>
         <div class="row-tight" style="margin-top:10px;gap:10px;flex-wrap:wrap">
           <button type="button" class="btn btn-sm" id="rc-more">+ Ещё строка</button>
           <button type="button" class="btn btn-sm" id="rc-more10">+ 10 строк</button>
@@ -790,7 +802,7 @@ window.Pages.products = (() => {
       const о = {};
       for (const el of tr.querySelectorAll('[name]')) о[el.name] = el.value.trim();
       return о;
-    }).filter(о => о.sku || о.name || о.purchase_price || о.retail_price);
+    }).filter(о => о.sku || о.name || о.weight || о.purchase_price || о.retail_price);
 
     function пересчитать() {
       const строки = собрать();
@@ -865,7 +877,9 @@ window.Pages.products = (() => {
         });
         ui.toast(r.consignment
           ? `Принято на реализацию: изделий ${r.items_count}`
-          : `Принято: изделий ${r.items_count} на ${ui.money(r.amount)}, долг записан`);
+          : r.amount > 0
+            ? `Принято: изделий ${r.items_count} на ${ui.money(r.amount)}, долг записан`
+            : `Принято: изделий ${r.items_count}. Закупка не указана — долг не записан`);
         m.close(); onDone && onDone();
       } catch (e) { ui.toastErr(e); кнопка.disabled = false; }
     };
@@ -952,19 +966,19 @@ window.Pages.products = (() => {
       body: `<form id="prod-form">
         ${DATALISTS()}
         ${isNew ? `<div class="form-hint" style="margin:0 0 10px">Обязательных полей нет: можно сохранить сразу,
-          а вес, камни и цену дописать потом. Артикул не указан — выдадим следующий по порядку.
-          Без цены изделие не продаётся.</div>`
+          а вес, камни и ${admin ? 'цены — закупочную и розничную —' : 'цену'} дописать потом. Артикул не указан — выдадим
+          следующий по порядку. Без ${admin ? 'розничной ' : ''}цены изделие не продаётся.</div>`
           : незаполнено(p).length ? `<div class="form-hint" style="margin:0 0 10px">Не заполнено:
             ${незаполнено(p).join(', ')}.</div>` : ''}
         <div class="form-grid-3">
           <label class="field"><span>Артикул</span><input name="sku" value="${ui.esc(p.sku || '')}" placeholder="${isNew ? 'выдадим сами' : 'AS-00120'}"></label>
-          <label class="field"><span>Штрихкод</span><input name="barcode" value="${ui.esc(p.barcode || '')}" placeholder="2000000000015"></label>
           <label class="field"><span>Категория</span><select name="category_id"><option value="">—</option>${catOpts}</select></label>
+          <label class="field"><span>Размер</span><input name="size" value="${ui.esc(p.size || '')}" placeholder="17,5"></label>
         </div>
         <label class="field"><span>Наименование</span><input name="name" value="${ui.esc(p.name === БЕЗ_НАЗВАНИЯ ? '' : (p.name || ''))}" placeholder="Кольцо с бриллиантом «Сияние»"></label>
         <div class="form-grid-3">
-          <label class="field"><span>Металл</span><input name="metal" value="${ui.esc(p.metal || '')}" list="metal-list" placeholder="Белое золото"></label>
-          <label class="field"><span>Проба</span><input name="fineness" value="${ui.esc(p.fineness || '')}" list="fineness-list" placeholder="750"></label>
+          <label class="field"><span>Металл</span><input name="metal" value="${ui.esc(p.metal || (isNew ? умолч.metal : ''))}" list="metal-list" placeholder="Белое золото"></label>
+          <label class="field"><span>Проба</span><input name="fineness" value="${ui.esc(p.fineness || (isNew ? умолч.fineness : ''))}" list="fineness-list" placeholder="750"></label>
           <label class="field"><span>Вес изделия, г</span><input name="weight" type="number" step="0.01" min="0" value="${p.weight || ''}"></label>
         </div>
         <!-- Главный бриллиант: то, по чему изделие ищут, сравнивают и оценивают -->
@@ -975,9 +989,6 @@ window.Pages.products = (() => {
             <input name="color" value="${ui.esc(p.color || '')}" list="color-list" placeholder="G"></label>
           <label class="field"><span>Чистота</span>
             <input name="clarity" value="${ui.esc(p.clarity || '')}" list="clarity-list" placeholder="VS1"></label>
-        </div>
-        <div class="form-grid-3">
-          <label class="field"><span>Размер</span><input name="size" value="${ui.esc(p.size || '')}" placeholder="17,5"></label>
         </div>
         <div class="form-grid-3">
           ${admin ? `<label class="field"><span>Закупочная цена</span><input name="purchase_price" type="number" step="0.01" min="0" value="${p.purchase_price || ''}"></label>` : ''}
@@ -1111,7 +1122,7 @@ window.Pages.products = (() => {
         cert_number: row.querySelector('[name=g_cert_number]').value.trim(),
       })).filter(g => g.type);
       const payload = {
-        sku: v.sku, barcode: v.barcode, name: v.name,
+        sku: v.sku, name: v.name,
         category_id: v.category_id || null, supplier_id: v.supplier_id || null,
         metal: v.metal, weight: v.weight, size: v.size,
         // Проба и главный бриллиант — отдельные поля изделия
