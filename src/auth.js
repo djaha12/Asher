@@ -189,9 +189,22 @@ function denyDevice(deviceId, byUserId) {
   return { device: d, dropped: оборвано };
 }
 
+/*
+ * Сотрудник по логину — без учёта регистра. Логины хранятся строчными
+ * (settings.js переводит их так при создании), а телефон сам делает первую
+ * букву заглавной: «Anna» вместо «anna» — и сотрудник с верным паролем
+ * слышал «неверный логин или пароль». Счётчик неудачных попыток (guard.js)
+ * и так считает логин без регистра, поэтому подбор пароля это не облегчает.
+ */
+function активныйПоЛогину(username) {
+  const логин = String(username || '').trim();
+  return db.prepare('SELECT * FROM users WHERE username = ? AND active = 1').get(логин)
+    || db.prepare('SELECT * FROM users WHERE username = ? COLLATE NOCASE AND active = 1').get(логин);
+}
+
 // Состояние ожидающего устройства — для экрана «ждём разрешения».
 function deviceStateByKey(username, ключ) {
-  const u = db.prepare('SELECT id FROM users WHERE username = ? AND active = 1').get(String(username || '').trim());
+  const u = активныйПоЛогину(username);
   if (!u) return { state: 'нет' };
   const d = db.prepare('SELECT approved, code FROM devices WHERE user_id = ? AND device_key = ?')
     .get(u.id, String(ключ || '').slice(0, 100));
@@ -207,7 +220,7 @@ function forgetDevices(userId) {
 }
 
 function login(username, password, { ip = '', deviceKey = '', deviceName = '' } = {}) {
-  const user = db.prepare('SELECT * FROM users WHERE username = ? AND active = 1').get(String(username || '').trim());
+  const user = активныйПоЛогину(username);
   if (!user) {
     hashPassword(String(password || ''), DUMMY_SALT);
     return null;

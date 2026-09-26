@@ -594,7 +594,10 @@ window.Pages.settings = (() => {
       title: isNew ? 'Новый сотрудник' : 'Сотрудник: ' + u.name,
       size: 'sm',
       body: `<form id="user-form">
-        ${isNew ? `<label class="field"><span>Логин *</span><input name="username" required placeholder="anna" autocapitalize="none" pattern="[a-z0-9._\\-]{3,30}"></label>` : ''}
+        ${isNew ? `<label class="field"><span>Логин *</span><input name="username" required placeholder="anna"
+          autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off" maxlength="30"></label>
+        <p class="form-hint" style="margin-top:-6px">Латинские буквы, цифры, точка или дефис — от 3 знаков,
+          например anna или aigerim.s. Заглавные буквы не важны: войти можно и как «Anna».</p>` : ''}
         <label class="field"><span>Имя *</span><input name="name" required value="${ui.esc(u.name || '')}"></label>
         <label class="field"><span>Роль</span><select name="role">
           ${роли.map(([v, t]) => `<option value="${v}" ${u.role === v ? 'selected' : ''}>${t}</option>`).join('')}
@@ -623,11 +626,39 @@ window.Pages.settings = (() => {
     roleSel.addEventListener('change', showRoleHint);
     showRoleHint();
 
+    /*
+     * Логин — строчными, и сразу, пока набирают. Телефон сам делает первую
+     * букву заглавной («Cum» вместо «cum»), а прежняя проверка формы на это
+     * отвечала лишь «Следуйте заданному формату» — без слова о том, что не так.
+     */
+    const логинEl = m.body.querySelector('[name=username]');
+    if (логинEl) {
+      логинEl.addEventListener('input', () => {
+        const было = логинEl.value;
+        const стало = было.toLowerCase().replace(/\s+/g, '');
+        if (стало === было) return;
+        const курсор = Math.max(0, (логинEl.selectionStart || стало.length) - (было.length - стало.length));
+        логинEl.value = стало;
+        try { логинEl.setSelectionRange(курсор, курсор); } catch { /* поле без курсора */ }
+      });
+    }
+    const чтоНеТакСЛогином = логин => {
+      if (/[а-яёңөү]/i.test(логин)) return 'Логин пишется латинскими буквами: например, anna, а не анна';
+      if (логин.length < 3) return 'Логин — не короче 3 знаков';
+      if (!/^[a-z0-9._-]{3,30}$/.test(логин)) return 'В логине можно только латинские буквы, цифры, точку и дефис — без пробелов';
+      return '';
+    };
+
     m.foot.querySelector('[data-act=cancel]').onclick = m.close;
     m.foot.querySelector('[data-act=ok]').onclick = async () => {
       const form = m.body.querySelector('#user-form');
       if (!form.reportValidity()) return;
       const v = ui.formValues(form);
+      if (isNew) {
+        v.username = String(v.username || '').trim().toLowerCase();
+        const беда = чтоНеТакСЛогином(v.username);
+        if (беда) { ui.toast(беда, true); логинEl.focus(); return; }
+      }
       try {
         let created = null;
         if (isNew) created = await api.post('/api/users', v);
