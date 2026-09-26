@@ -954,14 +954,17 @@ window.Pages.products = (() => {
   /*
    * Кнопки вместо набора. Металл, проба, цвет и чистота почти всегда одни
    * и те же — их выбирают касанием, а не печатают с телефона. Обычное
-   * значение уже выбрано. Нажать выбранное ещё раз — снять выбор (у изделия
-   * без камня цвета нет). «Другое» открывает обычное поле для своего
-   * значения; оно же хранит выбор — форма читает его как раньше.
+   * значение уже выбрано. Нажать выбранное ещё раз — ничего не меняет:
+   * люди жмут «для верности», и тихо стёртый цвет потом никто не заметит.
+   * Снять значение (у изделия без камня цвета нет) — отдельная кнопка «Нет».
+   * «Другое» открывает обычное поле для своего значения; оно же хранит
+   * выбор — форма читает его как раньше.
    */
-  function кнопкиВыбора(name, подпись, варианты, значение, список) {
+  function кнопкиВыбора(name, подпись, варианты, значение, список, { можноБез = false } = {}) {
     const своё = Boolean(значение) && !варианты.includes(значение);
     return `<div class="field pick" data-pick="${name}"><span>${подпись}</span>
       <div class="chip-row">
+        ${можноБез ? `<button type="button" class="chip${значение ? '' : ' active'}" data-v="">Нет</button>` : ''}
         ${варианты.map(в => `<button type="button" class="chip${в === значение ? ' active' : ''}"
           data-v="${ui.esc(в)}">${ui.esc(в)}</button>`).join('')}
         <button type="button" class="chip${своё ? ' active' : ''}" data-other>Другое</button>
@@ -974,22 +977,20 @@ window.Pages.products = (() => {
   function включитьКнопкиВыбора(root) {
     root.querySelectorAll('.pick').forEach(блок => {
       const поле = блок.querySelector('input');
-      const варианты = [...блок.querySelectorAll('[data-v]')].map(b => b.dataset.v);
+      const варианты = [...блок.querySelectorAll('[data-v]')].map(b => b.dataset.v).filter(Boolean);
       блок.addEventListener('click', e => {
         const b = e.target.closest('.chip');
         if (!b) return;
-        const былВыбран = b.classList.contains('active');
         блок.querySelectorAll('.chip').forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
         if (b.dataset.other !== undefined) {
-          b.classList.add('active');
           поле.classList.remove('hidden');
           if (варианты.includes(поле.value)) поле.value = '';
           поле.focus();
           return;
         }
         поле.classList.add('hidden');
-        поле.value = былВыбран ? '' : b.dataset.v;
-        if (!былВыбран) b.classList.add('active');
+        поле.value = b.dataset.v;
       });
     });
   }
@@ -1070,8 +1071,8 @@ window.Pages.products = (() => {
           <label class="field"><span>Каратность</span>
             <input name="carat" type="number" step="0.001" min="0" value="${p.carat || ''}" placeholder="0,50"></label>
         </div>
-        ${кнопкиВыбора('color', 'Цвет бриллианта', варианты.color, сейчас('color'), 'color-list')}
-        ${кнопкиВыбора('clarity', 'Чистота бриллианта', варианты.clarity, сейчас('clarity'), 'clarity-list')}
+        ${кнопкиВыбора('color', 'Цвет бриллианта', варианты.color, сейчас('color'), 'color-list', { можноБез: true })}
+        ${кнопкиВыбора('clarity', 'Чистота бриллианта', варианты.clarity, сейчас('clarity'), 'clarity-list', { можноБез: true })}
         <div class="form-grid-3">
           ${admin ? `<label class="field"><span>Закупочная цена</span><input name="purchase_price" type="number" step="0.01" min="0" value="${p.purchase_price || ''}"></label>` : ''}
           <label class="field"><span>Розничная цена</span>

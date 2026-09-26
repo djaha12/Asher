@@ -7,6 +7,8 @@ const ВЫВОД = require('node:path').join(__dirname, '.вывод');
  * Металл у магазина почти всегда белое золото 750, цвет и чистота
  * бриллианта — почти всегда одни и те же. Поэтому они стоят кнопками, и
  * обычное значение уже выбрано; другое — касанием, своё — через «Другое».
+ * Нажать выбранное ещё раз — ничего не меняет (жмут «для верности»);
+ * снять цвет у изделия без камня — кнопка «Нет».
  * Поставщика, которого ещё нет в списке, владелец заводит прямо из анкеты.
  */
 const { chromium, снимок } = require('./браузер');
@@ -87,15 +89,21 @@ const значение = (page, поле) => page.inputValue(`#prod-form [name=$
   check('на телефоне анкета не шире экрана', ширина <= 390, ширина);
   await снимок(page, { path: `${OUT}/анкета.png` });
 
-  console.log('\n=== 2. Другое — касанием, снять — ещё одним ===');
+  console.log('\n=== 2. Другое — касанием; выбранное повторным касанием не снимается ===');
   await page.click('#prod-form .pick[data-pick=metal] [data-v="Жёлтое золото"]');
   check('нажали «Жёлтое золото» — оно в форме, выбрано одно', await значение(page, 'metal') === 'Жёлтое золото'
     && (await выбрано(page, 'metal')).length === 1);
   await page.click('#prod-form .pick[data-pick=metal] [data-v="Жёлтое золото"]');
-  check('нажали ещё раз — выбор снят', await значение(page, 'metal') === '' && (await выбрано(page, 'metal')).length === 0);
+  check('нажали ещё раз «для верности» — выбор остался', await значение(page, 'metal') === 'Жёлтое золото'
+    && (await выбрано(page, 'metal')).join() === 'Жёлтое золото');
   await page.click('#prod-form .pick[data-pick=metal] [data-v="Белое золото"]');
+  check('у металла кнопки «Нет» нет — металл есть всегда', !(await page.$('#prod-form .pick[data-pick=metal] [data-v=""]')));
+  await page.click('#prod-form .pick[data-pick=color] [data-v=""]');
+  check('у цвета «Нет» снимает цвет — изделие без камня', await значение(page, 'color') === ''
+    && (await выбрано(page, 'color')).join() === 'Нет');
   await page.click('#prod-form .pick[data-pick=color] [data-v="G"]');
-  check('цвет G — одним касанием', await значение(page, 'color') === 'G');
+  await page.click('#prod-form .pick[data-pick=color] [data-v="G"]');
+  check('цвет G — касанием, и второе касание его не снимает', await значение(page, 'color') === 'G');
   await page.click('#prod-form .pick[data-pick=clarity] [data-other]');
   check('«Другое» открывает поле для своего значения', await page.isVisible('#prod-form [name=clarity]')
     && await значение(page, 'clarity') === '');
