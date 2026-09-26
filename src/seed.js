@@ -32,6 +32,13 @@ const DAY = 86400000;
 function isoDaysAgo(days, hourFrom = 10, hourTo = 20) {
   const d = new Date(NOW - days * DAY);
   d.setHours(ri(hourFrom, hourTo), ri(0, 59), ri(0, 59), 0);
+  /*
+   * Демо-данные не из будущего. «Сегодняшняя» продажа в 17:00, когда на часах
+   * девять утра, выглядела поступившей после утренней сверки: касса ждала
+   * в ящике деньги, которых ещё никто не принёс, и проверки кассы по утрам
+   * падали, а вечером проходили.
+   */
+  if (d.getTime() > NOW) d.setTime(NOW - ri(1, 120) * 60000);
   return d.toISOString();
 }
 
