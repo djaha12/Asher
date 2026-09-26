@@ -154,7 +154,7 @@ async function войти(page, логин, пароль) {
   await page2.waitForTimeout(600);
   await page2.click('[data-act=submit]');
   await page2.waitForTimeout(2000);
-  check('продажа в рассрочку новому клиенту прошла', !(await page2.$('#pos-search')));
+  check('продажа в долг новому клиенту прошла', !(await page2.$('#pos-search')));
 
   console.log('\n=== Искали по номеру — номер и подставился ===');
   /*

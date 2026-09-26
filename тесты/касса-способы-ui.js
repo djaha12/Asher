@@ -1,12 +1,13 @@
 'use strict';
 require('./устройство');   // проверки называют себя устройством, как настоящее приложение
 /*
- * «Чем платят» — в окнах заказа и в кассе при рассрочке.
+ * «Чем платят» — в окнах заказа и в кассе, когда клиент платит не всю сумму.
  *
  * Раньше в окнах заказа способа оплаты не было вовсе, и любая оплата
- * записывалась наличными; первый взнос по рассрочке — тоже. Оплата картой
- * вечером становилась недостачей в сверке. Здесь продавец выбирает «Карта»
- * или «Перевод» — и ящик от этого не меняется.
+ * записывалась наличными. Оплата картой вечером становилась недостачей
+ * в сверке. Здесь продавец выбирает «Карта» или «Перевод» — и ящик от этого
+ * не меняется. Рассрочки в магазине нет: часть суммы вносят выбранным
+ * способом, остаток — долг клиента.
  */
 const { chromium } = require('./браузер');
 const BASE = process.env.BASE || 'http://127.0.0.1:3122';
@@ -21,7 +22,7 @@ const МЕТКА = 'СУИ' + process.pid;
 /*
  * Имя клиентки — без цифр. Поиск клиента сверяет цифры запроса с телефонами,
  * и «Айжан СУИ347» находил демо-клиентку с телефоном …513-47-23 и её личной
- * скидкой 5% — рассрочка выходила не на ту сумму. Цифры номера процесса
+ * скидкой 5% — долг выходил не на ту сумму. Цифры номера процесса
  * заменяем буквами: имя остаётся своим для каждого прогона.
  */
 const КЛИЕНТКА = 'Айжан СУИ' + String(process.pid).replace(/\d/g, ц => 'абвгдежзик'[ц]);
@@ -55,7 +56,7 @@ async function войти(page, логин, пароль) {
   cookie = (вход.headers.get('set-cookie') || '').split(';')[0];
   await зов('POST', '/api/customers', { name: КЛИЕНТКА });
   await зов('POST', '/api/products', {
-    sku: `${МЕТКА}-1`, name: 'Колье в рассрочку', metal: 'Золото', retail_price: 30000, purchase_price: 10000,
+    sku: `${МЕТКА}-1`, name: 'Колье в долг', metal: 'Золото', retail_price: 30000, purchase_price: 10000,
   });
   const заказ = (await зов('POST', '/api/orders', { description: `Пайка цепи ${МЕТКА}`, estimate: 4000 })).data;
   await зов('POST', '/api/cash/count', { counted: await ящик() });   // точка отсчёта
@@ -109,19 +110,20 @@ async function войти(page, логин, пароль) {
   if (await page.$(`${ВЕРХ} [data-act=done]`)) await page.click(`${ВЕРХ} [data-act=done]`);
   check('наличными — в ящик: +700', await ящик() - было === 700, [было, await ящик()]);
 
-  console.log('\n=== 4. Касса: рассрочка, первый взнос картой ===');
+  console.log('\n=== 4. Касса: часть картой, остаток в долг; рассрочки нет ===');
   было = await ящик();
   await page.click('#btn-quick-sale');
   await page.waitForSelector('#pos-search');
-  check('пока не рассрочка — вопроса про взнос нет', await page.isHidden('#pos-first-wrap'));
+  const способы = await page.$$eval('#pos-payment option', o => o.map(x => x.textContent.trim()));
+  check('в кассе нет способа «Рассрочка»', !способы.some(т => /рассроч/i.test(т)) && способы.includes('Карта'), способы);
+  check('и вопроса про первый взнос тоже', !(await page.$('#pos-first-wrap')));
   await page.fill('#pos-search', `${МЕТКА}-1`);
   await page.waitForTimeout(1200);
   const найдено = await page.$('.search-results .sr-item[data-i]');
   if (найдено) await найдено.dispatchEvent('mousedown');
   await page.waitForSelector('.pos-item');
-  await page.selectOption('#pos-payment', 'installment');
-  check('выбрали рассрочку — касса спрашивает, чем внесли взнос', await page.isVisible('#pos-first-wrap'));
-  await page.selectOption('#pos-first', 'card');
+  await page.selectOption('#pos-payment', 'card');
+  await page.check('#pos-partial');
   await page.fill('#pos-paid', '10000');
   await page.fill('#pos-due', '2030-01-01');
   await page.fill('#pos-customer', КЛИЕНТКА);
@@ -133,9 +135,15 @@ async function войти(page, логин, пароль) {
   await page.waitForTimeout(1500);
   const продажи = (await зов('GET', '/api/sales?search=' + encodeURIComponent(`${МЕТКА}-1`))).data.items;
   const чек = продажи[0] ? (await зов('GET', '/api/sales/' + продажи[0].id)).data : { payments: [] };
-  check('рассрочка оформлена: взнос 10 000, долг 20 000', чек.paid === 10000 && чек.debt === 20000, `${чек.paid} ${чек.debt}`);
-  check('взнос записан картой', чек.payments.some(p => p.method === 'card' && p.amount === 10000), JSON.stringify(чек.payments));
+  check('продажа в долг оформлена: внесено 10 000, долг 20 000', чек.paid === 10000 && чек.debt === 20000, `${чек.paid} ${чек.debt}`);
+  check('способ в чеке — карта, не рассрочка', чек.payment_method === 'card', чек.payment_method);
+  check('внесённое записано картой', чек.payments.some(p => p.method === 'card' && p.amount === 10000), JSON.stringify(чек.payments));
   check('картой — ящик не изменился', await ящик() === было, [было, await ящик()]);
+
+  await page.goto(BASE + '/#/sales');
+  await page.waitForSelector('#sf-payment');
+  const вФильтре = await page.$$eval('#sf-payment option', o => o.map(x => x.textContent.trim()));
+  check('в фильтре продаж «Рассрочки» тоже нет', !вФильтре.some(т => /рассроч/i.test(т)) && вФильтре.includes('Карта'), вФильтре);
 
   check('в браузере нет ошибок', ошибки.length === 0, ошибки.slice(0, 3).join(' | '));
   console.log(`\nИтого: ${ok} ok, ${fail} fail`);
