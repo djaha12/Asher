@@ -397,6 +397,20 @@ async function main() {
     items: [{ product_id: безСкидок.id, discount: 100 }], payment_method: 'cash',
   });
   check('при нуле никакая скидка не проходит', любая.status === 400, любая.data);
+  /*
+   * Раньше предел сравнивался в процентах, округлённых до сотых: на изделии
+   * за 673 500 скидка 100 сом давала «0,01%» и проходила даже при нуле.
+   * Случайное изделие со склада ловило это только иногда — берём дорогое.
+   */
+  const колье = (await админ.зов('POST', '/api/products', {
+    sku: `СКИДКИ-${process.pid}-дорогое`, name: 'Колье для проверки предела',
+    metal: 'Золото', retail_price: 673500, purchase_price: 300000,
+  })).data;
+  заведённые.add(колье.id);
+  const копеечная = await продавец.зов('POST', '/api/sales', {
+    items: [{ product_id: колье.id, discount: 100 }], payment_method: 'cash',
+  });
+  check('и на изделии за 673 500 скидка 100 сом при нуле не проходит', копеечная.status === 400, копеечная.data);
   const безСкидки = await продавец.зов('POST', '/api/sales', {
     items: [{ product_id: безСкидок.id, discount: 0 }], payment_method: 'cash',
   });
