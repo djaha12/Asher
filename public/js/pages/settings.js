@@ -73,11 +73,22 @@ window.Pages.settings = (() => {
                   <input name="default_fineness" inputmode="numeric" placeholder="не подставлять"
                     value="${ui.esc(s.default_fineness || '')}"></label>
               </div>
+              <div class="form-grid">
+                <label class="field"><span>Цвет бриллианта</span>
+                  <input name="default_color" list="st-color-list" placeholder="не подставлять"
+                    autocapitalize="characters" value="${ui.esc(s.default_color || '')}"></label>
+                <label class="field"><span>Чистота бриллианта</span>
+                  <input name="default_clarity" list="st-clarity-list" placeholder="не подставлять"
+                    autocapitalize="characters" value="${ui.esc(s.default_clarity || '')}"></label>
+              </div>
               <datalist id="st-metal-list"><option>Белое золото</option><option>Жёлтое золото</option>
                 <option>Красное золото</option></datalist>
-              <p class="form-hint">Сразу стоят в новом изделии и в строках приёмки — вписывать
-                каждый раз не нужно. У отдельного изделия их можно поменять. Сотрите, если
-                подставлять ничего не надо.</p>
+              <datalist id="st-color-list">${['D', 'E', 'F', 'G', 'H', 'I', 'J'].map(v => `<option>${v}</option>`).join('')}</datalist>
+              <datalist id="st-clarity-list">${['IF', 'VVS1', 'VVS2', 'VS1', 'VS2', 'SI1', 'SI2'].map(v => `<option>${v}</option>`).join('')}</datalist>
+              <p class="form-hint">Сразу выбраны в анкете нового изделия (металл и проба — ещё и
+                в строках приёмки): вписывать каждый раз не нужно, у отдельного изделия их можно
+                поменять кнопкой. Цвет и чистота, пока вы их здесь не задали, — те, что чаще всего
+                встречаются в вашем каталоге. Сотрите значение, если подставлять ничего не надо.</p>
 
               <h4 style="margin:18px 0 10px">Цена от грамма</h4>
               <div class="form-grid">
@@ -348,9 +359,12 @@ window.Pages.settings = (() => {
       if (!form.reportValidity()) return;
       const v = ui.formValues(form);
       try {
-        if (isNew) await api.post('/api/suppliers', v);
+        // Кто открыл окно из анкеты изделия, получает номер нового поставщика —
+        // чтобы сразу его выбрать.
+        let id = s.id;
+        if (isNew) id = (await api.post('/api/suppliers', v)).id;
         else await api.put('/api/suppliers/' + s.id, v);
-        m.close(); onChange && onChange();
+        m.close(); onChange && onChange(id);
       } catch (e) { ui.toastErr(e); }
     };
   }
@@ -1043,7 +1057,7 @@ window.Pages.settings = (() => {
 
   return {
     // Панель основателя заводит людей тем же окном и подписывает действия теми же словами.
-    userDialog, phoneCard, roleBadge, AUDIT_ACTIONS, AUDIT_ENTITIES,
+    userDialog, supplierDialog, phoneCard, roleBadge, AUDIT_ACTIONS, AUDIT_ENTITIES,
     title: 'Настройки',
     async render(el) {
       const admin = App.isAdmin();

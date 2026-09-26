@@ -44,6 +44,8 @@ const check = (name, cond, extra) => {
   await page.waitForSelector('#prod-form');
   await page.fill('[name=sku]', sku);
   await page.fill('[name=name]', 'Кольцо сквозного теста');
+  // Металл выбирают кнопкой; своё значение вписывают после «Другое».
+  await page.click('.pick[data-pick=metal] [data-other]');
   await page.fill('[name=metal]', 'Золото 585');
   await page.fill('[name=weight]', '4.2');
   await page.fill('[name=purchase_price]', '30000');

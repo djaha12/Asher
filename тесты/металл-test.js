@@ -163,6 +163,30 @@ async function main() {
   check('вернули как было', s.default_metal === былиНастройки.default_metal && s.default_fineness === былиНастройки.default_fineness);
   await админ.зов('POST', '/api/products/fix-metal', { metal: '', fineness: '' });   // прибрали за собой
 
+  console.log('\n=== 7. Цвет и чистота нового изделия ===');
+  /*
+   * Пока владелец их не задал, берутся самые частые в каталоге: у магазина
+   * они почти всегда одни и те же. Заданные — пишутся как в карточке.
+   */
+  const каталог = (await админ.зов('GET', '/api/products?limit=2000')).data.items || [];
+  s = (await админ.зов('GET', '/api/settings')).data;
+  const былиКамни = { default_color: s.default_color, default_clarity: s.default_clarity };
+  check('цвет по умолчанию — из тех, что есть в каталоге',
+    !каталог.some(x => x.color) || каталог.some(x => x.color === s.default_color), s.default_color);
+  check('чистота по умолчанию — из тех, что есть в каталоге',
+    !каталог.some(x => x.clarity) || каталог.some(x => x.clarity === s.default_clarity), s.default_clarity);
+  check('продавцу они тоже приходят — анкета у него та же',
+    (await анна.зов('GET', '/api/settings')).data.default_color === s.default_color);
+  await админ.зов('PUT', '/api/settings', { default_color: ' f ', default_clarity: 'vs2' });
+  s = (await админ.зов('GET', '/api/settings')).data;
+  check('заданные пишутся как в карточке: «F», «VS2»', s.default_color === 'F' && s.default_clarity === 'VS2',
+    [s.default_color, s.default_clarity]);
+  await админ.зов('PUT', '/api/settings', { default_color: '', default_clarity: '' });
+  s = (await админ.зов('GET', '/api/settings')).data;
+  check('стёрли — не подставляем, а не возвращаем самое частое', s.default_color === '' && s.default_clarity === '',
+    [s.default_color, s.default_clarity]);
+  await админ.зов('PUT', '/api/settings', былиКамни);
+
   console.log(`\nИтого: ${ok} ok, ${fail} fail`);
   if (провалы.length) console.log('Провалено:\n  - ' + провалы.join('\n  - '));
   process.exit(fail ? 1 : 0);

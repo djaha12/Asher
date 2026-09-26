@@ -46,7 +46,9 @@ const check = (n, c, e) => c ? (ok++, console.log('  ok  ' + n))
   // форма
   await p.click('#pf-add'); await p.waitForTimeout(900);
   for (const [name, label] of [['fineness','Проба'],['carat','Каратность'],['color','Цвет'],['clarity','Чистота']]) {
-    check(`поле «${label}» в форме`, await p.isVisible(`[name=${name}]`));
+    // Проба, цвет и чистота — кнопками выбора (поле открывается по «Другое»).
+    check(`поле «${label}» в форме`,
+      await p.isVisible(`.pick[data-pick=${name}]`) || await p.isVisible(`[name=${name}]`));
   }
   const metals = await p.$$eval('#metal-list option', els => els.map(e => e.value || e.textContent));
   // Подсказка = наши три золота + то, что реально лежит в каталоге (из 1С может

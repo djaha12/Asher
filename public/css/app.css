@@ -412,6 +412,16 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 .chip:hover { border-color: var(--gold); color: var(--ink); }
 .chip.active { background: var(--primary); color: var(--primary-ink); border-color: var(--primary); }
 
+/* Кнопки выбора в анкете изделия: металл, проба, цвет, чистота — касанием, а не набором. */
+.pick .chip-row { margin-top: 2px; }
+.pick .chip { font-variant-numeric: tabular-nums; }
+/* Строка камня на телефоне — в два столбца, а не девять крошечных полей в ряд. */
+@media (max-width: 600px) {
+  .gem-row { grid-template-columns: 1fr 1fr !important; padding-bottom: 10px; margin-bottom: 10px;
+    border-bottom: 1px solid var(--line); }
+  .gem-row .gem-del { justify-self: start; margin-bottom: 0 !important; }
+}
+
 /* ============ Модальные окна ============ */
 
 .modal-overlay {

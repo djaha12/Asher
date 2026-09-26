@@ -12,7 +12,7 @@ window.Pages.products = (() => {
    * подсказкой: подсказка выглядела заполненным полем, и изделия уходили
    * «без металла». Меняются в «Настройках»; до ответа сервера — белое золото 750.
    */
-  let умолч = { metal: 'Белое золото', fineness: '750' };
+  let умолч = { metal: 'Белое золото', fineness: '750', color: '', clarity: '' };
 
   /*
    * Дом торгует только бриллиантами в золоте 750-й пробы, поэтому подсказки
@@ -63,7 +63,8 @@ window.Pages.products = (() => {
     gramPrice = Number(settings.gram_price) || 0;
     workPrice = Number(settings.work_price) || 0;
     if (settings.default_metal !== undefined) {
-      умолч = { metal: settings.default_metal || '', fineness: settings.default_fineness || '' };
+      умолч = { metal: settings.default_metal || '', fineness: settings.default_fineness || '',
+        color: settings.default_color || '', clarity: settings.default_clarity || '' };
     }
     meta = { metals: m.metals || [], fineness: m.fineness || [],
       colors: m.colors || [], clarities: m.clarities || [] };
@@ -850,7 +851,8 @@ window.Pages.products = (() => {
         api.get('/api/stores').then(r => r.items).catch(() => []),
       ]);
       m.body.querySelector('#rc-supplier').innerHTML = '<option value="">— выберите —</option>'
-        + пост.map(s => `<option value="${s.id}">${ui.esc(s.name)}</option>`).join('');
+        + пост.map(s => `<option value="${s.id}">${ui.esc(s.name)}</option>`).join('') + опцияНовогоПоставщика();
+      включитьНовогоПоставщика(m.body.querySelector('#rc-supplier'));
       m.body.querySelector('#rc-store').innerHTML =
         точки.map(s => `<option value="${s.id}"${s.is_default ? ' selected' : ''}>${ui.esc(s.name)}</option>`).join('');
       форма.querySelector('[name=doc_date]').value = new Date().toISOString().slice(0, 10);
@@ -949,6 +951,80 @@ window.Pages.products = (() => {
     </div>`;
   }
 
+  /*
+   * Кнопки вместо набора. Металл, проба, цвет и чистота почти всегда одни
+   * и те же — их выбирают касанием, а не печатают с телефона. Обычное
+   * значение уже выбрано. Нажать выбранное ещё раз — снять выбор (у изделия
+   * без камня цвета нет). «Другое» открывает обычное поле для своего
+   * значения; оно же хранит выбор — форма читает его как раньше.
+   */
+  function кнопкиВыбора(name, подпись, варианты, значение, список) {
+    const своё = Boolean(значение) && !варианты.includes(значение);
+    return `<div class="field pick" data-pick="${name}"><span>${подпись}</span>
+      <div class="chip-row">
+        ${варианты.map(в => `<button type="button" class="chip${в === значение ? ' active' : ''}"
+          data-v="${ui.esc(в)}">${ui.esc(в)}</button>`).join('')}
+        <button type="button" class="chip${своё ? ' active' : ''}" data-other>Другое</button>
+      </div>
+      <input name="${name}" class="pick-own${своё ? '' : ' hidden'}" value="${ui.esc(значение || '')}"
+        list="${список}" placeholder="Своё значение" autocomplete="off" style="margin-top:8px">
+    </div>`;
+  }
+
+  function включитьКнопкиВыбора(root) {
+    root.querySelectorAll('.pick').forEach(блок => {
+      const поле = блок.querySelector('input');
+      const варианты = [...блок.querySelectorAll('[data-v]')].map(b => b.dataset.v);
+      блок.addEventListener('click', e => {
+        const b = e.target.closest('.chip');
+        if (!b) return;
+        const былВыбран = b.classList.contains('active');
+        блок.querySelectorAll('.chip').forEach(x => x.classList.remove('active'));
+        if (b.dataset.other !== undefined) {
+          b.classList.add('active');
+          поле.classList.remove('hidden');
+          if (варианты.includes(поле.value)) поле.value = '';
+          поле.focus();
+          return;
+        }
+        поле.classList.add('hidden');
+        поле.value = былВыбран ? '' : b.dataset.v;
+        if (!былВыбран) b.classList.add('active');
+      });
+    });
+  }
+
+  /*
+   * Поставщик — прямо из анкеты: «+ Новый поставщик» заводит его и сразу
+   * выбирает. Раньше за этим надо было уходить в «Настройки → Справочники»,
+   * бросив недописанную карточку.
+   */
+  const НОВЫЙ_ПОСТАВЩИК = '__new';
+  function включитьНовогоПоставщика(select) {
+    if (!select || !App.isAdmin()) return;
+    let прежний = select.value;
+    select.addEventListener('focus', () => { прежний = select.value; });
+    select.addEventListener('change', () => {
+      if (select.value !== НОВЫЙ_ПОСТАВЩИК) { прежний = select.value; return; }
+      select.value = прежний;
+      Pages.settings.supplierDialog(null, async id => {
+        suppliers = await api.get('/api/suppliers').then(r => r.items).catch(() => suppliers);
+        const новый = suppliers.find(x => x.id === id);
+        if (!новый) return;
+        const опция = document.createElement('option');
+        опция.value = String(новый.id);
+        опция.textContent = новый.name;
+        select.insertBefore(опция, select.querySelector(`option[value="${НОВЫЙ_ПОСТАВЩИК}"]`));
+        select.value = String(новый.id);
+        прежний = select.value;
+        select.dispatchEvent(new Event('change'));
+        ui.toast(`Поставщик «${новый.name}» добавлен и выбран`);
+      });
+    });
+  }
+  const опцияНовогоПоставщика = () => (App.isAdmin()
+    ? `<option value="${НОВЫЙ_ПОСТАВЩИК}">+ Новый поставщик…</option>` : '');
+
   function openEditor(p, onChange) {
     const isNew = !p || !p.id;
     p = p || {};
@@ -960,6 +1036,16 @@ window.Pages.products = (() => {
     // Новое изделие по умолчанию попадает на основную точку — лишний выбор ни к чему.
     const defaultStore = p.store_id || (stores.find(s => s.is_default) || stores[0] || {}).id;
     const storeOpts = stores.map(s => `<option value="${s.id}" ${defaultStore === s.id ? 'selected' : ''}>${ui.esc(s.name)}</option>`).join('');
+    // Варианты для кнопок: привычные + то, что уже встречается в каталоге
+    // (цвет «K», чистота «I1»). Металл — только привычные: в каталоге
+    // бывают и опечатки, их предлагать незачем.
+    const варианты = {
+      metal: [...new Set([...METALS, умолч.metal].filter(Boolean))],
+      fineness: [...new Set([...FINENESS, умолч.fineness].filter(Boolean))],
+      color: [...new Set([...COLORS, умолч.color, ...(meta.colors || []).filter(в => в.length <= 3)].filter(Boolean))],
+      clarity: [...new Set([...CLARITIES, умолч.clarity, ...(meta.clarities || []).filter(в => в.length <= 5)].filter(Boolean))],
+    };
+    const сейчас = поле => p[поле] || (isNew ? умолч[поле] : '');
     const m = ui.modal({
       title: isNew ? 'Новое изделие' : 'Изделие: ' + p.name,
       size: 'lg',
@@ -976,27 +1062,23 @@ window.Pages.products = (() => {
           <label class="field"><span>Размер</span><input name="size" value="${ui.esc(p.size || '')}" placeholder="17,5"></label>
         </div>
         <label class="field"><span>Наименование</span><input name="name" value="${ui.esc(p.name === БЕЗ_НАЗВАНИЯ ? '' : (p.name || ''))}" placeholder="Кольцо с бриллиантом «Сияние»"></label>
-        <div class="form-grid-3">
-          <label class="field"><span>Металл</span><input name="metal" value="${ui.esc(p.metal || (isNew ? умолч.metal : ''))}" list="metal-list" placeholder="Белое золото"></label>
-          <label class="field"><span>Проба</span><input name="fineness" value="${ui.esc(p.fineness || (isNew ? умолч.fineness : ''))}" list="fineness-list" placeholder="750"></label>
-          <label class="field"><span>Вес изделия, г</span><input name="weight" type="number" step="0.01" min="0" value="${p.weight || ''}"></label>
-        </div>
+        ${кнопкиВыбора('metal', 'Металл', варианты.metal, сейчас('metal'), 'metal-list')}
+        ${кнопкиВыбора('fineness', 'Проба', варианты.fineness, сейчас('fineness'), 'fineness-list')}
         <!-- Главный бриллиант: то, по чему изделие ищут, сравнивают и оценивают -->
-        <div class="form-grid-3">
+        <div class="form-grid">
+          <label class="field"><span>Вес изделия, г</span><input name="weight" type="number" step="0.01" min="0" value="${p.weight || ''}"></label>
           <label class="field"><span>Каратность</span>
             <input name="carat" type="number" step="0.001" min="0" value="${p.carat || ''}" placeholder="0,50"></label>
-          <label class="field"><span>Цвет</span>
-            <input name="color" value="${ui.esc(p.color || '')}" list="color-list" placeholder="G"></label>
-          <label class="field"><span>Чистота</span>
-            <input name="clarity" value="${ui.esc(p.clarity || '')}" list="clarity-list" placeholder="VS1"></label>
         </div>
+        ${кнопкиВыбора('color', 'Цвет бриллианта', варианты.color, сейчас('color'), 'color-list')}
+        ${кнопкиВыбора('clarity', 'Чистота бриллианта', варианты.clarity, сейчас('clarity'), 'clarity-list')}
         <div class="form-grid-3">
           ${admin ? `<label class="field"><span>Закупочная цена</span><input name="purchase_price" type="number" step="0.01" min="0" value="${p.purchase_price || ''}"></label>` : ''}
           <label class="field"><span>Розничная цена</span>
             <input name="retail_price" type="number" step="0.01" min="0" value="${p.retail_price || ''}">
             ${gramPrice > 0 ? `<button type="button" class="btn btn-sm" id="pf-bygram"
               style="margin-top:6px">Посчитать от грамма</button>` : ''}</label>
-          <label class="field"><span>Поставщик</span><select name="supplier_id"><option value="">—</option>${supOpts}</select></label>
+          <label class="field"><span>Поставщик</span><select name="supplier_id"><option value="">—</option>${supOpts}${опцияНовогоПоставщика()}</select></label>
         </div>
         <!-- Закупка в валюте: поставщики часто считают в долларах, а учёт идёт в валюте магазина -->
         ${admin ? `<label class="row-tight" style="cursor:pointer;margin-bottom:8px">
@@ -1037,6 +1119,8 @@ window.Pages.products = (() => {
         <button class="btn btn-primary" data-act="save">${isNew ? 'Добавить изделие' : 'Сохранить'}</button>`,
     });
     const form = m.body.querySelector('#prod-form');
+    включитьКнопкиВыбора(form);
+    включитьНовогоПоставщика(form.querySelector('[name=supplier_id]'));
     m.body.querySelector('#gem-add').onclick = () => {
       m.body.querySelector('#gems-wrap').insertAdjacentHTML('beforeend', gemRow());
     };

@@ -51,10 +51,21 @@ function активныхОснователей() {
  * default_metal и default_fineness — что стоит в новом изделии и в строках
  * приёмки, пока их не поменяли (металл.js). Не заданы — белое золото 750;
  * стёрты — не подставляем ничего.
+ *
+ * default_color и default_clarity — цвет и чистота главного бриллианта
+ * нового изделия. У магазина они почти всегда одни и те же, поэтому, пока
+ * владелец их не задал, берём то, что чаще всего встречается в каталоге.
  */
 const SETTING_KEYS = ['store_name', 'site_note', 'store_address', 'store_phone', 'usd_rate',
   'gram_price', 'work_price', 'max_discount_percent', 'scrap_price_585',
-  'default_metal', 'default_fineness', ...LOCALE_KEYS];
+  'default_metal', 'default_fineness', 'default_color', 'default_clarity', ...LOCALE_KEYS];
+
+const ПО_КАТАЛОГУ = [['default_color', 'color'], ['default_clarity', 'clarity']];
+// Самое частое непустое значение колонки в каталоге (колонки — из списка выше).
+const самоеЧастое = колонка => (db.prepare(
+  `SELECT ${колонка} AS v, COUNT(*) AS c FROM products WHERE COALESCE(${колонка}, '') != ''
+    GROUP BY ${колонка} ORDER BY c DESC, v LIMIT 1`
+).get() || {}).v || '';
 
 /*
  * Состояние резервных копий — то, что владелец должен узнать САМ, не заходя
@@ -106,6 +117,9 @@ const routes = [
     handler: ({ session }) => {
       const out = {};
       for (const k of SETTING_KEYS) out[k] = getSetting(k, металл.ПО_УМОЛЧАНИЮ[k] ?? '');
+      for (const [k, колонка] of ПО_КАТАЛОГУ) {
+        if (!db.prepare('SELECT 1 FROM settings WHERE key = ?').get(k)) out[k] = самоеЧастое(колонка);
+      }
       /*
        * Курс закупки — часть закупочной кухни: зная его и цену в долларах,
        * закупочную считают в уме. Продавцу настройки нужны только ради валюты
@@ -161,6 +175,10 @@ const routes = [
         body.default_metal = металл.правильноеНаписание(body.default_metal).slice(0, 60);
       }
       if (body.default_fineness !== undefined) body.default_fineness = металл.праваяПроба(body.default_fineness);
+      // Цвет и чистота пишутся так же, как в карточке изделия: «vs1» → «VS1».
+      for (const [k] of ПО_КАТАЛОГУ) {
+        if (body[k] !== undefined) body[k] = String(body[k] ?? '').trim().toUpperCase().slice(0, 12);
+      }
       const ломБыл = getSetting('scrap_price_585');
       // Курс влияет на себестоимость всего, что закупят дальше, — его смена
       // должна оставлять в журнале конкретные цифры, а не общую фразу.
