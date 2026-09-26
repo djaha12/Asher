@@ -106,8 +106,10 @@ window.Pages.products = (() => {
     if (stores.length > 1) cols.push({ title: 'Точка', render: r => `<span class="dim">${ui.esc(r.store_name || '—')}</span>` });
     if (admin) cols.push({ title: 'Закупка', cls: 'num dim', render: r => ui.money(r.purchase_price) });
     cols.push(
-      { title: 'Цена', cls: 'num strong', render: r => ui.money(r.retail_price) },
+      { title: 'Цена', cls: 'num strong', render: r => Number(r.retail_price) > 0
+        ? ui.money(r.retail_price) : '<span class="warn">не указана</span>' },
       { title: 'Статус', render: r => ui.badge('status', r.status) +
+        (незаполнено(r).length ? ' <span class="badge badge-warn">не заполнено</span>' : '') +
         (r.ownership === 'consignment' ? ' <span class="badge badge-info">реализация</span>' : '') +
         (r.reserved_for_name ? `<div class="dim" style="font-size:11px">${ui.esc(r.reserved_for_name)}</div>` : '') },
     );
@@ -117,9 +119,25 @@ window.Pages.products = (() => {
   }
 
   // Плитка каталога: фото крупно, под ним — то, что спрашивают у прилавка.
+  /*
+   * Что в карточке не заполнено. Изделие можно завести второпях и дописать
+   * потом (сервер ничего не требует); здесь — чего не хватает, чтобы его было
+   * видно в каталоге и в карточке, а кнопка «Не заполнены» их собирала.
+   */
+  const БЕЗ_НАЗВАНИЯ = 'Без названия';
+  function незаполнено(r) {
+    return [
+      (!r.name || r.name === БЕЗ_НАЗВАНИЯ) && 'название',
+      !(Number(r.retail_price) > 0) && 'цена',
+      !r.metal && 'металл',
+      !(Number(r.weight) > 0) && 'вес',
+    ].filter(Boolean);
+  }
+
   function productCard(r, index) {
     const badges = [];
     if (r.status !== 'in_stock') badges.push(ui.badge('status', r.status));
+    if (незаполнено(r).length) badges.push('<span class="badge badge-warn">не заполнено</span>');
     if (r.ownership === 'consignment') badges.push('<span class="badge badge-info">реализация</span>');
     return `
       <div class="pcard" data-i="${index}">
@@ -136,7 +154,7 @@ window.Pages.products = (() => {
           <div class="pcard-meta">${[metalLabel(r), r.weight ? ui.num(r.weight) + ' г' : '', r.size]
             .filter(Boolean).map(ui.esc).join(' · ') || '&nbsp;'}</div>
           ${stoneLabel(r) ? `<div class="pcard-stone">${ui.esc(stoneLabel(r))}</div>` : ''}
-          <div class="pcard-price">${ui.money(r.retail_price)}</div>
+          <div class="pcard-price">${Number(r.retail_price) > 0 ? ui.money(r.retail_price) : '<span class="warn">цена не указана</span>'}</div>
         </div>
       </div>`;
   }
@@ -150,10 +168,15 @@ window.Pages.products = (() => {
           ? `<span class="mono">${ui.esc([g.cert_lab, g.cert_number].filter(Boolean).join(' '))}</span>`
           : '<span class="dim">—</span>'}</td></tr>`).join('');
       const admin = App.isAdmin();
+      const нехватает = незаполнено(p);
       const m = ui.modal({
         title: p.name,
         size: 'lg',
         body: `
+          ${нехватает.length ? `<div class="hint-box" style="margin-bottom:12px">
+            <strong>Не заполнено: ${нехватает.join(', ')}.</strong> Изделие можно было завести и так —
+            допишите, когда будет время (кнопка «Изменить»).${нехватает.includes('цена')
+              ? ' Пока нет цены, касса его не продаст.' : ''}</div>` : ''}
           <div class="grid grid-2">
             <div id="prod-gallery"></div>
             <div>
@@ -740,10 +763,12 @@ window.Pages.products = (() => {
         </form>
         <div class="table-wrap" style="max-height:44vh;overflow:auto">
           <table class="tbl"><thead><tr>
-            <th>Артикул *</th><th>Наименование *</th><th>Металл</th><th>Проба</th>
-            <th>Вес, г</th><th>Закупка *</th><th>Цена продажи *</th><th></th>
+            <th>Артикул</th><th>Наименование</th><th>Металл</th><th>Проба</th>
+            <th>Вес, г</th><th>Закупка *</th><th>Цена продажи</th><th></th>
           </tr></thead><tbody id="rc-rows"></tbody></table>
         </div>
+        <p class="form-hint">Обязательна только закупка — из неё складывается долг поставщику.
+          Артикул не указан — выдадим следующий по порядку; название и цену продажи можно дописать потом.</p>
         <div class="row-tight" style="margin-top:10px;gap:10px;flex-wrap:wrap">
           <button type="button" class="btn btn-sm" id="rc-more">+ Ещё строка</button>
           <button type="button" class="btn btn-sm" id="rc-more10">+ 10 строк</button>
@@ -926,12 +951,17 @@ window.Pages.products = (() => {
       size: 'lg',
       body: `<form id="prod-form">
         ${DATALISTS()}
+        ${isNew ? `<div class="form-hint" style="margin:0 0 10px">Обязательных полей нет: можно сохранить сразу,
+          а вес, камни и цену дописать потом. Артикул не указан — выдадим следующий по порядку.
+          Без цены изделие не продаётся.</div>`
+          : незаполнено(p).length ? `<div class="form-hint" style="margin:0 0 10px">Не заполнено:
+            ${незаполнено(p).join(', ')}.</div>` : ''}
         <div class="form-grid-3">
-          <label class="field"><span>Артикул *</span><input name="sku" required value="${ui.esc(p.sku || '')}" placeholder="AS-00120"></label>
+          <label class="field"><span>Артикул</span><input name="sku" value="${ui.esc(p.sku || '')}" placeholder="${isNew ? 'выдадим сами' : 'AS-00120'}"></label>
           <label class="field"><span>Штрихкод</span><input name="barcode" value="${ui.esc(p.barcode || '')}" placeholder="2000000000015"></label>
           <label class="field"><span>Категория</span><select name="category_id"><option value="">—</option>${catOpts}</select></label>
         </div>
-        <label class="field"><span>Наименование *</span><input name="name" required value="${ui.esc(p.name || '')}" placeholder="Кольцо с бриллиантом «Сияние»"></label>
+        <label class="field"><span>Наименование</span><input name="name" value="${ui.esc(p.name === БЕЗ_НАЗВАНИЯ ? '' : (p.name || ''))}" placeholder="Кольцо с бриллиантом «Сияние»"></label>
         <div class="form-grid-3">
           <label class="field"><span>Металл</span><input name="metal" value="${ui.esc(p.metal || '')}" list="metal-list" placeholder="Белое золото"></label>
           <label class="field"><span>Проба</span><input name="fineness" value="${ui.esc(p.fineness || '')}" list="fineness-list" placeholder="750"></label>
@@ -951,8 +981,8 @@ window.Pages.products = (() => {
         </div>
         <div class="form-grid-3">
           ${admin ? `<label class="field"><span>Закупочная цена</span><input name="purchase_price" type="number" step="0.01" min="0" value="${p.purchase_price || ''}"></label>` : ''}
-          <label class="field"><span>Розничная цена *</span>
-            <input name="retail_price" type="number" step="0.01" min="0" required value="${p.retail_price || ''}">
+          <label class="field"><span>Розничная цена</span>
+            <input name="retail_price" type="number" step="0.01" min="0" value="${p.retail_price || ''}">
             ${gramPrice > 0 ? `<button type="button" class="btn btn-sm" id="pf-bygram"
               style="margin-top:6px">Посчитать от грамма</button>` : ''}</label>
           <label class="field"><span>Поставщик</span><select name="supplier_id"><option value="">—</option>${supOpts}</select></label>
@@ -1060,6 +1090,13 @@ window.Pages.products = (() => {
       if (e.target.classList.contains('gem-del')) e.target.closest('.gem-row').remove();
     });
     m.foot.querySelector('[data-act=cancel]').onclick = m.close;
+    // Какой артикул выдадим, если оставить поле пустым, — видно прямо в поле.
+    if (isNew) {
+      api.get('/api/products/next-sku').then(({ sku }) => {
+        const поле = form.querySelector('[name=sku]');
+        if (поле && !поле.value) поле.placeholder = `${sku} — выдадим сами`;
+      }).catch(() => {});
+    }
     m.foot.querySelector('[data-act=save]').onclick = async () => {
       if (!form.reportValidity()) return;
       const v = ui.formValues(form);
@@ -1174,10 +1211,11 @@ window.Pages.products = (() => {
           <span style="width:12px"></span>
           <button class="chip" data-photo="0">Без фото</button>
           <button class="chip" data-own="consignment">На реализации</button>
+          <button class="chip" data-incomplete="1">Не заполнены</button>
         </div>
         <div id="prod-list"></div>`;
 
-      filters = { search: '', status: '', category_id: '', metal: '', store_id: '', has_photo: '', sort: 'new', ownership: '' };
+      filters = { search: '', status: '', category_id: '', metal: '', store_id: '', has_photo: '', sort: 'new', ownership: '', incomplete: '' };
       const doRefresh = () => { if (el.isConnected) refresh(el).catch(ui.toastErr); };
       Pages._prodRefresh = doRefresh;
       App.обновлятьТак(el, () => refresh(el));
@@ -1220,6 +1258,9 @@ window.Pages.products = (() => {
         } else if (chip.dataset.own !== undefined) {
           const on = chip.classList.toggle('active');
           filters.ownership = on ? chip.dataset.own : '';
+        } else if (chip.dataset.incomplete !== undefined) {
+          const on = chip.classList.toggle('active');
+          filters.incomplete = on ? '1' : '';
         }
         doRefresh();
       });

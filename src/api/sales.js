@@ -127,6 +127,11 @@ function createSaleTx(body, session, opts = {}) {
       throw new ApiError(400, `«${p.name}» в резерве за другим клиентом`);
     }
     const price = round2(p.retail_price);
+    // Изделие завели без цены, чтобы дописать потом (products.js) — продать его
+    // за ноль нельзя: сначала цена в карточке.
+    if (!(price > 0)) {
+      throw new ApiError(400, `У «${p.name}» (${p.sku}) не указана цена — сначала заполните её в карточке изделия`);
+    }
     const discount = round2(it.discount || 0);
     if (discount < 0 || discount > price) throw new ApiError(400, `Недопустимая скидка на «${p.name}»`);
     // Комплект в чеке — только подпись позиции: цена и скидка уже разложены

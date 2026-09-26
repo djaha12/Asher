@@ -149,12 +149,10 @@ async function main() {
   const мусор = (тело, что) => админ.зов('POST', '/api/receipts', { supplier_id: поставщик.id, ...тело })
     .then(r => check(что, r.status === 400, r.data));
   await мусор({ items: [] }, 'пустая накладная — отказ');
-  await мусор({ items: [{ name: 'Без артикула', purchase_price: 1, retail_price: 2 }] },
-    'изделие без артикула — отказ');
-  await мусор({ items: [{ sku: МЕТКА + '-x', purchase_price: 1, retail_price: 2 }] },
-    'изделие без наименования — отказ');
-  await мусор({ items: [{ sku: МЕТКА + '-y', name: 'Без цены продажи', purchase_price: 1 }] },
-    'изделие без цены продажи — отказ');
+  // Без артикула, названия и цены продажи строка теперь принимается — их
+  // дописывают потом (это проверяет черновик-test). Без закупки — нет: из неё долг.
+  await мусор({ items: [{ sku: МЕТКА + '-y', name: 'Без закупки', retail_price: 2 }] },
+    'изделие без закупочной цены — отказ');
   await мусор({ items: [
     { sku: МЕТКА + '-z', name: 'Один', purchase_price: 1, retail_price: 2 },
     { sku: МЕТКА + '-z', name: 'Тот же артикул', purchase_price: 1, retail_price: 2 },

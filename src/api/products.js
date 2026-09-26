@@ -142,15 +142,58 @@ function rowToProduct(r) {
   return { ...r, gems };
 }
 
+/*
+ * Изделие можно завести, не заполнив ничего: товар пришёл, его надо положить
+ * на витрину сейчас, а вес, камни и цену дописать потом. Раньше без артикула
+ * и названия карточка не сохранялась, и изделие ждало на столе, пока кто-то
+ * найдёт время заполнить всё разом.
+ *   — артикул не указан — выдаём следующий по порядку (следующийАртикул);
+ *   — название не указано — «Без названия»: так его видно в любом списке,
+ *     и кнопка «Не заполнены» в каталоге его находит;
+ *   — цена не указана — изделие лежит, но касса его не продаст (sales.js).
+ */
+const БЕЗ_НАЗВАНИЯ = 'Без названия';
+
+/*
+ * Следующий артикул по порядку. Продолжаем ту нумерацию, которой в каталоге
+ * больше всего: после «AS-00152» — «AS-00153», той же ширины. Так
+ * выданный артикул выглядит как обычный, по нему печатается штрихкод и
+ * ищет касса. занятые — артикулы, уже выданные в этой же накладной.
+ */
+function следующийАртикул(занятые = new Set()) {
+  const поПрефиксу = new Map();
+  for (const { sku } of db.prepare('SELECT sku FROM products').all()) {
+    const m = /^(.*?)(\d+)$/.exec(String(sku));
+    if (!m) continue;
+    const п = поПрефиксу.get(m[1]) || { сколько: 0, наибольший: 0, ширина: 0 };
+    п.сколько++;
+    п.наибольший = Math.max(п.наибольший, Number(m[2]));
+    п.ширина = Math.max(п.ширина, m[2].length);
+    поПрефиксу.set(m[1], п);
+  }
+  let префикс = 'A-', номер = 1, ширина = 5;
+  let лучший = null;
+  for (const [пр, п] of поПрефиксу) if (!лучший || п.сколько > лучший.сколько) лучший = { пр, ...п };
+  if (лучший) { префикс = лучший.пр; номер = лучший.наибольший + 1; ширина = лучший.ширина; }
+  const занят = sku => занятые.has(sku.toLowerCase())
+    || db.prepare('SELECT 1 FROM products WHERE sku = ? COLLATE NOCASE').get(sku)
+    || db.prepare('SELECT 1 FROM product_sets WHERE sku = ? COLLATE NOCASE').get(sku);
+  for (;; номер++) {
+    const sku = префикс + String(номер).padStart(ширина, '0');
+    if (!занят(sku)) return sku;
+  }
+}
+
 function validateProduct(body, { partial = false, existing = null } = {}) {
   const out = {};
   if (!partial || body.sku !== undefined) {
     out.sku = String(body.sku || '').trim();
-    if (!out.sku) throw new ApiError(400, 'Артикул обязателен');
+    // Пустой при заведении — выдадим следующий по порядку (см. выше). А стереть
+    // артикул у заведённого изделия нельзя: по нему ищут, сканируют и печатают.
+    if (!out.sku && partial) throw new ApiError(400, 'Артикул нельзя стереть — укажите новый или оставьте прежний');
   }
   if (!partial || body.name !== undefined) {
-    out.name = String(body.name || '').trim();
-    if (!out.name) throw new ApiError(400, 'Наименование обязательно');
+    out.name = String(body.name || '').trim() || БЕЗ_НАЗВАНИЯ;
   }
   const toId = (v, label) => {
     if (!v) return null;
@@ -322,6 +365,11 @@ const routes = [
       if (query.carat_max) { cond.push('p.carat <= ?'); args.push(Number(query.carat_max)); }
       if (query.store_id) { cond.push('p.store_id = ?'); args.push(Number(query.store_id)); }
       if (query.ownership) { cond.push('p.ownership = ?'); args.push(query.ownership); }
+      // «Не заполнены» — заведены второпях: без названия, цены, металла или веса.
+      if (query.incomplete === '1') {
+        cond.push(`(p.name = ? OR p.retail_price <= 0 OR COALESCE(p.metal, '') = '' OR COALESCE(p.weight, 0) <= 0)`);
+        args.push(БЕЗ_НАЗВАНИЯ);
+      }
       if (query.has_photo === '1') cond.push('EXISTS (SELECT 1 FROM product_images pi WHERE pi.product_id = p.id)');
       if (query.has_photo === '0') cond.push('NOT EXISTS (SELECT 1 FROM product_images pi WHERE pi.product_id = p.id)');
       const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
@@ -389,6 +437,11 @@ const routes = [
       reserve.releaseExpired();
       return { items: reserve.expiringSoon(Math.min(Number(query.days) || 2, 30)) };
     },
+  },
+  {
+    // Какой артикул выдадим, если оставить поле пустым, — форма показывает его подсказкой.
+    method: 'GET', path: '/api/products/next-sku',
+    handler: () => ({ sku: следующийАртикул() }),
   },
   {
     method: 'GET', path: '/api/products/meta',
@@ -469,6 +522,7 @@ const routes = [
     handler: ({ body, session }) => {
       const data = validateProduct(
         stripOwnerFields(stripPurchaseInput(body, session.role), session.role, null));
+      if (!data.sku) data.sku = следующийАртикул();
       const dup = db.prepare('SELECT id FROM products WHERE sku = ?').get(data.sku);
       if (dup) throw new ApiError(400, `Артикул «${data.sku}» уже существует`);
       // Артикул сканируется одним кодом и в кассе, и в инвентаризации,
@@ -578,4 +632,4 @@ const routes = [
   },
 ];
 
-module.exports = { routes };
+module.exports = { routes, следующийАртикул, БЕЗ_НАЗВАНИЯ };

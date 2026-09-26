@@ -135,22 +135,28 @@ const routes = [
       const артикулы = new Set();
       for (const [i, строка] of строки.entries()) {
         const номер = i + 1;
-        const sku = String(строка.sku || '').trim();
-        if (!sku) throw new ApiError(400, `Строка ${номер}: артикул обязателен`);
-        if (артикулы.has(sku)) throw new ApiError(400, `Артикул «${sku}» в накладной дважды`);
-        артикулы.add(sku);
+        /*
+         * Артикул, название и цену продажи можно дописать потом, как и в
+         * карточке изделия (products.js): не указан артикул — выдаём следующий
+         * по порядку, название — «Без названия». Закупочная остаётся
+         * обязательной: из неё складывается долг поставщику по накладной.
+         */
+        const { следующийАртикул, БЕЗ_НАЗВАНИЯ } = require('./products');
+        let sku = String(строка.sku || '').trim();
+        if (!sku) sku = следующийАртикул(артикулы);
+        if (артикулы.has(sku.toLowerCase())) throw new ApiError(400, `Артикул «${sku}» в накладной дважды`);
+        артикулы.add(sku.toLowerCase());
         const занят = db.prepare('SELECT id FROM products WHERE sku = ?').get(sku);
         if (занят) throw new ApiError(400, `Артикул «${sku}» уже есть в каталоге`);
 
-        const name = String(строка.name || '').trim();
-        if (!name) throw new ApiError(400, `Строка ${номер}: укажите наименование`);
+        const name = String(строка.name || '').trim() || БЕЗ_НАЗВАНИЯ;
 
         const закуп = закупочная(строка, курсПоУмолчанию);
         if (!(закуп.сумма > 0)) {
           throw new ApiError(400, `Строка ${номер}: закупочная цена должна быть больше нуля`);
         }
         const retail = round2(строка.retail_price);
-        if (!(retail > 0)) throw new ApiError(400, `Строка ${номер}: укажите цену продажи`);
+        if (retail < 0) throw new ApiError(400, `Строка ${номер}: цена продажи не может быть отрицательной`);
 
         готовые.push({
           sku, name, закуп, retail,

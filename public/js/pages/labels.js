@@ -62,7 +62,7 @@ window.Pages.labels = (() => {
         ${meta ? `<div>${ui.esc(meta)}</div>` : ''}
         ${o.stone && stone ? `<div class="jl-stone">${ui.esc(stone)}</div>` : ''}
         ${o.store && p.store_name ? `<div>${ui.esc(p.store_name)}</div>` : ''}
-        ${o.price ? `<div class="jl-price">${ui.money(p.retail_price)}</div>` : ''}
+        ${o.price && Number(p.retail_price) > 0 ? `<div class="jl-price">${ui.money(p.retail_price)}</div>` : ''}
         ${o.qr && code ? `<div class="jl-qr">${qrSvg(code)}</div>` : ''}
         ${o.barcode && code ? ui.barcodeSvg(code) +
           `<div class="jl-sku" style="text-align:center;letter-spacing:.08em">${ui.esc(code)}</div>` : ''}
@@ -118,7 +118,9 @@ window.Pages.labels = (() => {
       { title: 'Наименование', render: r => ui.esc(r.name) },
       { title: 'Металл', render: r => ui.esc(r.metal || '—') },
       { title: 'Вес', cls: 'num', render: r => r.weight ? ui.num(r.weight) + ' г' : '—' },
-      { title: 'Цена', cls: 'num strong', render: r => ui.money(r.retail_price) },
+      // Изделие могли завести без цены — на бирке тогда цены нет, а не «0 сом».
+      { title: 'Цена', cls: 'num strong', render: r => Number(r.retail_price) > 0
+        ? ui.money(r.retail_price) : '<span class="warn">не указана</span>' },
       { title: 'Штрихкод', render: r => r.barcode
         ? `<span class="mono dim">${ui.esc(r.barcode)}</span>`
         : '<span class="dim">по артикулу</span>' },

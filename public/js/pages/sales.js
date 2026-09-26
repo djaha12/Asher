@@ -340,6 +340,10 @@ window.Pages.sales = (() => {
         ui.toast('Изделие недоступно для продажи', true);
         return;
       }
+      if (!(Number(prod.retail_price) > 0)) {
+        ui.toast(`У «${prod.name}» не указана цена — сначала заполните её в карточке изделия`, true);
+        return;
+      }
       newItems.push({ product: prod, discount: 0 });
       renderEx();
     }
@@ -818,6 +822,11 @@ window.Pages.sales = (() => {
     function addProduct(p) {
       if (state.items.some(it => it.product.id === p.id)) { ui.toast('Это изделие уже в чеке', true); return; }
       if (p.status !== 'in_stock' && p.status !== 'reserved') { ui.toast('Изделие недоступно для продажи', true); return; }
+      // Изделие завели без цены, чтобы дописать потом, — за ноль его не продать.
+      if (!(Number(p.retail_price) > 0)) {
+        ui.toast(`У «${p.name}» не указана цена — сначала заполните её в карточке изделия`, true);
+        return;
+      }
       /*
        * Отложенное изделие продаётся только тому, за кем отложено. Раньше
        * касса молча пускала его в чек, а при оплате сервер отвечал «в резерве
@@ -855,7 +864,7 @@ window.Pages.sales = (() => {
       resultsBox.innerHTML = lastResults.slice(0, 8).map((p, i) => `
         <div class="sr-item" data-i="${i}">
           <span>${ui.esc(p.name)} <span class="sr-sub">${ui.esc(p.sku)}${p.status === 'reserved' ? ' · резерв' : ''}</span></span>
-          <b class="money">${ui.money(p.retail_price)}</b>
+          <b class="money">${Number(p.retail_price) > 0 ? ui.money(p.retail_price) : '<span class="warn">без цены</span>'}</b>
         </div>`).join('') || '<div class="sr-item muted">Нет доступных изделий по запросу</div>';
       resultsBox.querySelectorAll('.sr-item[data-i]').forEach(el => {
         el.addEventListener('mousedown', () => {
