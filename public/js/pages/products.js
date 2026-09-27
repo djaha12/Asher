@@ -183,7 +183,7 @@ window.Pages.products = (() => {
       </div>`;
   }
 
-  function openDetail(id, onChange) {
+  function openDetail(id, onChange, { новое = false } = {}) {
     api.get('/api/products/' + id).then(p => {
       const gems = (p.gems || []).map(g => `
         <tr><td>${ui.esc(g.type)}</td><td class="num">${g.count || 1}</td><td class="num">${g.carat || '—'}</td>
@@ -271,12 +271,18 @@ window.Pages.products = (() => {
          * «Редактировать» и «Продать». Раньше здесь было до десяти кнопок:
          * на телефоне они закрывали полэкрана, «Редактировать» пряталась
          * под всплывающее сообщение, а «Сохранить» не было вовсе.
+         *
+         * Сразу после «Добавить» следующий шаг — фото и «Сохранить»: она и
+         * становится большой кнопкой. Продать можно было ещё в анкете.
+         * Открыли изделие из каталога — большая кнопка «Продать».
          */
-        footer: `
-          <button class="btn" data-act="done">Сохранить</button>
+        footer: новое
+          ? `<button class="btn" data-act="edit">Редактировать</button>
+          ${p.status === 'in_stock' || p.status === 'reserved' ? '<button class="btn" data-act="sell">Продать</button>' : ''}
+          <button class="btn btn-primary" data-act="done">Сохранить</button>`
+          : `<button class="btn" data-act="done">Сохранить</button>
           <button class="btn" data-act="edit">Редактировать</button>
-          ${p.status === 'in_stock' || p.status === 'reserved' ? '<button class="btn btn-primary" data-act="sell">Продать</button>' : ''}
-        `,
+          ${p.status === 'in_stock' || p.status === 'reserved' ? '<button class="btn btn-primary" data-act="sell">Продать</button>' : ''}`,
       });
       // Галерея живёт своей жизнью: загрузка и удаление фото не трогают остальную карточку.
       Photos.gallery(m.body.querySelector('#prod-gallery'), p.id, p.images || [], {
@@ -1095,6 +1101,8 @@ window.Pages.products = (() => {
       clarity: [...new Set([...CLARITIES, умолч.clarity, ...(meta.clarities || []).filter(в => в.length <= 5)].filter(Boolean))],
     };
     const сейчас = поле => p[поле] || (isNew ? умолч[поле] : '');
+    // «Продать» — у нового изделия и у того, что лежит на витрине или в резерве.
+    const можноПродать = isNew || p.status === 'in_stock' || p.status === 'reserved';
     const m = ui.modal({
       title: isNew ? 'Новое изделие' : 'Изделие: ' + p.name,
       size: 'lg',
@@ -1164,8 +1172,14 @@ window.Pages.products = (() => {
         <div id="gems-wrap">${(p.gems || []).map(gemRow).join('')}</div>
         <button type="button" class="btn btn-sm" id="gem-add">+ Добавить камень</button>
       </form>`,
+      /*
+       * Две дороги из анкеты: «Добавить» — дальше фото и «Сохранить»;
+       * «Продать» — изделие записывается, и сразу открывается касса с ним в
+       * чеке: покупатель ждёт у прилавка, а изделие ещё не заведено.
+       */
       footer: `<button class="btn" data-act="cancel">Отмена</button>
-        <button class="btn btn-primary" data-act="save">${isNew ? 'Добавить изделие' : 'Сохранить'}</button>`,
+        ${можноПродать ? '<button class="btn" data-act="save-sell">Продать</button>' : ''}
+        <button class="btn btn-primary" data-act="save">${isNew ? 'Добавить' : 'Сохранить'}</button>`,
     });
     const form = m.body.querySelector('#prod-form');
     включитьКнопкиВыбора(form);
@@ -1241,9 +1255,22 @@ window.Pages.products = (() => {
         if (поле && !поле.value) поле.placeholder = `${sku} — выдадим сами`;
       }).catch(() => {});
     }
-    m.foot.querySelector('[data-act=save]').onclick = async () => {
-      if (!form.reportValidity()) return;
+    let идёт = false;   // двойное касание на телефоне не заводит изделие дважды
+    async function сохранить(потомПродать) {
+      if (идёт || !form.reportValidity()) return;
       const v = ui.formValues(form);
+      // Без цены касса не продаст — не записываем зря, а показываем, что вписать.
+      if (потомПродать && !(Number(v.retail_price) > 0)) {
+        if (!isNew && !admin) {
+          ui.toast('У изделия нет цены — её вписывает владелец. Пока цены нет, касса его не продаст', true);
+          return;
+        }
+        ui.toast('Чтобы продать, впишите розничную цену', true);
+        const поле = form.querySelector('[name=retail_price]');
+        поле.focus();
+        поле.scrollIntoView({ block: 'center' });
+        return;
+      }
       const gems = [...m.body.querySelectorAll('.gem-row')].map(row => ({
         type: row.querySelector('[name=g_type]').value.trim(),
         count: Number(row.querySelector('[name=g_count]').value) || 1,
@@ -1287,21 +1314,20 @@ window.Pages.products = (() => {
         ui.toast('Для товара на реализации укажите поставщика — владельца изделия', true);
         return;
       }
+      идёт = true;
       try {
-        if (isNew) {
-          const created = await api.post('/api/products', payload);
-          ui.toast('Изделие добавлено');
-          m.close();
-          onChange && onChange();
-          // Сразу предлагаем фото: без него изделие в каталоге выглядит пустым.
-          openDetail(created.id, onChange);
-          return;
-        }
-        await api.put('/api/products/' + p.id, payload);
-        ui.toast('Сохранено');
-        m.close(); onChange && onChange();
-      } catch (e) { ui.toastErr(e); }
-    };
+        const id = isNew ? (await api.post('/api/products', payload)).id : p.id;
+        if (!isNew) await api.put('/api/products/' + p.id, payload);
+        ui.toast(isNew ? 'Изделие добавлено' : 'Сохранено');
+        m.close();
+        onChange && onChange();
+        if (потомПродать) Pages.sales.newSale(await api.get('/api/products/' + id));
+        // Сразу предлагаем фото: без него изделие в каталоге выглядит пустым.
+        else if (isNew) openDetail(id, onChange, { новое: true });
+      } catch (e) { ui.toastErr(e); } finally { идёт = false; }
+    }
+    m.foot.querySelector('[data-act=save]').onclick = () => сохранить(false);
+    if (можноПродать) m.foot.querySelector('[data-act=save-sell]').onclick = () => сохранить(true);
   }
 
   return {
