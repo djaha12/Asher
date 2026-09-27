@@ -1080,6 +1080,51 @@ window.Pages.products = (() => {
   const опцияНовогоПоставщика = () => (App.isAdmin()
     ? `<option value="${НОВЫЙ_ПОСТАВЩИК}">+ Новый поставщик…</option>` : '');
 
+  /*
+   * Артикул уже носит другое изделие. Раньше вверху мелькала красная строка
+   * «уже существует», изделие не сохранялось, и что делать дальше, было
+   * непонятно. Теперь — отдельное окно: то изделие с фото, весом и ценой,
+   * чтобы узнать его глазами, и три дороги. «Это оно» — изделие уже заведено,
+   * открываем его. «Другое изделие» — та же модель, ещё одна штука: пишем
+   * «К-12-2», и по «К-12» поиск находит обе. «Исправить» — опечатка.
+   * Отвечает 'open', 'variant', 'fix' или null (окно закрыли).
+   */
+  function выборПриДублеАртикула(д, вариант, { новое }) {
+    return new Promise(resolve => {
+      let ответ = null;
+      const приметы = [д.sku, [д.metal, д.fineness].filter(Boolean).join(' '),
+        д.weight ? ui.num(д.weight) + '\u00a0г' : '', д.size ? 'размер ' + д.size : ''].filter(Boolean);
+      const m = ui.modal({
+        title: `Артикул «${д.sku}» уже есть`,
+        size: 'sm',
+        body: `<div class="dup-item">
+            ${д.thumb ? `<img src="${ui.esc(ui.photoUrl(д.thumb))}" alt="">`
+              : `<div class="thumb-sm-empty">${ui.icon('gem')}</div>`}
+            <div>
+              <div class="strong">${ui.esc(д.name)}</div>
+              <div class="muted">${приметы.map(ui.esc).join(' · ')}</div>
+              <div>${Number(д.retail_price) > 0 ? ui.money(д.retail_price) : 'цена не указана'}
+                ${ui.badge('status', д.status)}</div>
+            </div>
+          </div>
+          <p style="margin:12px 0 4px">${новое
+            ? 'Это то же изделие или другое — ещё одна штука того же артикула?'
+            : 'Этот артикул уже носит другое изделие.'}</p>`,
+        footer: `
+          ${новое ? '<button class="btn" data-act="open">Это оно — открыть</button>' : ''}
+          <button class="btn" data-act="variant">${новое ? 'Другое изделие' : 'Записать как'}: ${ui.esc(вариант)}</button>
+          <button class="btn" data-act="fix">Исправить артикул</button>`,
+        onClose: () => resolve(ответ),
+      });
+      // Три ответа на вопрос — на телефоне друг под другом, каждый одной строкой.
+      m.foot.classList.add('modal-foot-stack');
+      m.foot.addEventListener('click', e => {
+        const b = e.target.closest('[data-act]');
+        if (b) { ответ = b.dataset.act; m.close(); }
+      });
+    });
+  }
+
   function openEditor(p, onChange) {
     const isNew = !p || !p.id;
     p = p || {};
@@ -1315,6 +1360,7 @@ window.Pages.products = (() => {
         return;
       }
       идёт = true;
+      let дубль = null;
       try {
         const id = isNew ? (await api.post('/api/products', payload)).id : p.id;
         if (!isNew) await api.put('/api/products/' + p.id, payload);
@@ -1324,7 +1370,16 @@ window.Pages.products = (() => {
         if (потомПродать) Pages.sales.newSale(await api.get('/api/products/' + id));
         // Сразу предлагаем фото: без него изделие в каталоге выглядит пустым.
         else if (isNew) openDetail(id, onChange, { новое: true });
-      } catch (e) { ui.toastErr(e); } finally { идёт = false; }
+      } catch (e) {
+        if (e.status === 409 && e.data && e.data.existing) дубль = e.data;
+        else ui.toastErr(e);
+      } finally { идёт = false; }
+      if (!дубль) return;
+      const поле = form.querySelector('[name=sku]');
+      const выбор = await выборПриДублеАртикула(дубль.existing, дубль.вариант, { новое: isNew });
+      if (выбор === 'open') { m.close(); openDetail(дубль.existing.id, onChange); }
+      if (выбор === 'variant') { поле.value = дубль.вариант; await сохранить(потомПродать); }
+      if (выбор === 'fix') { поле.focus(); поле.select(); поле.scrollIntoView({ block: 'center' }); }
     }
     m.foot.querySelector('[data-act=save]').onclick = () => сохранить(false);
     if (можноПродать) m.foot.querySelector('[data-act=save-sell]').onclick = () => сохранить(true);

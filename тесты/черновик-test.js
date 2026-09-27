@@ -140,7 +140,8 @@ async function main() {
 
   console.log('\n=== 5. Явный артикул — как раньше ===');
   r = await админ.зов('POST', '/api/products', { sku: второе.sku });
-  check('занятый артикул по-прежнему не дают', r.status === 400 && /уже существует/.test(r.data.error), r.data);
+  check('занятый артикул по-прежнему не дают — и говорят, у какого он изделия',
+    r.status === 409 && /уже есть/.test(r.data.error) && r.data.existing && r.data.existing.sku === второе.sku, r.data);
 
   console.log(`\nИтого: ${ok} ok, ${fail} fail`);
   if (провалы.length) console.log('Провалено:\n  - ' + провалы.join('\n  - '));

@@ -189,6 +189,33 @@ function следующийАртикул(занятые = new Set()) {
   }
 }
 
+/*
+ * Кто уже носит этот артикул. Без учёта регистра: «к-12» и «К-12» для
+ * человека один артикул, и поиск их не различает. Возвращаем само изделие —
+ * окно «Такой артикул уже есть» показывает его с фото, весом и ценой,
+ * чтобы узнать глазами: это оно или другое изделие того же артикула.
+ */
+function изделиеСАртикулом(sku, кромеId = 0) {
+  return db.prepare(`SELECT p.id, p.sku, p.name, p.metal, p.fineness, p.weight, p.size,
+      p.retail_price, p.status, ${MAIN_THUMB}
+    FROM products p WHERE nlower(p.sku) = nlower(?) AND p.id != ? LIMIT 1`).get(sku, кромеId) || null;
+}
+
+// «К-12» занят — первый свободный из «К-12-2», «К-12-3»…: модель узнаётся по артикулу.
+function свободныйАртикул(sku) {
+  for (let n = 2; ; n++) {
+    const вариант = `${sku}-${n}`;
+    if (!изделиеСАртикулом(вариант)
+      && !db.prepare('SELECT 1 FROM product_sets WHERE nlower(sku) = nlower(?)').get(вариант)) return вариант;
+  }
+}
+
+// Вариант строим от записанного артикула: набрали «к-12» — предлагаем «К-12-2», как у модели.
+function отказЗаАртикул(дубль, sku) {
+  throw new ApiError(409, `Артикул «${sku}» уже есть: «${дубль.name}»`,
+    { existing: дубль, вариант: свободныйАртикул(дубль.sku) });
+}
+
 function validateProduct(body, { partial = false, existing = null } = {}) {
   const out = {};
   if (!partial || body.sku !== undefined) {
@@ -577,8 +604,8 @@ const routes = [
       const data = validateProduct(
         stripOwnerFields(stripPurchaseInput(body, session.role), session.role, null));
       if (!data.sku) data.sku = следующийАртикул();
-      const dup = db.prepare('SELECT id FROM products WHERE sku = ?').get(data.sku);
-      if (dup) throw new ApiError(400, `Артикул «${data.sku}» уже существует`);
+      const дубль = изделиеСАртикулом(data.sku);
+      if (дубль) отказЗаАртикул(дубль, data.sku);
       // Артикул сканируется одним кодом и в кассе, и в инвентаризации,
       // поэтому не должен совпадать с артикулом комплекта.
       const dupSet = db.prepare('SELECT name FROM product_sets WHERE sku = ? COLLATE NOCASE').get(data.sku);
@@ -610,8 +637,8 @@ const routes = [
         stripOwnerFields(stripPurchaseInput(body, session.role), session.role, existing),
         { partial: true, existing });
       if (data.sku && data.sku !== existing.sku) {
-        const dup = db.prepare('SELECT id FROM products WHERE sku = ? AND id != ?').get(data.sku, id);
-        if (dup) throw new ApiError(400, `Артикул «${data.sku}» уже существует`);
+        const дубль = изделиеСАртикулом(data.sku, id);
+        if (дубль) отказЗаАртикул(дубль, data.sku);
       }
       // статусы «продано» ставит только продажа, снимает — только возврат по чеку
       if (data.status !== undefined && data.status !== existing.status) {
@@ -686,4 +713,4 @@ const routes = [
   },
 ];
 
-module.exports = { routes, следующийАртикул, БЕЗ_НАЗВАНИЯ };
+module.exports = { routes, следующийАртикул, БЕЗ_НАЗВАНИЯ, изделиеСАртикулом, свободныйАртикул };

@@ -877,7 +877,7 @@ mark { background: var(--gold-soft); color: inherit; border-radius: 3px; padding
     border-top: 1px solid var(--line); flex-wrap: wrap;
   }
   .modal-foot .btn { flex: 1 1 calc(50% - 5px); min-width: 0; white-space: normal; line-height: 1.2; }
-  .modal-foot .btn-primary { flex-basis: 100%; }
+  .modal-foot .btn-primary, .modal-foot-stack .btn { flex-basis: 100%; }
   .modal-foot .left { margin-right: 0; }
   /*
    * Пока открыто окно, сообщения — сверху: снизу они ложились прямо на
@@ -948,6 +948,15 @@ mark { background: var(--gold-soft); color: inherit; border-radius: 3px; padding
   display: flex; align-items: center; justify-content: center; color: var(--line-strong); flex: 0 0 auto;
 }
 .thumb-sm-empty svg { width: 18px; height: 18px; stroke-width: 1.4; }
+/* Окно «Такой артикул уже есть»: то изделие крупно — узнать его глазами */
+.dup-item {
+  display: flex; gap: 12px; align-items: center; padding: 10px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2);
+}
+.dup-item > img, .dup-item > .thumb-sm-empty {
+  width: 72px; height: 72px; border-radius: 10px; object-fit: cover; flex: 0 0 auto;
+}
+.dup-item > div:last-child { min-width: 0; display: grid; gap: 3px; }
 .hint-box {
   background: var(--gold-wash); border: 1px solid var(--gold-soft); border-radius: var(--radius-sm);
   padding: 13px 16px; font-size: 13.5px; color: var(--ink-2); margin-bottom: 16px; line-height: 1.55;
