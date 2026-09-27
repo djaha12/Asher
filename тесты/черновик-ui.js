@@ -78,10 +78,11 @@ async function войти(page, логин, пароль) {
   await page.click(`${ВЕРХ} [data-act=save]`);
   await page.waitForTimeout(1500);
   const карточка = чисто(await page.textContent(`${ВЕРХ} .modal-body`).catch(() => ''));
-  check('сохранилось и открылась карточка «Без названия»',
-    /Без названия/.test(await page.textContent(`${ВЕРХ} .modal-head`).catch(() => '')), await page.textContent(`${ВЕРХ} .modal-head`).catch(() => ''));
+  // Названия в анкете нет — без категории изделие называется «Изделие».
+  check('сохранилось и открылась карточка «Изделие»',
+    /Изделие/.test(await page.textContent(`${ВЕРХ} .modal-head`).catch(() => '')), await page.textContent(`${ВЕРХ} .modal-head`).catch(() => ''));
   // Металл и проба стоят в форме сами (металл-ui), так что их в списке нет.
-  check('в карточке — чего не хватает', /Не заполнено: название, цена, вес/.test(карточка), карточка.slice(0, 200));
+  check('в карточке — чего не хватает', /Не заполнено: цена, вес/.test(карточка), карточка.slice(0, 200));
   check('и что без цены касса не продаст', /касса его не продаст/.test(карточка));
   check('пустой штрихкод в карточке не показан', !/Штрихкод/.test(карточка));
   await снимок(page, { path: `${OUT}/карточка.png` });

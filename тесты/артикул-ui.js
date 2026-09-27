@@ -103,7 +103,7 @@ const кнопкиВнизу = page => page.$$eval(`${ВЕРХ} .modal-foot butt
   console.log('\n=== 2. Анкета: вместо красной строки — окно «Такой артикул уже есть» ===');
   await открытьАнкету(page);
   await page.fill('#prod-form [name=sku]', АРТ.toLowerCase());
-  await page.fill('#prod-form [name=name]', 'Кольцо «Новая штука»');
+  await page.selectOption('#prod-form [name=category_id]', { label: 'Кольца' });
   await page.fill('#prod-form [name=weight]', '3.4');
   await page.fill('#prod-form [name=retail_price]', '52000');
   await page.click(`${ВЕРХ} [data-act=save]`);
@@ -133,7 +133,7 @@ const кнопкиВнизу = page => page.$$eval(`${ВЕРХ} .modal-foot butt
   await page.waitForTimeout(400);
   check('окно закрылось, анкета на месте', !(await окноДубля(page)) && Boolean(await page.$('#prod-form')));
   check('курсор в артикуле', await page.evaluate(() => document.activeElement && document.activeElement.name) === 'sku');
-  check('набранное не пропало', await page.inputValue('#prod-form [name=name]') === 'Кольцо «Новая штука»'
+  check('набранное не пропало', await page.$eval('#prod-form [name=category_id]', s => s.options[s.selectedIndex].text) === 'Кольца'
     && await page.inputValue('#prod-form [name=weight]') === '3.4' && await page.inputValue('#prod-form [name=retail_price]') === '52000');
 
   console.log('\n=== 4. «Другое изделие» — записываем «-3», дальше фото и «Сохранить» ===');
@@ -144,7 +144,7 @@ const кнопкиВнизу = page => page.$$eval(`${ВЕРХ} .modal-foot butt
   check('открылась карточка нового изделия с фото', Boolean(await page.$(`${ВЕРХ} #prod-gallery`)));
   const третье = (await сАртикулом(АРТ + '-3'))[0];
   check('записано с артикулом «-3» и всем набранным',
-    третье && третье.name === 'Кольцо «Новая штука»' && третье.weight === 3.4 && третье.retail_price === 52000,
+    третье && третье.name === 'Кольцо' && третье.weight === 3.4 && третье.retail_price === 52000,
     третье && [третье.sku, третье.name, третье.weight, третье.retail_price]);
   check('первое изделие не тронуто', (await зов('GET', '/api/products/' + первое)).data.name === 'Кольцо «Первое»');
   const поиск = ((await зов('GET', '/api/products?limit=50&search=' + encodeURIComponent(АРТ))).data.items || []).map(x => x.sku);

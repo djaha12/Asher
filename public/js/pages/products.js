@@ -148,6 +148,20 @@ window.Pages.products = (() => {
    * видно в каталоге и в карточке, а кнопка «Не заполнены» их собирала.
    */
   const БЕЗ_НАЗВАНИЯ = 'Без названия';
+  /*
+   * Название — по категории. Поля «Наименование» в анкете нет: изделие
+   * узнают по артикулу, фото и весу, а каталогу, чеку и бирке нужно имя —
+   * «Кольцо», «Серьги». Своя категория — её же названием; без категории —
+   * «Изделие».
+   */
+  const ИМЯ_ПО_КАТЕГОРИИ = {
+    'кольца': 'Кольцо', 'серьги': 'Серьги', 'подвески': 'Подвеска', 'буквенные подвески': 'Буквенная подвеска',
+    'браслеты': 'Браслет', 'цепи': 'Цепь', 'колье': 'Колье', 'броши': 'Брошь', 'часы': 'Часы', 'комплекты': 'Комплект',
+  };
+  const имяПоКатегории = id => {
+    const к = cats.find(c => String(c.id) === String(id || ''));
+    return к ? ИМЯ_ПО_КАТЕГОРИИ[к.name.trim().toLowerCase()] || к.name.trim() : 'Изделие';
+  };
   function незаполнено(r) {
     return [
       (!r.name || r.name === БЕЗ_НАЗВАНИЯ) && 'название',
@@ -1155,7 +1169,7 @@ window.Pages.products = (() => {
         ${DATALISTS()}
         ${isNew ? `<div class="form-hint" style="margin:0 0 10px">Обязательных полей нет: можно сохранить сразу,
           а вес, камни и ${admin ? 'цены — закупочную и розничную —' : 'цену'} дописать потом. Артикул не указан — выдадим
-          следующий по порядку. Без ${admin ? 'розничной ' : ''}цены изделие не продаётся.</div>`
+          следующий по порядку. Название — по категории. Без ${admin ? 'розничной ' : ''}цены изделие не продаётся.</div>`
           : незаполнено(p).length ? `<div class="form-hint" style="margin:0 0 10px">Не заполнено:
             ${незаполнено(p).join(', ')}.</div>` : ''}
         <div class="form-grid-3">
@@ -1163,7 +1177,6 @@ window.Pages.products = (() => {
           <label class="field"><span>Категория</span><select name="category_id"><option value="">—</option>${catOpts}</select></label>
           <label class="field"><span>Размер</span><input name="size" value="${ui.esc(p.size || '')}" placeholder="17,5"></label>
         </div>
-        <label class="field"><span>Наименование</span><input name="name" value="${ui.esc(p.name === БЕЗ_НАЗВАНИЯ ? '' : (p.name || ''))}" placeholder="Кольцо с бриллиантом «Сияние»"></label>
         ${кнопкиВыбора('metal', 'Металл', варианты.metal, сейчас('metal'), 'metal-list')}
         ${кнопкиВыбора('fineness', 'Проба', варианты.fineness, сейчас('fineness'), 'fineness-list')}
         <!-- Главный бриллиант: то, по чему изделие ищут, сравнивают и оценивают -->
@@ -1201,18 +1214,11 @@ window.Pages.products = (() => {
               value="${p.purchase_rate || ''}"></label>
         </div>
         <div class="form-hint hidden" id="pf-usd-calc"></div>` : ''}
-        <div class="form-grid-3">
+        <!-- «Чей товар» в анкете не спрашиваем: новое изделие — наше; на реализацию принимают накладной -->
+        <div class="form-grid">
           <label class="field"><span>Точка продаж</span><select name="store_id">${storeOpts}</select></label>
-          <label class="field"><span>Чей товар</span><select name="ownership">
-            <option value="own" ${p.ownership !== 'consignment' ? 'selected' : ''}>Наш (куплен)</option>
-            <option value="consignment" ${p.ownership === 'consignment' ? 'selected' : ''}>На реализации (чужой)</option>
-          </select></label>
           <label class="field"><span>Расположение</span><input name="location" value="${ui.esc(p.location || '')}" placeholder="Витрина 2 / Сейф"></label>
         </div>
-        <p class="form-hint" id="own-hint" style="${p.ownership === 'consignment' ? '' : 'display:none'}">
-          Товар на реализации: как только вы его продадите, система сама запишет долг перед
-          поставщиком на закупочную стоимость. Поставщика указать обязательно.
-        </p>
         <label class="field"><span>Описание</span><input name="description" value="${ui.esc(p.description || '')}"></label>
         <h4 style="margin:6px 0 10px">Вставки (камни)</h4>
         <div id="gems-wrap">${(p.gems || []).map(gemRow).join('')}</div>
@@ -1233,9 +1239,6 @@ window.Pages.products = (() => {
     m.body.querySelector('#gem-add').onclick = () => {
       m.body.querySelector('#gems-wrap').insertAdjacentHTML('beforeend', gemRow());
     };
-    form.querySelector('[name=ownership]').addEventListener('change', e => {
-      m.body.querySelector('#own-hint').style.display = e.target.value === 'consignment' ? '' : 'none';
-    });
 
     // ---- Закупка в валюте: подставляем курс из настроек и показываем итог ----
     // У продавца этого блока в форме нет — весь расчёт ниже пропускаем.
@@ -1327,8 +1330,14 @@ window.Pages.products = (() => {
         cert_lab: row.querySelector('[name=g_cert_lab]').value.trim(),
         cert_number: row.querySelector('[name=g_cert_number]').value.trim(),
       })).filter(g => g.type);
+      /*
+       * Название ставим по категории у нового изделия и у того, чьё название
+       * и так было по категории (или «Без названия»): сменили категорию —
+       * сменилось и название. Вписанное когда-то своё — не трогаем.
+       */
+      const поКатегории = isNew || !p.name || p.name === БЕЗ_НАЗВАНИЯ || p.name === имяПоКатегории(p.category_id);
       const payload = {
-        sku: v.sku, name: v.name,
+        sku: v.sku, ...(поКатегории ? { name: имяПоКатегории(v.category_id) } : {}),
         category_id: v.category_id || null, supplier_id: v.supplier_id || null,
         metal: v.metal, weight: v.weight, size: v.size,
         // Проба и главный бриллиант — отдельные поля изделия
@@ -1336,7 +1345,7 @@ window.Pages.products = (() => {
         color: v.color, clarity: v.clarity,
         retail_price: v.retail_price,
         location: v.location, description: v.description,
-        store_id: v.store_id || null, ownership: v.ownership,
+        store_id: v.store_id || null,
         gems, gem_summary: gemsSummary(gems),
       };
       /*
@@ -1356,7 +1365,7 @@ window.Pages.products = (() => {
           payload.purchase_rate = 0;
         }
       }
-      if (payload.ownership === 'consignment' && !payload.supplier_id) {
+      if (p.ownership === 'consignment' && !payload.supplier_id) {
         ui.toast('Для товара на реализации укажите поставщика — владельца изделия', true);
         return;
       }

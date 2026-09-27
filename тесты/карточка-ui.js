@@ -111,7 +111,6 @@ async function кассаСИзделием(page, sku) {
   check('и ни одна не уходит за край экрана', низАнкеты.край <= 390, низАнкеты.край);
   await снимок(page, { path: `${OUT}/анкета-низ.png` });
   await page.fill('#prod-form [name=sku]', МЕТКА + '-1');
-  await page.fill('#prod-form [name=name]', 'Кольцо «Три кнопки»');
   await page.click(`${ВЕРХ} [data-act=save]`);
   await page.waitForSelector(`${ВЕРХ} #prod-gallery`, { timeout: 10000 });
   await page.waitForTimeout(800);
@@ -149,7 +148,6 @@ async function кассаСИзделием(page, sku) {
   console.log('\n=== 4. «Продать» прямо из анкеты ===');
   await открытьАнкету(page);
   await page.fill('#prod-form [name=sku]', МЕТКА + '-3');
-  await page.fill('#prod-form [name=name]', 'Серьги «С прилавка»');
   await page.click(`${ВЕРХ} [data-act=save-sell]`);
   await page.waitForTimeout(800);
   check('без цены — анкета не закрылась', Boolean(await page.$('#prod-form')));

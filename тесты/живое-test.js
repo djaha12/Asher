@@ -145,10 +145,10 @@ async function войти(page, логин, пароль) {
   await телефон.waitForTimeout(2200);
   await телефон.click('#pf-add');
   await телефон.waitForTimeout(1200);
-  await телефон.fill('[name=name]', 'Кольцо, которое я набираю');
+  await телефон.fill('#prod-form [name=description]', 'Кольцо, которое я набираю');
   await телефон.fill('[name=weight]', '4.35');
   await телефон.fill('[name=retail_price]', '38500');
-  check('форма открыта и заполняется', await телефон.isVisible('[name=name]'));
+  check('форма открыта и заполняется', await телефон.isVisible('#prod-form [name=description]'));
 
   // Пока форма открыта — ноутбук делает изменения одно за другим.
   for (let i = 0; i < 3; i++) {
@@ -162,10 +162,10 @@ async function войти(page, логин, пароль) {
     await телефон.waitForTimeout(3000);
   }
 
-  const имяПосле = await телефон.inputValue('[name=name]');
+  const имяПосле = await телефон.inputValue('#prod-form [name=description]');
   const весПосле = await телефон.inputValue('[name=weight]');
   const ценаПосле = await телефон.inputValue('[name=retail_price]');
-  check('набранное название на месте', имяПосле === 'Кольцо, которое я набираю', имяПосле);
+  check('набранное описание на месте', имяПосле === 'Кольцо, которое я набираю', имяПосле);
   check('набранный вес на месте', весПосле === '4.35', весПосле);
   check('набранная цена на месте', ценаПосле === '38500', ценаПосле);
   check('форма всё ещё открыта', await телефон.isVisible('.modal-overlay'));

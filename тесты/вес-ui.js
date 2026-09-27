@@ -65,7 +65,6 @@ async function войти(page, логин, пароль) {
   await page.waitForSelector('#prod-form');
   await page.waitForTimeout(400);
   await page.fill('#prod-form [name=sku]', МЕТКА + '-1');
-  await page.fill('#prod-form [name=name]', 'Кольцо «Три знака»');
   await page.fill('#prod-form [name=weight]', '3.324');
   check('поле веса не спорит с тремя цифрами после точки',
     await page.$eval('#prod-form [name=weight]', el => el.checkValidity()));
