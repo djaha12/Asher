@@ -186,7 +186,7 @@ window.Pages.products = (() => {
         body: `
           ${нехватает.length ? `<div class="hint-box" style="margin-bottom:12px">
             <strong>Не заполнено: ${нехватает.join(', ')}.</strong> Изделие можно было завести и так —
-            допишите, когда будет время (кнопка «Изменить»).${нехватает.includes('цена')
+            допишите, когда будет время (кнопка «Редактировать»).${нехватает.includes('цена')
               ? ' Пока нет цены, касса его не продаст.' : ''}</div>` : ''}
           <div class="grid grid-2">
             <div id="prod-gallery"></div>
@@ -223,6 +223,17 @@ window.Pages.products = (() => {
               </dl>
             </div>
           </div>
+          <!-- Остальные действия — здесь, а не внизу: внизу три главные кнопки -->
+          <div class="chip-row card-actions" style="margin:14px 0 6px">
+            <button class="btn btn-sm" data-act="label">${ui.icon('tag')} Бирка</button>
+            <button class="btn btn-sm" data-act="passport">${ui.icon('certificate')} Паспорт</button>
+            ${p.status !== 'written_off'
+              ? `<button class="btn btn-sm" data-act="share">${ui.icon('whatsapp')} Клиенту</button>` : ''}
+            ${stores.length > 1 && p.status !== 'sold'
+              ? '<button class="btn btn-sm" data-act="move">→ Переместить</button>' : ''}
+            ${p.status === 'in_stock' ? '<button class="btn btn-sm" data-act="reserve">В резерв</button>' : ''}
+            ${p.status === 'reserved' ? '<button class="btn btn-sm" data-act="unreserve">Снять резерв</button>' : ''}
+          </div>
           ${p.description ? `<p class="muted">${ui.esc(p.description)}</p>` : ''}
           ${gems ? `<h4 style="margin:14px 0 8px">Вставки</h4>
             <div class="table-wrap"><table class="tbl"><thead><tr><th>Камень</th><th class="num">Шт</th><th class="num">Караты</th><th>Цвет</th><th>Чистота</th><th>Огранка</th><th>Сертификат</th></tr></thead>
@@ -234,20 +245,22 @@ window.Pages.products = (() => {
             <tbody>${p.history.map(h => `<tr><td>${ui.esc(h.sale_number)}</td><td>${ui.dt(h.sale_date)}</td>
               <td>${ui.esc(h.customer_name || '—')}</td><td class="num">${ui.money(h.final_price)}</td>
               <td>${h.returned ? '<span class="badge badge-crit">возврат</span>' : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}
+          ${admin ? `<div class="chip-row card-actions" style="margin:18px 0 0;padding-top:12px;border-top:1px solid var(--line)">
+            ${(p.status === 'in_stock' || p.status === 'reserved') && p.supplier_id
+              ? `<button class="btn btn-sm" data-act="supret">${ui.icon('truck')} Вернуть поставщику</button>` : ''}
+            ${p.status === 'in_stock' || p.status === 'reserved' ? '<button class="btn btn-sm" data-act="writeoff">Списать</button>' : ''}
+            <button class="btn btn-sm btn-danger" data-act="delete">Удалить</button>
+          </div>` : ''}
         `,
+        /*
+         * Внизу — три главные кнопки, как их ищет человек, заполнивший
+         * карточку: «Сохранить» (всё уже записано, фото тоже — закрываем),
+         * «Редактировать» и «Продать». Раньше здесь было до десяти кнопок:
+         * на телефоне они закрывали полэкрана, «Редактировать» пряталась
+         * под всплывающее сообщение, а «Сохранить» не было вовсе.
+         */
         footer: `
-          ${admin ? `<button class="btn btn-danger left" data-act="delete">Удалить</button>` : ''}
-          <button class="btn" data-act="label">${ui.icon('tag')} Бирка</button>
-          <button class="btn" data-act="passport">${ui.icon('certificate')} Паспорт</button>
-          ${p.status !== 'written_off'
-            ? `<button class="btn" data-act="share">${ui.icon('whatsapp')} Клиенту</button>` : ''}
-          ${stores.length > 1 && p.status !== 'sold'
-            ? '<button class="btn" data-act="move">→ Переместить</button>' : ''}
-          ${p.status === 'in_stock' ? '<button class="btn" data-act="reserve">В резерв</button>' : ''}
-          ${p.status === 'reserved' ? '<button class="btn" data-act="unreserve">Снять резерв</button>' : ''}
-          ${(p.status === 'in_stock' || p.status === 'reserved') && admin && p.supplier_id
-            ? `<button class="btn" data-act="supret">${ui.icon('truck')} Вернуть поставщику</button>` : ''}
-          ${(p.status === 'in_stock' || p.status === 'reserved') && admin ? '<button class="btn" data-act="writeoff">Списать</button>' : ''}
+          <button class="btn" data-act="done">Сохранить</button>
           <button class="btn" data-act="edit">Редактировать</button>
           ${p.status === 'in_stock' || p.status === 'reserved' ? '<button class="btn btn-primary" data-act="sell">Продать</button>' : ''}
         `,
@@ -258,14 +271,30 @@ window.Pages.products = (() => {
       });
       renderCerts(m.body.querySelector('#prod-certs'), p, admin);
 
-      m.foot.addEventListener('click', async e => {
+      const действие = async e => {
         // closest: нажатие приходится и на значок внутри кнопки, а не только на её текст.
         const btn = e.target.closest('[data-act]');
         const act = btn && btn.dataset.act;
         if (!act) return;
         try {
+          if (act === 'done') { m.close(); ui.toast('Сохранено'); if (onChange) onChange(); }
           if (act === 'edit') { m.close(); openEditor(p, onChange); }
-          if (act === 'sell') { m.close(); Pages.sales.newSale(p); }
+          if (act === 'sell') {
+            // Без цены касса изделие не продаст — не ведём туда зря, а говорим, что сделать.
+            if (!(Number(p.retail_price) > 0)) {
+              if (!admin) {
+                ui.toast('У изделия нет цены — её вписывает владелец. Пока цены нет, касса его не продаст', true);
+                return;
+              }
+              ui.toast('Сначала впишите цену — открываю анкету', true);
+              m.close();
+              openEditor(p, onChange);
+              const поле = document.querySelector('#prod-form [name=retail_price]');
+              if (поле) поле.focus();
+              return;
+            }
+            m.close(); Pages.sales.newSale(p);
+          }
           if (act === 'label') Pages.labels.printOne(p);
           if (act === 'passport') Passport.изИзделия(p);
           if (act === 'share') shareDialog(p);
@@ -284,7 +313,10 @@ window.Pages.products = (() => {
             }
           }
         } catch (err) { ui.toastErr(err); }
-      });
+      };
+      // Слушаем только кнопки действий: у галереи и сертификатов свои кнопки.
+      m.foot.addEventListener('click', действие);
+      m.body.querySelectorAll('.card-actions').forEach(ряд => ряд.addEventListener('click', действие));
     }).catch(ui.toastErr);
   }
 

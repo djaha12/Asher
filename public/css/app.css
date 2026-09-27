@@ -871,6 +871,11 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
   .modal-foot .btn { flex: 1 1 calc(50% - 5px); min-width: 0; white-space: normal; line-height: 1.2; }
   .modal-foot .btn-primary { flex-basis: 100%; }
   .modal-foot .left { margin-right: 0; }
+  /*
+   * Пока открыто окно, сообщения — сверху: снизу они ложились прямо на
+   * кнопки карточки («Редактировать» пряталась под «Изделие добавлено»).
+   */
+  body:has(.modal-overlay) .toast-root { top: 16px; bottom: auto; }
 
   .toolbar { gap: 8px; }
   .toolbar .search { flex: 1 1 100%; max-width: none; }
