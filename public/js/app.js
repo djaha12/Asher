@@ -448,6 +448,13 @@ window.App = (() => {
               line2: ui.badge('order', r.status) + (r.due_date ? ' · до ' + ui.dateOnly(r.due_date) : ''),
               right: money(r.final_price > 0 ? r.final_price : r.estimate),
               href: '#/orders/' + r.id });
+          } else if (g.key === 'scrap') {
+            // Акт живёт в чеке, к которому принят: там и печать, и оплата.
+            out.push({ group: g.title, icon: 'exchange',
+              line1: `<span class="mono">${ui.esc(r.number)}</span> · ${ui.esc(r.customer_name || '—')}`,
+              line2: ui.esc(r.what || 'лом') + ` · ${ui.num(r.weight, 3)} г` +
+                (r.sale_number ? ` · чек <span class="mono">${ui.esc(r.sale_number)}</span>` : ''),
+              right: money(r.amount), href: r.sale_id ? '#/sales/' + r.sale_id : '#/scrap' });
           } else {
             out.push({ group: g.title, icon: 'gift',
               line1: ui.esc(r.name),
@@ -467,7 +474,9 @@ window.App = (() => {
         box.classList.remove('hidden');
         return;
       }
-      let html = '';
+      // Набрали не в той раскладке — нашли по исправленному и говорим об этом.
+      let html = data.раскладка
+        ? `<div class="gs-more">Ничего по «${ui.esc(data.query)}» — показано по «${ui.esc(data.раскладка)}».</div>` : '';
       let group = '';
       items.forEach((it, i) => {
         if (it.group !== group) { group = it.group; html += `<div class="gs-group-title">${ui.esc(group)}</div>`; }

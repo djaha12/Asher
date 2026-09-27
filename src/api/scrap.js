@@ -18,6 +18,7 @@
  */
 const { db, round2, getSetting, nextNumber, nowIso, audit, money, видитВсё } = require('../db');
 const { ApiError } = require('./util');
+const { искатьСЗапасом } = require('../поиск');
 
 const ПРОБЫ = [375, 500, 583, 585, 750, 875, 916, 958, 999];
 
@@ -120,13 +121,23 @@ const routes = [
      * клиентам, а не закупочная.
      */
     method: 'GET', path: '/api/scrap',
-    handler: ({ query }) => {
+    handler: ({ query }) => искатьСЗапасом(query, query => {
+      /*
+       * Акт ищут по номеру, клиенту, его телефону, чеку или тому, что
+       * принесли: «Л-000012», «Динара», «кольцо 585». Склад по пробам ниже
+       * считается всегда целиком — это то, что лежит в сейфе.
+       */
+      const поиск = query.search
+        ? `WHERE nmatch(?, 3, c.phone, a.number, c.name, s.number, u.name,
+             (SELECT group_concat(json_extract(j.value, '$.description') || ' ' || json_extract(j.value, '$.fineness'), char(10))
+                FROM json_each(a.items) j))`
+        : '';
       const акты = db.prepare(
         `SELECT a.*, c.name AS customer_name, u.name AS user_name, s.number AS sale_number
            FROM scrap_intakes a LEFT JOIN customers c ON c.id = a.customer_id
            LEFT JOIN users u ON u.id = a.user_id LEFT JOIN sales s ON s.id = a.sale_id
-          ORDER BY a.id DESC LIMIT ?`
-      ).all(Math.min(Number(query.limit) || 200, 1000)).map(акт);
+          ${поиск} ORDER BY a.id DESC LIMIT ?`
+      ).all(...(поиск ? [String(query.search)] : []), Math.min(Number(query.limit) || 200, 1000)).map(акт);
       const поПробам = new Map();
       for (const а of db.prepare('SELECT items FROM scrap_intakes').all().map(акт)) {
         for (const r of а.items) {
@@ -140,7 +151,7 @@ const routes = [
       const склад = [...поПробам.values()].sort((a, b) => b.fineness - a.fineness)
         .map(п => ({ ...п, weight: веса(п.weight), pure_weight: веса(п.pure_weight), amount: round2(п.amount) }));
       return { stock: склад, items: акты };
-    },
+    }),
   },
   {
     method: 'GET', path: '/api/scrap/:id',

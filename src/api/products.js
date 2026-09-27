@@ -1,8 +1,12 @@
 'use strict';
 const { db, nowIso, round2, audit, видитВсё } = require('../db');
 const { ApiError } = require('./util');
+const { свернуть, сжать, искатьСЗапасом } = require('../поиск');
 const { listImages, listCertificates, removeFiles } = require('./images');
 const металл = require('../металл');
+
+// Артикул без чёрточек и пробелов: «AS 00012» и «as00012» — это «AS-00012».
+const БЕЗ_ЧЁРТОЧЕК = `replace(replace(replace(replace(nlower(p.sku), '-', ''), ' ', ''), '.', ''), '_', '')`;
 
 const PRODUCT_FIELDS = ['sku', 'barcode', 'name', 'category_id', 'metal', 'weight', 'size', 'gems',
   'gem_summary', 'purchase_price', 'retail_price', 'supplier_id', 'status', 'reserved_for',
@@ -344,7 +348,8 @@ function validateProduct(body, { partial = false, existing = null } = {}) {
 const routes = [
   {
     method: 'GET', path: '/api/products',
-    handler: ({ query, session }) => {
+    // По набранному пусто — ищем без окончаний и в другой раскладке (src/поиск.js).
+    handler: ({ query, session }) => искатьСЗапасом(query, query => {
       const cond = [];
       const args = [];
       if (query.search) {
@@ -353,11 +358,12 @@ const routes = [
          * находить изделие. Именно по отдельной колонке cert_index, а не по
          * сырому JSON вставок — иначе «57» совпало бы с огранкой «Кр-57» и с
          * каратами, а этот же поиск обслуживает кассу и диалог обмена.
+         * Металл, проба и категория — чтобы «серьги белое золото» или
+         * «кольцо 585» находили то, что имели в виду.
          */
-        cond.push(`(nlower(p.name) LIKE ? OR nlower(p.sku) LIKE ? OR p.barcode LIKE ?
-                    OR nlower(p.gem_summary) LIKE ? OR nlower(p.cert_index) LIKE ?)`);
-        const s = `%${String(query.search).toLowerCase()}%`;
-        args.push(s, s, s, s, s);
+        cond.push(`nmatch(?, 0, NULL, p.name, p.sku, p.barcode, p.gem_summary, p.cert_index, p.metal, p.fineness,
+                    (SELECT cg.name FROM categories cg WHERE cg.id = p.category_id))`);
+        args.push(String(query.search));
       }
       if (query.status) { cond.push('p.status = ?'); args.push(query.status); }
       if (query.category_id) { cond.push('p.category_id = ?'); args.push(Number(query.category_id)); }
@@ -397,7 +403,21 @@ const routes = [
        * ошибкой». Красть этим ничего нельзя, но любой сотрудник мог случайно
        * (или нарочно) сделать каталог неоткрывающимся.
        */
-      const order = Object.hasOwn(SORTS, String(query.sort)) ? SORTS[query.sort] : SORTS.new;
+      let order = Object.hasOwn(SORTS, String(query.sort)) ? SORTS[query.sort] : SORTS.new;
+      const orderArgs = [];
+      if (query.search) {
+        /*
+         * Набранный артикул или считанный штрихкод — первым, при любой
+         * сортировке. Поиск теперь смотрит и в пробу, и в металл: по «585»
+         * находятся все изделия 585-й пробы, но изделие с артикулом «585»
+         * должно стоять наверху — касса по Enter ищет точное совпадение
+         * именно в этом списке.
+         */
+        const точно = свернуть(query.search).trim();
+        order = `CASE WHEN nlower(p.sku) = ? OR nlower(p.barcode) = ? OR ${БЕЗ_ЧЁРТОЧЕК} = ? THEN 0
+                      WHEN substr(nlower(p.sku), 1, length(?)) = ? THEN 1 ELSE 2 END, ${order}`;
+        orderArgs.push(точно, точно, сжать(точно), точно, точно);
+      }
       const limit = Math.min(Number(query.limit) || 500, 2000);
       const offset = Number(query.offset) || 0;
       const rows = db.prepare(
@@ -410,14 +430,17 @@ const routes = [
          LEFT JOIN stores st ON st.id = p.store_id
          LEFT JOIN product_sets ps ON ps.id = p.set_id
          ${where} ORDER BY ${order} LIMIT ? OFFSET ?`
-      ).all(...args, limit, offset);
-      const totalRow = db.prepare(`SELECT COUNT(*) AS c FROM products p ${where}`).get(...args);
+      ).all(...args, ...orderArgs, limit, offset);
+      // Нашлось меньше страницы — это и есть всё: второй проход по складу
+      // ради подсчёта не нужен (при поиске он стоил столько же, сколько сам поиск).
+      const total = offset === 0 && rows.length < limit ? rows.length
+        : Number(db.prepare(`SELECT COUNT(*) AS c FROM products p ${where}`).get(...args).c);
       const items = rows.map(rowToProduct);
       // Закупочные цены — только основателю и бухгалтеру. Валютные поля убираем тоже:
       // цена в долларах, умноженная на курс, и есть закупочная.
       if (!видитВсё(session.role)) items.forEach(hidePurchase);
-      return { items, total: Number(totalRow.c) };
-    },
+      return { items, total };
+    }),
   },
   {
     /*

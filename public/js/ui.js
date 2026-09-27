@@ -447,14 +447,178 @@ window.ui = (() => {
   // Ссылка на фотографию по пути из базы.
   function photoUrl(file) { return file ? '/media/' + file : ''; }
 
-  // Подсветка совпадения при поиске — глазам легче найти нужную строку.
+  /*
+   * Поиск на экране — по тем же правилам, что на сервере (src/поиск.js):
+   * регистр, «ё» и кыргызские буквы, слова в любом порядке, артикул без
+   * чёрточек, телефон в любом виде, другая раскладка. Нужен разделам,
+   * которые отбирают уже загруженный список, — долгам и комплектам, — чтобы
+   * они находили ровно то же, что и поиск на сервере.
+   */
+  const поиск = (() => {
+    const ЗАМЕНЫ = { 'ё': 'е', 'ү': 'у', 'ө': 'о', 'ң': 'н' };
+    const свернуть = s => (s === null || s === undefined) ? ''
+      : String(s).toLowerCase().replace(/[ёүөң]/g, ch => ЗАМЕНЫ[ch]);
+    const сжать = s => s.replace(/[ \t\u00a0\u202f\-\u2013\u2014./_]/g, '');
+    function ядроНомера(s, мин) {
+      const сырой = String(s);
+      let d = сырой.replace(/\D/g, '');
+      if (d.startsWith('00996')) d = d.slice(2);
+      if (d.startsWith('996') && (d.length >= 9 || /^\s*\+/.test(сырой))) d = d.slice(3);
+      else if (d.startsWith('0') && d.length > 3) d = d.slice(1);
+      return мин > 0 && d.length >= мин ? d : '';
+    }
+    const ПОХОЖ_НА_НОМЕР = /^[\d\s()+\-.]+$/;
+    function разобрать(запрос, минЦифр = 3) {
+      const текст = свернуть(запрос).trim();
+      const слова = [...new Set(текст.split(/\s+/).filter(Boolean))].slice(0, 8).map(w => ({
+        w,
+        сжато: /\d/.test(w) ? сжать(w) : '',
+        ядро: ПОХОЖ_НА_НОМЕР.test(w) ? ядроНомера(w, минЦифр) : '',
+      }));
+      const номер = текст && ПОХОЖ_НА_НОМЕР.test(текст) ? ядроНомера(текст, минЦифр) : '';
+      return { текст, слова, номер };
+    }
+    function подходит(разбор, телефон, поля) {
+      const тел = телефон ? String(телефон).replace(/\D/g, '') : '';
+      if (разбор.номер && тел.includes(разбор.номер)) return true;
+      if (!разбор.слова.length) return true;
+      const текст = свернуть(поля.join('\n'));
+      let сжатый = null;
+      return разбор.слова.every(с => {
+        if (текст.includes(с.w)) return true;
+        if (с.ядро && тел.includes(с.ядро)) return true;
+        if (с.сжато) {
+          if (сжатый === null) сжатый = сжать(текст);
+          return сжатый.includes(с.сжато);
+        }
+        return false;
+      });
+    }
+    const совпадает = (запрос, { телефон = '', поля = [], минЦифр = 3 } = {}) =>
+      подходит(разобрать(запрос, минЦифр), телефон, поля);
+
+    // «цепь» → «цеп» (находит «цепочку»), «кольца» → «кольц».
+    const КОНЕЦ = /[аяоеиыуюьй]$/;
+    function основа(w) {
+      if (w.length < 4 || !/^[а-я]+$/.test(w) || !КОНЕЦ.test(w)) return '';
+      let о = w.slice(0, -1);
+      if (КОНЕЦ.test(о) && о.length - 1 >= 5) о = о.slice(0, -1);
+      return о.length >= 3 ? о : '';
+    }
+    // «Серёжки» — это «серьги»: как в разговоре и как в каталоге.
+    const РАЗГОВОРНОЕ = {
+      сережки: 'серьги', сережка: 'серьги', сережку: 'серьги', цепочка: 'цепь', цепочку: 'цепь',
+      цепочки: 'цепь', колечко: 'кольцо', колечки: 'кольца', кулон: 'подвеска', кулоны: 'подвески',
+      кулончик: 'подвеска', брошка: 'брошь', брошку: 'брошь', часики: 'часы', браслетик: 'браслет',
+    };
+    // Одно слово: как записано в каталоге и без окончания; пусто — если нечего менять.
+    function срезать(w) {
+      const с = РАЗГОВОРНОЕ[w] || w;
+      return основа(с) || (с !== w ? с : '');
+    }
+    function безОкончаний(запрос) {
+      const слова = свернуть(запрос).trim().split(/\s+/).filter(Boolean);
+      const срезано = слова.map(w => срезать(w) || w);
+      return срезано.join(' ') !== слова.join(' ') ? срезано.join(' ') : '';
+    }
+
+    const EN = "`qwertyuiop[]asdfghjkl;'zxcvbnm,.";
+    const RU = 'ёйцукенгшщзхъфывапролджэячсмитьбю';
+    function другаяРаскладка(запрос) {
+      const s = String(запрос || '').toLowerCase();
+      const лат = /[a-z]/.test(s);
+      const кир = /[а-яё]/.test(s);
+      if (лат === кир) return '';
+      const [из, в] = лат ? [EN, RU] : [RU, EN];
+      let out = '';
+      for (const ch of s) {
+        const i = из.indexOf(ch);
+        out += i >= 0 ? в[i] : ch;
+      }
+      return out.trim() && out !== s ? out : '';
+    }
+
+    // По набранному пусто — без окончаний, потом в другой раскладке.
+    function запасныеХоды(запрос) {
+      const ходы = [];
+      const срезано = безОкончаний(запрос);
+      if (срезано) ходы.push({ search: срезано, раскладка: '' });
+      const иначе = другаяРаскладка(запрос);
+      if (иначе) {
+        ходы.push({ search: иначе, раскладка: иначе });
+        const иначеСрезано = безОкончаний(иначе);
+        if (иначеСрезано) ходы.push({ search: иначеСрезано, раскладка: иначе });
+      }
+      return ходы;
+    }
+
+    /*
+     * Отобрать из списка подходящее. описание(x) → { телефон, поля }.
+     * Пусто — запасными ходами; «раскладка» в ответе — если её исправляли.
+     */
+    function отобрать(список, запрос, описание, минЦифр = 3) {
+      const q = String(запрос || '').trim();
+      if (!q) return { items: список, раскладка: '' };
+      const по = строка => {
+        const р = разобрать(строка, минЦифр);
+        return список.filter(x => { const о = описание(x); return подходит(р, о.телефон, о.поля || []); });
+      };
+      const items = по(q);
+      if (items.length) return { items, раскладка: '' };
+      for (const ход of запасныеХоды(q)) {
+        const ещё = по(ход.search);
+        if (ещё.length) return { items: ещё, раскладка: ход.раскладка };
+      }
+      return { items, раскладка: '' };
+    }
+
+    return { свернуть, срезать, разобрать, подходит, совпадает, другаяРаскладка, запасныеХоды, отобрать };
+  })();
+
+  /*
+   * Подсветка найденного — каждое слово запроса, без учёта регистра и «ё»:
+   * глазам легче найти нужную строку. Буквы, у которых маленькая пишется
+   * иначе по длине (редкость), просто не подсвечиваем — лишь бы не сдвинуть.
+   */
   function highlight(text, query) {
-    const s = esc(text);
-    const q = String(query || '').trim();
-    if (!q) return s;
-    const idx = s.toLowerCase().indexOf(esc(q).toLowerCase());
-    if (idx < 0) return s;
-    return s.slice(0, idx) + '<mark>' + s.slice(idx, idx + q.length) + '</mark>' + s.slice(idx + q.length);
+    const исходный = text === null || text === undefined ? '' : String(text);
+    const слова = поиск.свернуть(query).trim().split(/\s+/).filter(Boolean);
+    if (!слова.length || !исходный) return esc(исходный);
+    const низ = поиск.свернуть(исходный);
+    if (низ.length !== исходный.length) return esc(исходный);
+    const метки = new Array(исходный.length).fill(false);
+    for (const слово of слова) {
+      // Слова целиком нет — подсвечиваем основу: по «цепь» нашлась «цепочка»,
+      // по «серёжки» — «серьги».
+      const w = низ.includes(слово) ? слово : (поиск.срезать(слово) || слово);
+      for (let i = низ.indexOf(w); i >= 0; i = низ.indexOf(w, i + w.length)) {
+        for (let k = i; k < i + w.length; k++) метки[k] = true;
+      }
+    }
+    let out = '';
+    let внутри = false;
+    for (let i = 0; i < исходный.length; i++) {
+      if (метки[i] !== внутри) { out += внутри ? '</mark>' : '<mark>'; внутри = метки[i]; }
+      out += esc(исходный[i]);
+    }
+    return внутри ? out + '</mark>' : out;
+  }
+
+  /*
+   * Подпись у поля поиска, когда искали не по набранному, а по исправленной
+   * раскладке: «найдено по «кольцо»». Без неё человек видел бы кольца по
+   * запросу «rjkmwj» и не понимал, откуда они.
+   */
+  function отметитьРаскладку(input, раскладка) {
+    if (!input) return;
+    let подпись = input.parentElement && input.parentElement.querySelector(':scope > .search-fix');
+    if (!раскладка) { if (подпись) подпись.remove(); return; }
+    if (!подпись) {
+      подпись = document.createElement('span');
+      подпись.className = 'search-fix';
+      input.insertAdjacentElement('afterend', подпись);
+    }
+    подпись.textContent = `найдено по «${раскладка}» — другая раскладка`;
   }
 
   /*
@@ -531,7 +695,7 @@ window.ui = (() => {
 
   return { esc, icon, money, moneyRich, num, dt, dateOnly, monthName, badge, L, modal, confirmDialog, toast, toastErr,
     table, bindRows, formValues, debounce, currentTheme, applyTheme, toggleTheme, lightbox, подписатьТаблицы,
-    barcodeSvg, photoUrl, highlight, whatsappLink, normalizePhone, sourcePicker, bindSourcePicker,
+    barcodeSvg, photoUrl, highlight, поиск, отметитьРаскладку, whatsappLink, normalizePhone, sourcePicker, bindSourcePicker,
     естьВведённое, выборПриДубле, locale: loc };
 })();
 

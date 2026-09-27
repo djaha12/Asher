@@ -3,6 +3,7 @@ const os = require('node:os');
 const { db, nowIso, audit, getSetting, setSetting, hashPassword, makeSalt, РОЛИ, видитВсё } = require('../db');
 const копия = require('../копия');
 const { ApiError } = require('./util');
+const { искатьСЗапасом } = require('../поиск');
 const { changePassword, passwordProblem, destroyUserSessions, countUserSessions } = require('../auth');
 const { PRESETS, LOCALE_KEYS, presetFor } = require('../locale');
 const металл = require('../металл');
@@ -575,7 +576,7 @@ const routes = [
    */
   {
     method: 'GET', path: '/api/audit', admin: true, owner: true,
-    handler: ({ query }) => {
+    handler: ({ query }) => искатьСЗапасом(query, query => {
       const cond = [];
       const args = [];
       if (query.entity) { cond.push('a.entity = ?'); args.push(query.entity); }
@@ -585,9 +586,10 @@ const routes = [
       // Дату «по» задают днём — берём его целиком, до последней секунды.
       if (query.to) { cond.push('a.created_at <= ?'); args.push(query.to.length === 10 ? query.to + 'T23:59:59.999Z' : query.to); }
       if (query.search) {
-        cond.push('(a.details LIKE ? OR u.name LIKE ?)');
-        const like = '%' + String(query.search).trim() + '%';
-        args.push(like, like);
+        // Как везде: без учёта регистра по-русски, словами в любом порядке.
+        // Раньше «анна» не находила «Анна» — LIKE в SQLite так умеет только с латиницей.
+        cond.push('nmatch(?, 0, NULL, a.details, u.name)');
+        args.push(String(query.search));
       }
       const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
       const limit = Math.min(Math.max(Number(query.limit) || 100, 1), 500);
@@ -608,7 +610,7 @@ const routes = [
          ${where} GROUP BY a.user_id ORDER BY count DESC`
       ).all(...args);
       return { items: rows, total, limit, offset, by_user: byUser };
-    },
+    }),
   },
 ];
 

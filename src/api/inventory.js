@@ -10,6 +10,7 @@
  */
 const { db, nowIso, round2, audit, transaction, видитВсё } = require('../db');
 const { ApiError } = require('./util');
+const { другаяРаскладка } = require('../поиск');
 
 const COUNTABLE = `('in_stock','reserved')`;
 
@@ -122,9 +123,12 @@ const routes = [
       const code = String(body.code || '').trim();
       if (!code) throw new ApiError(400, 'Пустой код');
 
-      const product = db.prepare(
+      const поКоду = к => db.prepare(
         `SELECT * FROM products WHERE nlower(sku) = nlower(?) OR barcode = ? LIMIT 1`
-      ).get(code, code);
+      ).get(к, к);
+      // Сканер-клавиатура при русской раскладке печатает «ФЫ-00120» вместо
+      // «AS-00120» — пробуем тот же код в другой раскладке.
+      const product = поКоду(code) || (другаяРаскладка(code) ? поКоду(другаяРаскладка(code)) : undefined);
       if (!product) throw new ApiError(404, `Изделие с кодом «${code}» не найдено в базе`);
 
       const already = db.prepare(

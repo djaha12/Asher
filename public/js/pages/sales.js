@@ -19,14 +19,30 @@ window.Pages.sales = (() => {
     if (filters.period) q.set('from', periodFrom(filters.period));
     if (filters.payment_method) q.set('payment_method', filters.payment_method);
     if (filters.search) q.set('search', filters.search);
-    const { items, totals } = await api.get('/api/sales?' + q.toString());
+    let data = await api.get('/api/sales?' + q.toString());
+    /*
+     * Клиент принёс чек трёхмесячной давности, а период стоит «30 дней» —
+     * раньше поиск отвечал «продаж нет». Если за период пусто, ищем за всё
+     * время и пишем об этом.
+     */
+    let заВсёВремя = false;
+    if (filters.search && filters.period && !data.items.length) {
+      q.delete('from');
+      const все = await api.get('/api/sales?' + q.toString());
+      if (все.items.length) { data = все; заВсёВремя = true; }
+    }
     if (my !== refreshSeq || !el.isConnected) return;
+    const { items, totals } = data;
+    const hq = data.раскладка || filters.search;
+    ui.отметитьРаскладку(el.querySelector('#sf-search'), data.раскладка);
     const listEl = el.querySelector('#sales-list');
-    listEl.innerHTML = `<div class="muted" style="margin-bottom:8px">Чеков: ${totals.cnt} на сумму <b>${ui.money(totals.sum)}</b></div>` +
+    listEl.innerHTML = (заВсёВремя
+      ? '<div class="hint-box" style="margin-bottom:10px">За выбранный период не нашлось — показано за всё время.</div>' : '') +
+      `<div class="muted" style="margin-bottom:8px">Чеков: ${totals.cnt} на сумму <b>${ui.money(totals.sum)}</b></div>` +
       ui.table([
-        { title: 'Чек', render: r => `<span class="mono strong">${ui.esc(r.number)}</span>` },
+        { title: 'Чек', render: r => `<span class="mono strong">${ui.highlight(r.number, hq)}</span>` },
         { title: 'Дата', render: r => `<span class="dim">${ui.dt(r.created_at)}</span>` },
-        { title: 'Клиент', render: r => ui.esc(r.customer_name || '—') },
+        { title: 'Клиент', render: r => r.customer_name ? ui.highlight(r.customer_name, hq) : '—' },
         { title: 'Продавец', render: r => `<span class="dim">${ui.esc(r.seller_name || '—')}</span>` },
         { title: 'Позиций', cls: 'num', render: r => r.items_count },
         { title: 'Оплата', render: r => ui.L.payment[r.payment_method] || r.payment_method },
@@ -34,7 +50,7 @@ window.Pages.sales = (() => {
         { title: 'Долг', cls: 'num', render: r => r.debt > 0.009
           ? `<span class="crit strong">${ui.money(r.debt)}</span>` : '<span class="dim">—</span>' },
         { title: 'Сумма', cls: 'num strong', render: r => ui.money(r.total) },
-      ], items, { empty: 'Продаж за выбранный период нет.' });
+      ], items, { empty: filters.search ? `По запросу «${ui.esc(filters.search)}» чеков не нашлось.` : 'Продаж за выбранный период нет.' });
     ui.bindRows(listEl, items, r => openDetail(r.id, () => refresh(el)));
   }
 
@@ -125,11 +141,22 @@ window.Pages.sales = (() => {
    */
   async function productByCode(text) {
     for (const code of Scan.candidates(text)) {
-      const { items } = await api.get('/api/products?search=' + encodeURIComponent(code));
-      const exact = items.find(pr => pr.barcode === code || pr.sku.toLowerCase() === code.toLowerCase());
+      const exact = точноеИзделие(await api.get('/api/products?search=' + encodeURIComponent(code)), code);
       if (exact) return exact;
     }
     return null;
+  }
+
+  /*
+   * Точное совпадение по штрихкоду или артикулу — для сканера и Enter.
+   * И в другой раскладке: сканер-клавиатура при русской раскладке печатает
+   * «ФЫ-00120» вместо «AS-00120». Сервер тогда ищет по исправленному и
+   * говорит, по какому, — ищем точное совпадение и с ним.
+   */
+  function точноеИзделие(data, код) {
+    const коды = [код, data.раскладка].map(x => ui.поиск.свернуть(x).trim()).filter(Boolean);
+    return data.items.find(p => коды.includes(ui.поиск.свернуть(p.barcode).trim())
+      || коды.includes(ui.поиск.свернуть(p.sku).trim()));
   }
 
   async function productFromPhoto() {
@@ -379,8 +406,7 @@ window.Pages.sales = (() => {
       e.preventDefault();
       const q = searchInput.value.trim();
       if (!q) return;
-      const { items } = await api.get('/api/products?search=' + encodeURIComponent(q));
-      const exact = items.find(pr => pr.barcode === q || pr.sku.toLowerCase() === q.toLowerCase());
+      const exact = точноеИзделие(await api.get('/api/products?search=' + encodeURIComponent(q)), q);
       const pick = exact || (lastResults.length === 1 ? lastResults[0] : null);
       if (pick) { addItem(pick); searchInput.value = ''; clearResults(); }
     });
@@ -875,8 +901,7 @@ window.Pages.sales = (() => {
       const q = searchInput.value.trim();
       if (!q) return;
       // сканер: точное совпадение по штрихкоду или артикулу
-      const { items } = await api.get('/api/products?search=' + encodeURIComponent(q));
-      const exact = items.find(p => p.barcode === q || p.sku.toLowerCase() === q.toLowerCase());
+      const exact = точноеИзделие(await api.get('/api/products?search=' + encodeURIComponent(q)), q);
       const pick = exact || (lastResults.length === 1 ? lastResults[0] : null);
       if (pick) {
         addProduct(pick);
@@ -1175,7 +1200,7 @@ window.Pages.sales = (() => {
     async render(el, param) {
       el.innerHTML = `
         <div class="toolbar">
-          <input type="text" class="input search" id="sf-search" placeholder="Поиск: номер чека, изделие…" autocomplete="off">
+          <input type="text" class="input search" id="sf-search" placeholder="Поиск: чек, клиент, телефон, изделие…" autocomplete="off">
           <select class="input" id="sf-period">
             <option value="1">Сегодня</option>
             <option value="7">7 дней</option>

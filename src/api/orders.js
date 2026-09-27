@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const { db, nowIso, round2, audit, nextNumber, transaction, MEDIA_DIR } = require('../db');
 const { ApiError } = require('./util');
 const { decodeDataUrl, removeFiles } = require('./images');
+const { искатьСЗапасом } = require('../поиск');
 
 // Фотографий при приёме хватает трёх-четырёх; двенадцать — с запасом на
 // «до» и «после», но не бесконечно: место на сервере не резиновое.
@@ -31,6 +32,10 @@ function поляПриёма(body, upd) {
 }
 
 const TYPES = ['repair', 'custom', 'engraving', 'resize', 'cleaning', 'appraisal'];
+// Вид работ словами — для поиска: «ремонт Мамытова», «гравировка».
+const ВИД_РАБОТ = `CASE o.type WHEN 'repair' THEN 'ремонт' WHEN 'custom' THEN 'изготовление'
+  WHEN 'engraving' THEN 'гравировка' WHEN 'resize' THEN 'изменение размера'
+  WHEN 'cleaning' THEN 'чистка' WHEN 'appraisal' THEN 'оценка' END`;
 const STATUSES = ['accepted', 'in_progress', 'ready', 'delivered', 'cancelled'];
 
 function orderDetail(id) {
@@ -78,15 +83,16 @@ function addPayment(orderId, amount, note, userId, method = 'cash') {
 const routes = [
   {
     method: 'GET', path: '/api/orders',
-    handler: ({ query }) => {
+    handler: ({ query }) => искатьСЗапасом(query, query => {
       const cond = [];
       const args = [];
       if (query.status) { cond.push('o.status = ?'); args.push(query.status); }
       if (query.type) { cond.push('o.type = ?'); args.push(query.type); }
       if (query.search) {
-        cond.push('(nlower(o.number) LIKE ? OR nlower(o.description) LIKE ? OR nlower(o.item) LIKE ? OR nlower(c.name) LIKE ?)');
-        const s = `%${String(query.search).toLowerCase()}%`;
-        args.push(s, s, s, s);
+        // Клиент приходит за заказом и называет номер квитанции, имя или
+        // телефон — «я сдавала цепочку, номер на 4567». Находим по любому.
+        cond.push(`nmatch(?, 3, c.phone, o.number, o.item, o.description, c.name, o.stones, o.note, ${ВИД_РАБОТ})`);
+        args.push(String(query.search));
       }
       const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
       const rows = db.prepare(
@@ -99,7 +105,7 @@ const routes = [
       ).all(...args);
       const counts = db.prepare('SELECT status, COUNT(*) AS c FROM service_orders GROUP BY status').all();
       return { items: rows, status_counts: counts };
-    },
+    }),
   },
   { method: 'GET', path: '/api/orders/:id', handler: ({ params }) => orderDetail(Number(params.id)) },
   {
@@ -328,4 +334,4 @@ const routes = [
   },
 ];
 
-module.exports = { routes };
+module.exports = { routes, ВИД_РАБОТ };

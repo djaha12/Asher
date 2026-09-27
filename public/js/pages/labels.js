@@ -104,8 +104,11 @@ window.Pages.labels = (() => {
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(filters)) if (v) q.set(k, v);
     q.set('limit', '300');
-    const { items, total } = await api.get('/api/products?' + q.toString());
+    const data = await api.get('/api/products?' + q.toString());
     if (my !== refreshSeq || !pageEl.isConnected) return;
+    const { items, total } = data;
+    const hq = data.раскладка || filters.search;
+    ui.отметитьРаскладку(pageEl.querySelector('#lb-search'), data.раскладка);
 
     const listEl = pageEl.querySelector('#lb-list');
     listEl.innerHTML = `<div class="muted" style="margin-bottom:8px">
@@ -114,8 +117,8 @@ window.Pages.labels = (() => {
       { title: '', cls: 'nowrap', render: r =>
         `<input type="checkbox" data-pick="${r.id}" ${selected.has(r.id) ? 'checked' : ''}
           style="width:22px;height:22px;cursor:pointer">` },
-      { title: 'Артикул', render: r => `<span class="mono strong">${ui.esc(r.sku)}</span>` },
-      { title: 'Наименование', render: r => ui.esc(r.name) },
+      { title: 'Артикул', render: r => `<span class="mono strong">${ui.highlight(r.sku, hq)}</span>` },
+      { title: 'Наименование', render: r => ui.highlight(r.name, hq) },
       { title: 'Металл', render: r => ui.esc(r.metal || '—') },
       { title: 'Вес', cls: 'num', render: r => r.weight ? ui.num(r.weight) + ' г' : '—' },
       // Изделие могли завести без цены — на бирке тогда цены нет, а не «0 сом».
@@ -124,7 +127,7 @@ window.Pages.labels = (() => {
       { title: 'Штрихкод', render: r => r.barcode
         ? `<span class="mono dim">${ui.esc(r.barcode)}</span>`
         : '<span class="dim">по артикулу</span>' },
-    ], items, { empty: 'Изделий не найдено' });
+    ], items, { empty: filters.search ? `По запросу «${ui.esc(filters.search)}» изделий не нашлось` : 'Изделий не найдено' });
 
     listEl.querySelectorAll('[data-pick]').forEach(cb => {
       cb.addEventListener('change', () => {

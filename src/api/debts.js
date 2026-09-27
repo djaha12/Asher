@@ -13,6 +13,7 @@
  */
 const { db, nowIso, round2, money, audit, transaction, видитВсё } = require('../db');
 const { ApiError } = require('./util');
+const { совпадает, запасныеХоды } = require('../поиск');
 
 const PAYMENT_METHODS = ['cash', 'card', 'transfer'];
 
@@ -178,9 +179,15 @@ const routes = [
       let items = [...byCustomer.values()];
       if (query.overdue === '1') items = items.filter(i => i.overdue_debt > 0);
       if (query.search) {
-        const q = String(query.search).toLowerCase();
-        items = items.filter(i =>
-          String(i.customer_name).toLowerCase().includes(q) || String(i.customer_phone).includes(q));
+        // Имя — любыми словами, телефон — в любом виде; пусто — без окончаний
+        // и в другой раскладке (src/поиск.js).
+        const все = items;
+        const по = q => все.filter(i => совпадает(q, { телефон: i.customer_phone, поля: [i.customer_name] }));
+        items = по(query.search);
+        for (const ход of items.length ? [] : запасныеХоды(query.search)) {
+          items = по(ход.search);
+          if (items.length) break;
+        }
       }
       items.sort((a, b) => b.overdue_debt - a.overdue_debt || b.debt - a.debt);
       return {

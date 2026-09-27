@@ -10,17 +10,22 @@ window.Pages.customers = (() => {
     const my = ++refreshSeq;
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(filters)) if (v) q.set(k, v);
-    const { items } = await api.get('/api/customers?' + q.toString());
+    const data = await api.get('/api/customers?' + q.toString());
     if (my !== refreshSeq || !el.isConnected) return;
+    const { items } = data;
+    const hq = data.раскладка || filters.search;
+    ui.отметитьРаскладку(el.querySelector('#cf-search'), data.раскладка);
     const listEl = el.querySelector('#cust-list');
     listEl.innerHTML = ui.table([
-      { title: 'Клиент', render: r => `<span class="strong">${ui.esc(r.name)}</span>` },
+      { title: 'Клиент', render: r => `<span class="strong">${ui.highlight(r.name, hq)}</span>` },
       { title: 'Телефон', render: r => `<span class="mono">${ui.esc(r.phone || '—')}</span>` },
       { title: 'Откуда', render: r => r.source ? ui.esc(sourceName(r.source)) : '<span class="dim">—</span>' },
       { title: 'Скидка', cls: 'num', render: r => r.discount ? r.discount + '%' : '—' },
       { title: 'Покупок', cls: 'num', render: r => r.purchases || 0 },
       { title: 'Сумма покупок', cls: 'num strong', render: r => ui.money(r.total_spent) },
-    ], items, { empty: 'Клиентов не найдено. Добавьте первого!' });
+    ], items, { empty: filters.search
+      ? `По запросу «${ui.esc(filters.search)}» клиентов не нашлось.`
+      : 'Клиентов не найдено. Добавьте первого!' });
     ui.bindRows(listEl, items, r => openDetail(r.id, () => refresh(el)));
   }
 

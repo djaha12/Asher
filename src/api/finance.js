@@ -1,6 +1,7 @@
 'use strict';
 const { db, nowIso, round2, audit } = require('../db');
 const { ApiError } = require('./util');
+const { искатьСЗапасом } = require('../поиск');
 
 const DEFAULT_EXPENSE_CATS = ['Закупка товара', 'Оплата поставщику', 'Аренда', 'Зарплата', 'Налоги',
   'Коммунальные услуги', 'Реклама', 'Охрана', 'Банковские услуги', 'Прочие расходы'];
@@ -121,32 +122,46 @@ function неЗаписаны(сегодня = new Date()) {
 const routes = [
   {
     method: 'GET', path: '/api/finance', admin: true,
-    handler: ({ query }) => {
+    handler: ({ query }) => искатьСЗапасом(query, query => {
       const cond = [];
       const args = [];
       if (query.from) { cond.push('f.created_at >= ?'); args.push(query.from); }
       if (query.to) { cond.push('f.created_at <= ?'); args.push(query.to); }
       if (query.type) { cond.push('f.type = ?'); args.push(query.type); }
       if (query.category) { cond.push('f.category = ?'); args.push(query.category); }
+      if (query.search) {
+        /*
+         * «Аренда», «Бакыт», «П-000123», «15 000» — по категории, описанию,
+         * сотруднику, чеку или заказу, а число — ещё и по сумме операции.
+         * Итоги сверху считаются по найденному: «сколько ушло на рекламу».
+         */
+        const сумма = Number(String(query.search).replace(/[\s\u00a0\u202f]/g, '').replace(',', '.'));
+        const поСумме = /\d/.test(String(query.search)) && Number.isFinite(сумма) && сумма > 0;
+        cond.push(`(nmatch(?, 0, NULL, f.category, f.note, e.name, u.name, s.number, o.number)` +
+          (поСумме ? ' OR ABS(f.amount - ?) < 0.005)' : ')'));
+        args.push(String(query.search));
+        if (поСумме) args.push(сумма);
+      }
       const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
+      const JOINS = `LEFT JOIN users u ON u.id = f.user_id
+         LEFT JOIN users e ON e.id = f.employee_id
+         LEFT JOIN sales s ON s.id = f.sale_id
+         LEFT JOIN service_orders o ON o.id = f.order_id`;
       const rows = db.prepare(
         `SELECT f.*, u.name AS user_name, e.name AS employee_name,
                 s.number AS sale_number, o.number AS order_number
          FROM finance_ops f
-         LEFT JOIN users u ON u.id = f.user_id
-         LEFT JOIN users e ON e.id = f.employee_id
-         LEFT JOIN sales s ON s.id = f.sale_id
-         LEFT JOIN service_orders o ON o.id = f.order_id
+         ${JOINS}
          ${where} ORDER BY f.created_at DESC LIMIT 1000`
       ).all(...args);
       const totals = db.prepare(
         `SELECT
-           COALESCE(SUM(CASE WHEN type='income' THEN amount END), 0) AS income,
-           COALESCE(SUM(CASE WHEN type='expense' THEN amount END), 0) AS expense
-         FROM finance_ops f ${where}`
+           COALESCE(SUM(CASE WHEN f.type='income' THEN f.amount END), 0) AS income,
+           COALESCE(SUM(CASE WHEN f.type='expense' THEN f.amount END), 0) AS expense
+         FROM finance_ops f ${JOINS} ${where}`
       ).get(...args);
       return { items: rows, totals: { ...totals, profit: round2(totals.income - totals.expense) } };
-    },
+    }),
   },
   {
     method: 'GET', path: '/api/finance/categories', admin: true,

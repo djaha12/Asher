@@ -3,6 +3,7 @@ const { db, nowIso, round2, audit, getSetting, видитВсё } = require('../
 const { ApiError } = require('./util');
 const { SOURCES } = require('../customer-sources');
 const { normalizePhone } = require('../locale');
+const { искатьСЗапасом } = require('../поиск');
 
 /*
  * Один и тот же телефон записывают по-разному: «0555 12-34-56»,
@@ -102,21 +103,17 @@ const STATS_SQL = `
 const routes = [
   {
     method: 'GET', path: '/api/customers',
-    handler: ({ query }) => {
+    handler: ({ query }) => искатьСЗапасом(query, query => {
       const cond = [];
       const args = [];
       if (query.search) {
         /*
          * Номер ищут как набрали: «0555123456» должен находить «0555 12-34-56»
-         * и «+996 555 123456». Сравниваем голые цифры и заодно вариант без
-         * местной приставки — «0555…» и «996555…» это один телефон.
+         * и «+996 555 123456» — сравниваем голые цифры без кода страны и
+         * местного нуля. Имя — любыми словами в любом порядке (src/поиск.js).
          */
-        const s = `%${String(query.search).toLowerCase()}%`;
-        const цифры = String(query.search).replace(/\D/g, '');
-        const безПриставки = цифры.length > 3 && цифры.startsWith('0') ? цифры.slice(1) : цифры;
-        cond.push(`(nlower(c.name) LIKE ? OR nlower(c.email) LIKE ?
-          OR (LENGTH(?) >= 3 AND (digits(c.phone) LIKE ? OR digits(c.phone) LIKE ?)))`);
-        args.push(s, s, цифры, `%${цифры}%`, `%${безПриставки}%`);
+        cond.push('nmatch(?, 3, c.phone, c.name, c.email)');
+        args.push(String(query.search));
       }
       // «none» — клиенты, у которых источник не отмечен
       if (query.source === 'none') cond.push(`c.source = ''`);
@@ -134,7 +131,7 @@ const routes = [
          FROM customers c ${where} ORDER BY total_spent DESC, c.name LIMIT 1000`
       ).all(...args);
       return { items: rows };
-    },
+    }),
   },
   {
     method: 'GET', path: '/api/customers/birthdays',

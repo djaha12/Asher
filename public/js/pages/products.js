@@ -78,13 +78,26 @@ window.Pages.products = (() => {
   }
 
   let refreshSeq = 0;
+  // Что подсвечивать в найденном: набранное или, если искали по другой
+  // раскладке, исправленное.
+  let подсветка = '';
   async function refresh(container) {
     const my = ++refreshSeq;
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(filters)) if (v) q.set(k, v);
-    const { items, total } = await api.get('/api/products?' + q.toString());
+    const data = await api.get('/api/products?' + q.toString());
+    const { items, total } = data;
     // устаревший ответ (быстрая смена фильтров) или уже покинули страницу
     if (my !== refreshSeq || !container.isConnected) return;
+    подсветка = data.раскладка || filters.search;
+    ui.отметитьРаскладку(container.querySelector('#pf-search'), data.раскладка);
+    // Пусто — говорим, по чему искали, и напоминаем про включённые фильтры:
+    // вчерашний «металл» молча прятал половину каталога.
+    const сФильтрами = ['status', 'category_id', 'metal', 'store_id', 'has_photo', 'color', 'clarity', 'ownership']
+      .some(k => filters[k]);
+    const пусто = filters.search
+      ? `По запросу «${ui.esc(filters.search)}» изделий не нашлось${сФильтрами ? ' — попробуйте снять фильтры' : ''}.`
+      : 'Изделий не найдено. Добавьте первое или измените фильтры.';
     const listEl = container.querySelector('#prod-list');
     const admin = App.isAdmin();
     const shown = items.length < total ? `Показано ${items.length} из ${total}` : `Найдено: ${total}`;
@@ -94,7 +107,7 @@ window.Pages.products = (() => {
       listEl.innerHTML = `<div class="muted" style="margin-bottom:12px">${shown}</div>` +
         (items.length ? `<div class="pgrid">${items.map((r, i) => productCard(r, i)).join('')}</div>`
           : `<div class="empty"><div class="empty-ico">◇</div>
-             <p>Изделий не найдено. Добавьте первое или измените фильтры.</p></div>`);
+             <p>${пусто}</p></div>`);
       listEl.querySelectorAll('.pcard').forEach(card => {
         card.addEventListener('click', () => onPick(items[Number(card.dataset.i)]));
       });
@@ -105,8 +118,8 @@ window.Pages.products = (() => {
       { title: '', cls: 'nowrap', render: r => r.thumb
         ? `<img class="thumb-sm" src="${ui.esc(ui.photoUrl(r.thumb))}" alt="" loading="lazy">`
         : `<div class="thumb-sm-empty">${ui.icon('gem')}</div>` },
-      { title: 'Артикул', render: r => `<span class="mono strong">${ui.highlight(r.sku, filters.search)}</span>` },
-      { title: 'Наименование', render: r => `${ui.highlight(r.name, filters.search)}${r.gem_summary ? `<div class="dim" style="font-size:12px">${ui.esc(r.gem_summary)}</div>` : ''}` },
+      { title: 'Артикул', render: r => `<span class="mono strong">${ui.highlight(r.sku, подсветка)}</span>` },
+      { title: 'Наименование', render: r => `${ui.highlight(r.name, подсветка)}${r.gem_summary ? `<div class="dim" style="font-size:12px">${ui.highlight(r.gem_summary, подсветка)}</div>` : ''}` },
       { title: 'Категория', render: r => `<span class="dim">${ui.esc(r.category_name || '—')}</span>` },
       { title: 'Металл', render: r => ui.esc(metalLabel(r) || '—') },
       { title: 'Бриллиант', render: r => stoneLabel(r)
@@ -124,7 +137,7 @@ window.Pages.products = (() => {
         (r.reserved_for_name ? `<div class="dim" style="font-size:11px">${ui.esc(r.reserved_for_name)}</div>` : '') },
     );
     listEl.innerHTML = `<div class="muted" style="margin-bottom:8px">${shown}</div>` +
-      ui.table(cols, items, { empty: 'Изделий не найдено. Добавьте первое или измените фильтры.' });
+      ui.table(cols, items, { empty: пусто });
     ui.bindRows(listEl, items, onPick);
   }
 
@@ -160,8 +173,8 @@ window.Pages.products = (() => {
           ${r.photo_count > 1 ? `<div class="photo-count">${r.photo_count} фото</div>` : ''}
         </div>
         <div class="pcard-body">
-          <div class="pcard-sku">${ui.highlight(r.sku, filters.search)}</div>
-          <div class="pcard-name">${ui.highlight(r.name, filters.search)}</div>
+          <div class="pcard-sku">${ui.highlight(r.sku, подсветка)}</div>
+          <div class="pcard-name">${ui.highlight(r.name, подсветка)}</div>
           <div class="pcard-meta">${[metalLabel(r), r.weight ? ui.num(r.weight) + '\u00a0г' : '', r.size]
             .filter(Boolean).map(ui.esc).join(' · ') || '&nbsp;'}</div>
           ${stoneLabel(r) ? `<div class="pcard-stone">${ui.esc(stoneLabel(r))}</div>` : ''}

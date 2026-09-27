@@ -9,6 +9,9 @@ window.Pages.orders = (() => {
     { key: 'delivered', title: 'Выдан' },
   ];
   let showArchive = false;
+  // Поиск живёт здесь, а не в поле: доска перерисовывается, когда кто-то
+  // принял заказ или отметил «Готов», и набранное сбрасываться не должно.
+  let поиск = '';
 
   const граммы = w => (Number(w) > 0 ? ui.num(w, 3) + ' г' : '');
   /*
@@ -83,20 +86,31 @@ window.Pages.orders = (() => {
 
   // ---------- Список ----------
 
+  let refreshSeq = 0;
   async function refresh(el) {
-    const { items } = await api.get('/api/orders');
+    const my = ++refreshSeq;
+    const data = await api.get('/api/orders' + (поиск ? '?search=' + encodeURIComponent(поиск) : ''));
+    if (my !== refreshSeq || !el.isConnected) return;   // ответ устарел — набирают дальше
+    const { items } = data;
+    ui.отметитьРаскладку(el.querySelector('#of-search'), data.раскладка);
+    const hq = data.раскладка || поиск;
     const kanbanEl = el.querySelector('#orders-kanban');
-    const visible = items.filter(o => showArchive || o.status !== 'delivered' || isRecent(o.delivered_at));
+    // Ищут — показываем и давно выданные: за старым заказом тоже приходят.
+    const visible = items.filter(o => поиск || showArchive || o.status !== 'delivered' || isRecent(o.delivered_at));
+    const найдено = visible.filter(o => o.status !== 'cancelled').length;
+    el.querySelector('#orders-note').innerHTML = !поиск ? ''
+      : найдено ? `<div class="muted" style="margin-bottom:10px">Найдено заказов: ${найдено}</div>`
+        : `<div class="muted" style="margin-bottom:10px">По запросу «${ui.esc(поиск)}» заказов не нашлось.</div>`;
     kanbanEl.innerHTML = COLS.map(col => {
       const list = visible.filter(o => o.status === col.key);
       return `<div class="kanban-col">
         <h3>${col.title} <span class="pill-num">${list.length}</span></h3>
         ${list.map(o => `
           <div class="kanban-card" data-id="${o.id}">
-            <div class="kc-num">${ui.esc(o.number)} · ${ui.L.orderType[o.type] || o.type}${o.photo_count ? ` · ${o.photo_count} фото` : ''}</div>
-            <div class="kc-desc">${o.item ? `<b>${ui.esc(o.item)}${o.weight ? ', ' + граммы(o.weight) : ''}</b> — ` : ''}${ui.esc(o.description.slice(0, 90))}${o.description.length > 90 ? '…' : ''}</div>
+            <div class="kc-num">${ui.highlight(o.number, hq)} · ${ui.L.orderType[o.type] || o.type}${o.photo_count ? ` · ${o.photo_count} фото` : ''}</div>
+            <div class="kc-desc">${o.item ? `<b>${ui.highlight(o.item, hq)}${o.weight ? ', ' + граммы(o.weight) : ''}</b> — ` : ''}${ui.highlight(o.description.slice(0, 90), hq)}${o.description.length > 90 ? '…' : ''}</div>
             <div class="kc-foot">
-              <span>${ui.esc(o.customer_name || 'Без клиента')}</span>
+              <span>${o.customer_name ? ui.highlight(o.customer_name, hq) : 'Без клиента'}</span>
               <b class="money">${ui.money(o.final_price || o.estimate)}</b>
             </div>
             ${o.due_date && o.status !== 'delivered' ? `<div class="kc-foot" style="margin-top:4px"><span class="${overdue(o.due_date) ? 'badge badge-crit' : 'muted'}">срок: ${ui.dateOnly(o.due_date)}</span></div>` : ''}
@@ -118,8 +132,18 @@ window.Pages.orders = (() => {
       отметитьНаписали(заказ(a.dataset.notify), () => refresh(el));
     }));
     const cancelled = items.filter(o => o.status === 'cancelled');
-    el.querySelector('#orders-cancelled').innerHTML = cancelled.length
-      ? `<p class="muted">Отменённых заказов: ${cancelled.length}</p>` : '';
+    // Ищут — отменённые тоже по номерам: «где мой заказ» бывает и про отменённый.
+    const отменённые = el.querySelector('#orders-cancelled');
+    отменённые.innerHTML = !cancelled.length ? ''
+      : поиск ? `<p class="muted">Отменённые: ${cancelled.map(o =>
+        `<a href="#" data-cancelled="${o.id}">${ui.highlight(o.number, hq)}</a>${o.customer_name
+          ? ' (' + ui.highlight(o.customer_name, hq) + ')' : ''}`).join(', ')}</p>`
+        : `<p class="muted">Отменённых заказов: ${cancelled.length}</p>`;
+    // Открываем на месте, как карточку на доске: переход по адресу сбросил бы поиск.
+    отменённые.querySelectorAll('[data-cancelled]').forEach(a => a.addEventListener('click', e => {
+      e.preventDefault();
+      openDetail(Number(a.dataset.cancelled), () => refresh(el));
+    }));
   }
 
   /*
@@ -491,14 +515,18 @@ window.Pages.orders = (() => {
     печатьКвитанции,
     async render(el, param) {
       showArchive = false; // чекбокс рисуется снятым — состояние должно совпадать
+      поиск = '';
       el.innerHTML = `
         <div class="toolbar">
+          <input type="text" class="input search" id="of-search" autocomplete="off"
+            placeholder="Поиск: номер, клиент, телефон…">
           <label style="display:flex;align-items:center;gap:7px;font-size:13px;color:var(--ink-2)">
             <input type="checkbox" id="of-archive"> показывать давно выданные
           </label>
           <div class="spacer"></div>
           <button class="btn btn-primary" id="of-add">+ Принять заказ</button>
         </div>
+        <div id="orders-note"></div>
         <div class="kanban" id="orders-kanban"></div>
         <div id="orders-cancelled" style="margin-top:12px"></div>`;
       const doRefresh = () => { if (el.isConnected) refresh(el).catch(ui.toastErr); };
@@ -506,6 +534,7 @@ window.Pages.orders = (() => {
       App.обновлятьТак(el, () => refresh(el));
       el.querySelector('#of-add').addEventListener('click', () => openEditor(null, doRefresh));
       el.querySelector('#of-archive').addEventListener('change', e => { showArchive = e.target.checked; doRefresh(); });
+      el.querySelector('#of-search').addEventListener('input', ui.debounce(e => { поиск = e.target.value.trim(); doRefresh(); }));
       await refresh(el);
       if (param) openDetail(Number(param), doRefresh);
     },

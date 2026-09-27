@@ -2,6 +2,7 @@
 const { db, nowIso, round2, money, audit, nextNumber, transaction, getSetting, видитВсё } = require('../db');
 const { ApiError } = require('./util');
 const { recordConsignmentSale, revokeConsignmentSale } = require('./debts');
+const { искатьСЗапасом } = require('../поиск');
 
 /*
  * ---------- Потолок скидки ----------
@@ -353,7 +354,7 @@ function returnItemsTx(saleId, itemIds, session, { holdCash = false } = {}) {
 const routes = [
   {
     method: 'GET', path: '/api/sales',
-    handler: ({ query, session }) => {
+    handler: ({ query, session }) => искатьСЗапасом(query, query => {
       const cond = [];
       const args = [];
       if (query.from) { cond.push('s.created_at >= ?'); args.push(query.from); }
@@ -363,11 +364,16 @@ const routes = [
       if (query.payment_method) { cond.push('s.payment_method = ?'); args.push(query.payment_method); }
       if (query.status) { cond.push('s.status = ?'); args.push(query.status); }
       if (query.search) {
-        cond.push(`(nlower(s.number) LIKE ? OR EXISTS (
-          SELECT 1 FROM sale_items si JOIN products p ON p.id = si.product_id
-          WHERE si.sale_id = s.id AND (nlower(p.name) LIKE ? OR nlower(p.sku) LIKE ?)))`);
-        const q = `%${String(query.search).toLowerCase()}%`;
-        args.push(q, q, q);
+        /*
+         * Чек ищут по чему угодно: номеру, клиенту, его телефону, изделию,
+         * акту приёма старого золота. Телефон — от шести цифр: «123» здесь
+         * скорее номер чека, чем кусок чьего-то номера.
+         */
+        cond.push(`nmatch(?, 6, c.phone, s.number, c.name, s.note,
+          (SELECT group_concat(p.name || ' ' || p.sku, char(10)) FROM sale_items si
+            JOIN products p ON p.id = si.product_id WHERE si.sale_id = s.id),
+          (SELECT group_concat(a.number, ' ') FROM scrap_intakes a WHERE a.sale_id = s.id))`);
+        args.push(String(query.search));
       }
       if (query.store_id) { cond.push('s.store_id = ?'); args.push(Number(query.store_id)); }
       if (query.debt === '1') {
@@ -388,11 +394,12 @@ const routes = [
          ${where} ORDER BY s.created_at DESC LIMIT ?`
       ).all(...args, limit);
       const totals = db.prepare(
-        `SELECT COUNT(*) AS cnt, COALESCE(SUM(s.total),0) AS sum FROM sales s ${where}`
+        `SELECT COUNT(*) AS cnt, COALESCE(SUM(s.total),0) AS sum
+         FROM sales s LEFT JOIN customers c ON c.id = s.customer_id ${where}`
       ).get(...args);
       if (!видитВсё(session.role)) rows.forEach(r => delete r.cost_total);
       return { items: rows, totals };
-    },
+    }),
   },
   {
     method: 'GET', path: '/api/sales/:id',

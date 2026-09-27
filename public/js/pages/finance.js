@@ -2,7 +2,7 @@
 window.Pages = window.Pages || {};
 
 window.Pages.finance = (() => {
-  let tab = 'ops', period = '30', typeFilter = '';
+  let tab = 'ops', period = '30', typeFilter = '', поиск = '';
 
   function periodFrom(days) {
     if (!days) return '';
@@ -18,9 +18,25 @@ window.Pages.finance = (() => {
     const q = new URLSearchParams();
     if (period) q.set('from', periodFrom(period));
     if (typeFilter) q.set('type', typeFilter);
-    const { items, totals } = await api.get('/api/finance?' + q.toString());
+    if (поиск) q.set('search', поиск);
+    let data = await api.get('/api/finance?' + q.toString());
+    /*
+     * Ищут старую операцию, а период стоит «30 дней» — раньше это выглядело
+     * как «не найдено». Если за период пусто, ищем за всё время и честно
+     * пишем об этом над таблицей.
+     */
+    let заВсёВремя = false;
+    if (поиск && period && !data.items.length) {
+      q.delete('from');
+      const все = await api.get('/api/finance?' + q.toString());
+      if (все.items.length) { data = все; заВсёВремя = true; }
+    }
     if (my !== opsSeq || !box.isConnected) return; // фильтры уже сменились
+    const { items, totals } = data;
+    const hq = data.раскладка || поиск;
+    ui.отметитьРаскладку(document.getElementById('ff-search'), data.раскладка);
     box.innerHTML = `
+      ${заВсёВремя ? '<div class="hint-box" style="margin-bottom:12px">За выбранный период не нашлось — показано за всё время.</div>' : ''}
       <div class="grid grid-3" style="margin-bottom:16px">
         <div class="stat-tile"><div class="stat-label">Приход</div>
           <div class="stat-value" style="color:var(--good)">${ui.money(totals.income)}</div></div>
@@ -34,13 +50,13 @@ window.Pages.finance = (() => {
     tbl.innerHTML = ui.table([
       { title: 'Дата', render: r => `<span class="dim">${ui.dt(r.created_at)}</span>` },
       { title: 'Тип', render: r => r.type === 'income' ? '<span class="badge badge-good">Приход</span>' : '<span class="badge badge-crit">Расход</span>' },
-      { title: 'Категория', render: r => `<span class="strong">${ui.esc(r.category)}</span>${
-        r.employee_name ? ` <span class="dim">— ${ui.esc(r.employee_name)}</span>` : ''}` },
-      { title: 'Описание', render: r => `<span class="dim">${ui.esc(r.note || '')}${r.sale_number ? ` <a href="#/sales/${r.sale_id}">${ui.esc(r.sale_number)}</a>` : ''}${r.order_number ? ' ' + ui.esc(r.order_number) : ''}</span>` },
-      { title: 'Сотрудник', render: r => `<span class="dim">${ui.esc(r.user_name || '—')}</span>` },
+      { title: 'Категория', render: r => `<span class="strong">${ui.highlight(r.category, hq)}</span>${
+        r.employee_name ? ` <span class="dim">— ${ui.highlight(r.employee_name, hq)}</span>` : ''}` },
+      { title: 'Описание', render: r => `<span class="dim">${ui.highlight(r.note || '', hq)}${r.sale_number ? ` <a href="#/sales/${r.sale_id}">${ui.highlight(r.sale_number, hq)}</a>` : ''}${r.order_number ? ' ' + ui.highlight(r.order_number, hq) : ''}</span>` },
+      { title: 'Сотрудник', render: r => `<span class="dim">${r.user_name ? ui.highlight(r.user_name, hq) : '—'}</span>` },
       { title: 'Сумма', cls: 'num strong', render: r => (r.type === 'income' ? '+' : '−') + ui.money(r.amount) },
       { title: '', render: r => (!r.sale_id && !r.order_id) ? `<button class="btn btn-sm btn-danger" data-del="${r.id}">×</button>` : '' },
-    ], items, { empty: 'Операций за период нет.' });
+    ], items, { empty: поиск ? `По запросу «${ui.esc(поиск)}» операций не нашлось.` : 'Операций за период нет.' });
     tbl.addEventListener('click', async e => {
       const id = e.target.dataset && e.target.dataset.del;
       if (!id) return;
@@ -434,6 +450,8 @@ window.Pages.finance = (() => {
           <button class="tab" data-tab="cash">Сверка кассы</button>
         </div>
         <div id="fin-toolbar" class="toolbar">
+          <input type="text" class="input search" id="ff-search" autocomplete="off"
+            placeholder="Поиск: категория, описание, сумма…">
           <select class="input" id="ff-period">
             <option value="1">Сегодня</option><option value="7">7 дней</option>
             <option value="30" selected>30 дней</option><option value="365">Год</option>
@@ -478,11 +496,12 @@ window.Pages.finance = (() => {
       }));
       el.querySelector('#ff-period').addEventListener('change', e => { period = e.target.value; show(); });
       el.querySelector('#ff-type').addEventListener('change', e => { typeFilter = e.target.value; show(); });
+      el.querySelector('#ff-search').addEventListener('input', ui.debounce(e => { поиск = e.target.value.trim(); show(true); }));
       el.querySelector('#ff-year').addEventListener('change', show);
       el.querySelector('#ff-income').addEventListener('click', () => opDialog('income', show));
       el.querySelector('#ff-expense').addEventListener('click', () => opDialog('expense', show));
 
-      tab = 'ops'; period = '30'; typeFilter = '';
+      tab = 'ops'; period = '30'; typeFilter = ''; поиск = '';
       // Вкладка, период и тип живут в самой странице — обновляем только таблицу.
       App.обновлятьТак(el, () => show(true));
       await show();

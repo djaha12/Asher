@@ -12,6 +12,7 @@ window.Pages = window.Pages || {};
 window.Pages.sets = (() => {
   let pageEl = null;
   let sets = [];
+  let поиск = '';
 
   function statusBadge(s) {
     const [tone, label] = !s.count ? ['gray', 'пустой']
@@ -21,15 +22,15 @@ window.Pages.sets = (() => {
     return `<span class="badge badge-${tone}">${label}</span>`;
   }
 
-  function setCard(s) {
+  function setCard(s, hq = '') {
     const saving = s.items_total - s.price;
     return `
       <div class="card set-card" data-set="${s.id}">
         <div class="row" style="justify-content:space-between;align-items:flex-start;gap:10px">
           <div>
-            <div style="font-size:17px;font-weight:650">${ui.esc(s.name)}</div>
+            <div style="font-size:17px;font-weight:650">${ui.highlight(s.name, hq)}</div>
             <div class="muted" style="font-size:12.5px">
-              ${s.sku ? `<span class="mono">${ui.esc(s.sku)}</span> · ` : ''}
+              ${s.sku ? `<span class="mono">${ui.highlight(s.sku, hq)}</span> · ` : ''}
               ${s.count} изд. · ${ui.num(s.weight_total)} г
             </div>
           </div>
@@ -47,9 +48,9 @@ window.Pages.sets = (() => {
               ${i.thumb ? `<img src="/media/${ui.esc(i.thumb)}" alt="">`
                 : `<div class="set-item-noimg">${ui.icon('gem')}</div>`}
               <div class="grow">
-                <div style="font-weight:600;font-size:13.5px">${ui.esc(i.name)}</div>
+                <div style="font-weight:600;font-size:13.5px">${ui.highlight(i.name, hq)}</div>
                 <div class="muted" style="font-size:12px">
-                  <span class="mono">${ui.esc(i.sku)}</span>
+                  <span class="mono">${ui.highlight(i.sku, hq)}</span>
                   ${i.status === 'sold' ? ' · продано' : ''}
                   ${i.status === 'written_off' ? ' · списано' : ''}
                   ${i.status === 'reserved' ? ' · в резерве' : ''}
@@ -196,10 +197,22 @@ window.Pages.sets = (() => {
     const res = await api.get('/api/sets');
     if (!pageEl.isConnected) return;
     sets = res.items;
+    draw();
+  }
+
+  // Комплектов немного — отбираем уже загруженные, по тем же правилам, что сервер.
+  function draw() {
     const box = pageEl.querySelector('#sets-list');
-    box.innerHTML = sets.length
-      ? `<div class="grid grid-2">${sets.map(setCard).join('')}</div>`
-      : `<div class="card empty"><p>Комплектов пока нет. Соберите первый — например,
+    const { items: видно, раскладка } = ui.поиск.отобрать(sets, поиск, s => ({
+      поля: [s.name, s.sku, s.note, ...s.items.map(i => i.name + ' ' + i.sku)],
+    }));
+    const hq = раскладка || поиск;
+    ui.отметитьРаскладку(pageEl.querySelector('#sets-search'), раскладка);
+    box.innerHTML = видно.length
+      ? `<div class="grid grid-2">${видно.map(s => setCard(s, hq)).join('')}</div>`
+      : поиск && sets.length
+        ? `<div class="card empty"><p>По запросу «${ui.esc(поиск)}» комплектов не нашлось.</p></div>`
+        : `<div class="card empty"><p>Комплектов пока нет. Соберите первый — например,
            кольцо, серьги и подвеску одного гарнитура.</p></div>`;
 
     box.querySelectorAll('[data-set]').forEach(card => {
@@ -234,11 +247,16 @@ window.Pages.sets = (() => {
         остатки и граммы не задваиваются. В любой момент можно разобрать обратно.
       </div>
       <div class="toolbar">
+        <input type="text" class="input search" id="sets-search" autocomplete="off"
+          placeholder="Поиск: название, артикул, изделие…">
+        <div class="spacer"></div>
         ${App.isAdmin()
           ? `<button class="btn btn-primary" id="sets-new">${ui.icon('plus')} Собрать комплект</button>`
           : '<div class="muted">Комплекты собирает администратор — продать готовый может любой продавец.</div>'}
       </div>
       <div id="sets-list"></div>`;
+    поиск = '';
+    el.querySelector('#sets-search').addEventListener('input', ui.debounce(e => { поиск = e.target.value.trim(); draw(); }, 150));
     const newBtn = el.querySelector('#sets-new');
     if (newBtn) newBtn.onclick = () => editDialog(null, refresh);
     await refresh();

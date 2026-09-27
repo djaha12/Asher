@@ -731,6 +731,8 @@ window.Pages.settings = (() => {
     const f = { user_id: '', action: '', from: '', to: '', search: '' };
     let offset = 0;
     let rows = [];
+    let раскладка = '';   // искали по другой раскладке — «ещё» грузим по ней же
+    let seq = 0;
 
     box.innerHTML = `
       <div class="hint-box">
@@ -747,7 +749,7 @@ window.Pages.settings = (() => {
         </select>
         <label class="row-tight">с <input type="date" class="input" id="au-from" style="width:auto"></label>
         <label class="row-tight">по <input type="date" class="input" id="au-to" style="width:auto"></label>
-        <input type="text" class="input search" id="au-search" placeholder="Поиск по деталям…" autocomplete="off">
+        <input type="text" class="input search" id="au-search" placeholder="Поиск: чек, изделие, клиент, сотрудник…" autocomplete="off">
         <button class="btn" id="au-reset">Сбросить</button>
       </div>
       <div id="au-summary"></div>
@@ -764,21 +766,26 @@ window.Pages.settings = (() => {
       listEl.innerHTML = ui.table([
         { title: 'Когда', cls: 'nowrap', render: r => `<span class="dim">${ui.dt(r.created_at)}</span>` },
         { title: 'Кто', render: r => r.user_name
-          ? `${ui.esc(r.user_name)} ${roleBadge(r.user_role, true)}`
+          ? `${ui.highlight(r.user_name, раскладка || f.search)} ${roleBadge(r.user_role, true)}`
           : '<span class="dim">система</span>' },
         { title: 'Действие', render: r =>
           `<span class="badge badge-gray">${ui.esc(AUDIT_ACTIONS[r.action] || r.action)}</span>` },
         { title: 'Что', render: r => `<span class="dim">${ui.esc(AUDIT_ENTITIES[r.entity] || r.entity)}</span>` },
-        { title: 'Подробности', render: r => ui.esc(r.details || '—') },
+        { title: 'Подробности', render: r => r.details ? ui.highlight(r.details, раскладка || f.search) : '—' },
       ], rows, { empty: 'За выбранный отбор действий нет' });
     };
 
     const load = async (append) => {
+      const my = ++seq;
       const q = new URLSearchParams();
       for (const [k, v] of Object.entries(f)) if (v) q.set(k, v);
+      if (append && раскладка) q.set('search', раскладка);
       q.set('limit', '100');
       q.set('offset', String(append ? offset : 0));
       const res = await api.get('/api/audit?' + q.toString());
+      if (my !== seq || !box.isConnected) return;   // отбор уже сменили — ответ устарел
+      if (!append) раскладка = res.раскладка || '';
+      ui.отметитьРаскладку(box.querySelector('#au-search'), раскладка);
       rows = append ? [...rows, ...res.items] : res.items;
       offset = rows.length;
       draw();

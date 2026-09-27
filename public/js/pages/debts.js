@@ -14,6 +14,7 @@ window.Pages.debts = (() => {
   // перерисовывается, когда кто-то принял оплату, и отбор сбрасываться не должен.
   let поиск = '';
   let толькоПросроченные = false;
+  let поискРеализации = '';
 
   function reload() { if (pageEl && pageEl.isConnected) render(pageEl).catch(ui.toastErr); }
 
@@ -57,17 +58,22 @@ window.Pages.debts = (() => {
 
     const listEl = host.querySelector('#d-list');
     let filtered = items;
+    let hq = '';
 
     function draw() {
       if (!filtered.length) {
-        listEl.innerHTML = `<div class="empty"><div class="empty-ico">✓</div>
+        listEl.innerHTML = поиск && items.length
+          ? `<div class="empty"><p>По запросу «${ui.esc(поиск)}» должников не нашлось.</p></div>`
+          : толькоПросроченные && items.length
+            ? `<div class="empty"><div class="empty-ico">✓</div><p>Просроченных долгов нет.</p></div>`
+            : `<div class="empty"><div class="empty-ico">✓</div>
           <p>Долгов нет. Все рассчитались.</p></div>`;
         return;
       }
       listEl.innerHTML = filtered.map((r, i) => `
         <div class="debt-row ${r.overdue_debt > 0 ? 'overdue' : ''}" data-i="${i}">
           <div>
-            <div class="dr-name">${ui.esc(r.customer_name)}</div>
+            <div class="dr-name">${ui.highlight(r.customer_name, hq)}</div>
             <div class="dr-sub">${ui.esc(r.customer_phone || 'телефон не указан')} ·
               документов: ${r.documents}${r.oldest_due ? ' · срок ' + ui.dateOnly(r.oldest_due) : ''}</div>
           </div>
@@ -84,15 +90,14 @@ window.Pages.debts = (() => {
     }
 
     function apply() {
-      const q = поиск.toLowerCase();
-      // Номер — голыми цифрами и без местной приставки: «0555123456»
-      // находит «+996 555 12-34-56».
-      const цифры = q.replace(/\D/g, '');
-      const безПриставки = цифры.length > 3 && цифры.startsWith('0') ? цифры.slice(1) : цифры;
-      const поТелефону = r => цифры.length >= 3 && String(r.customer_phone || '').replace(/\D/g, '').includes(безПриставки);
-      filtered = items.filter(r =>
-        (!толькоПросроченные || r.overdue_debt > 0) &&
-        (!q || String(r.customer_name).toLowerCase().includes(q) || поТелефону(r)));
+      // Имя — любыми словами, номер — в любом виде: «0555123456» находит
+      // «+996 555 12-34-56». Правила те же, что у поиска на сервере.
+      const { items: найдены, раскладка } = ui.поиск.отобрать(
+        items.filter(r => !толькоПросроченные || r.overdue_debt > 0), поиск,
+        r => ({ телефон: r.customer_phone, поля: [r.customer_name] }));
+      filtered = найдены;
+      hq = раскладка || поиск;
+      ui.отметитьРаскладку(host.querySelector('#d-search'), раскладка);
       draw();
     }
 
@@ -441,31 +446,51 @@ window.Pages.debts = (() => {
         </div>
       </div>
 
+      ${data.on_hand.length || data.sold.length ? `<div class="toolbar">
+        <input type="text" class="input search" id="cn-search" autocomplete="off"
+          placeholder="Поиск: артикул, изделие, владелец, чек…" value="${ui.esc(поискРеализации)}">
+      </div>` : ''}
+      <div id="cn-body"></div>`;
+
+    // Отбираем уже загруженное — по тем же правилам, что и поиск на сервере.
+    const body = host.querySelector('#cn-body');
+    const поля = r => ({ поля: [r.sku, r.name, r.supplier_name, r.store_name, r.sale_number] });
+    function draw() {
+      const витрина = ui.поиск.отобрать(data.on_hand, поискРеализации, поля);
+      const продано = ui.поиск.отобрать(data.sold, поискРеализации, поля);
+      const раскладка = витрина.раскладка || продано.раскладка;
+      const hq = раскладка || поискРеализации;
+      ui.отметитьРаскладку(host.querySelector('#cn-search'), раскладка);
+      body.innerHTML = `
       <div class="card">
         <div class="card-title">Сейчас на витрине</div>
         ${data.on_hand.length ? ui.table([
-          { title: 'Артикул', render: r => `<span class="mono strong">${ui.esc(r.sku)}</span>` },
-          { title: 'Наименование', render: r => ui.esc(r.name) },
-          { title: 'Владелец', render: r => ui.esc(r.supplier_name || '—') },
+          { title: 'Артикул', render: r => `<span class="mono strong">${ui.highlight(r.sku, hq)}</span>` },
+          { title: 'Наименование', render: r => ui.highlight(r.name, hq) },
+          { title: 'Владелец', render: r => r.supplier_name ? ui.highlight(r.supplier_name, hq) : '—' },
           { title: 'Точка', render: r => `<span class="dim">${ui.esc(r.store_name || '—')}</span>` },
           { title: 'Отдать владельцу', cls: 'num', render: r => ui.money(r.purchase_price) },
           { title: 'Наша цена', cls: 'num strong', render: r => ui.money(r.retail_price) },
           { title: 'Статус', render: r => ui.badge('status', r.status) },
-        ], data.on_hand, { empty: 'Чужого товара на витрине нет' })
+        ], витрина.items, { empty: `По запросу «${ui.esc(поискРеализации)}» на витрине ничего нет` })
         : `<div class="empty"><div class="empty-ico">◇</div><p>Чужого товара на витрине нет.</p>
            <p class="muted">Отметьте изделие как «на реализации» в его карточке.</p></div>`}
       </div>
 
-      ${data.sold.length ? `<div class="card">
+      ${data.sold.length && (продано.items.length || !поискРеализации) ? `<div class="card">
         <div class="card-title">Продано — ждёт расчёта с владельцем</div>
         ${ui.table([
           { title: 'Когда', render: r => ui.dateOnly(r.created_at) },
-          { title: 'Изделие', render: r => `<span class="mono">${ui.esc(r.sku || '—')}</span> ${ui.esc(r.name || '')}` },
-          { title: 'Чек', render: r => ui.esc(r.sale_number || '—') },
-          { title: 'Владелец', render: r => ui.esc(r.supplier_name || '—') },
+          { title: 'Изделие', render: r => `<span class="mono">${ui.highlight(r.sku || '—', hq)}</span> ${ui.highlight(r.name || '', hq)}` },
+          { title: 'Чек', render: r => r.sale_number ? ui.highlight(r.sale_number, hq) : '—' },
+          { title: 'Владелец', render: r => r.supplier_name ? ui.highlight(r.supplier_name, hq) : '—' },
           { title: 'Сумма к отдаче', cls: 'num strong', render: r => ui.money(r.amount) },
-        ], data.sold, { empty: '' })}
+        ], продано.items, { empty: '' })}
       </div>` : ''}`;
+    }
+    const поле = host.querySelector('#cn-search');
+    if (поле) поле.addEventListener('input', ui.debounce(e => { поискРеализации = e.target.value.trim(); draw(); }, 150));
+    draw();
   }
 
   // ---------- Каркас страницы ----------

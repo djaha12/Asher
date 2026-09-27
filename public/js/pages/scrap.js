@@ -8,10 +8,16 @@ window.Pages = window.Pages || {};
  */
 window.Pages.scrap = (() => {
   const г = w => ui.num(w, 3) + ' г';
+  let поиск = '';
+  let seq = 0;
 
   async function refresh(el) {
-    const { stock, items } = await api.get('/api/scrap');
-    if (!el.isConnected) return;
+    const my = ++seq;
+    const data = await api.get('/api/scrap' + (поиск ? '?search=' + encodeURIComponent(поиск) : ''));
+    if (my !== seq || !el.isConnected) return;   // ответ устарел — набирают дальше
+    const { stock, items } = data;
+    const hq = data.раскладка || поиск;
+    ui.отметитьРаскладку(el.querySelector('#scrap-search'), data.раскладка);
     const всегоВес = stock.reduce((s, x) => s + x.weight, 0);
     const всегоЧистого = stock.reduce((s, x) => s + x.pure_weight, 0);
     el.querySelector('#scrap-stock').innerHTML = stock.length ? `
@@ -27,15 +33,15 @@ window.Pages.scrap = (() => {
         и оценка сама идёт в оплату покупки. Цену грамма задаёт владелец в Настройках.</p></div>`;
     const list = el.querySelector('#scrap-list');
     list.innerHTML = ui.table([
-      { title: 'Акт', render: r => `<b>${ui.esc(r.number)}</b>` },
+      { title: 'Акт', render: r => `<b>${ui.highlight(r.number, hq)}</b>` },
       { title: 'Когда', render: r => ui.dt(r.created_at) },
-      { title: 'Клиент', render: r => ui.esc(r.customer_name || '—') },
-      { title: 'Что', render: r => r.items.map(i => `${ui.esc(i.description || 'лом')} ${i.fineness}`).join(', ') },
+      { title: 'Клиент', render: r => r.customer_name ? ui.highlight(r.customer_name, hq) : '—' },
+      { title: 'Что', render: r => r.items.map(i => ui.highlight(`${i.description || 'лом'} ${i.fineness}`, hq)).join(', ') },
       { title: 'Вес', cls: 'num', render: r => г(r.weight) },
       { title: 'В зачёт', cls: 'num strong', render: r => ui.money(r.amount) },
-      { title: 'Чек', render: r => r.sale_number ? `<a href="#/sales/${r.sale_id}">${ui.esc(r.sale_number)}</a>` : '—' },
+      { title: 'Чек', render: r => r.sale_number ? `<a href="#/sales/${r.sale_id}">${ui.highlight(r.sale_number, hq)}</a>` : '—' },
       { title: '', render: r => `<button class="btn btn-sm" data-act-print="${r.id}">${ui.icon('print')} Акт</button>` },
-    ], items, { empty: 'Актов ещё нет' });
+    ], items, { empty: поиск ? `По запросу «${ui.esc(поиск)}» актов не нашлось.` : 'Актов ещё нет' });
     list.querySelectorAll('[data-act-print]').forEach(b => b.addEventListener('click', e => {
       e.stopPropagation();
       const а = items.find(x => x.id === Number(b.dataset.actPrint));
@@ -46,9 +52,19 @@ window.Pages.scrap = (() => {
   return {
     title: 'Старое золото',
     async render(el) {
+      поиск = '';
       el.innerHTML = `<div id="scrap-stock"></div>
-        <div class="card"><h3 class="card-title">Акты приёма</h3><div id="scrap-list"></div></div>`;
+        <div class="card"><h3 class="card-title">Акты приёма</h3>
+          <div class="toolbar">
+            <input type="text" class="input search" id="scrap-search" autocomplete="off"
+              placeholder="Поиск: акт, клиент, телефон, чек…">
+          </div>
+          <div id="scrap-list"></div></div>`;
       App.обновлятьТак(el, () => refresh(el));
+      el.querySelector('#scrap-search').addEventListener('input', ui.debounce(e => {
+        поиск = e.target.value.trim();
+        refresh(el).catch(ui.toastErr);
+      }));
       await refresh(el);
     },
   };
