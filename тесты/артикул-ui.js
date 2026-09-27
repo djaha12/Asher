@@ -80,7 +80,7 @@ const кнопкиВнизу = page => page.$$eval(`${ВЕРХ} .modal-foot butt
   check('закупочная в ответ не попадает', r.data && r.data.existing && !('purchase_price' in r.data.existing));
   r = await зов('POST', '/api/products', { sku: АРТ.toLowerCase(), name: 'Кольцо «строчными»' });
   check('тот же артикул строчными — тоже занят', r.status === 409 && r.data.existing.id === первое, r.status);
-  const второе = (await зов('POST', '/api/products', { sku: АРТ + '-2', name: 'Кольцо «Второе»' })).data.id;
+  const второе = (await зов('POST', '/api/products', { sku: АРТ + '-2', name: 'Кольцо «Второе»', retail_price: 41000 })).data.id;
   r = await зов('POST', '/api/products', { sku: АРТ, name: 'Кольцо «Третье»' });
   check('«-2» занято — предлагаем «-3»', r.status === 409 && r.data.вариант === АРТ + '-3', r.data && r.data.вариант);
   r = await зов('PUT', '/api/products/' + второе, { sku: АРТ });
@@ -105,6 +105,7 @@ const кнопкиВнизу = page => page.$$eval(`${ВЕРХ} .modal-foot butt
   await page.fill('#prod-form [name=sku]', АРТ.toLowerCase());
   await page.fill('#prod-form [name=name]', 'Кольцо «Новая штука»');
   await page.fill('#prod-form [name=weight]', '3.4');
+  await page.fill('#prod-form [name=retail_price]', '52000');
   await page.click(`${ВЕРХ} [data-act=save]`);
   await page.waitForSelector(`${ВЕРХ} .dup-item`, { timeout: 8000 }).catch(() => {});
   check('открылось окно', Boolean(await окноДубля(page)));
@@ -133,7 +134,7 @@ const кнопкиВнизу = page => page.$$eval(`${ВЕРХ} .modal-foot butt
   check('окно закрылось, анкета на месте', !(await окноДубля(page)) && Boolean(await page.$('#prod-form')));
   check('курсор в артикуле', await page.evaluate(() => document.activeElement && document.activeElement.name) === 'sku');
   check('набранное не пропало', await page.inputValue('#prod-form [name=name]') === 'Кольцо «Новая штука»'
-    && await page.inputValue('#prod-form [name=weight]') === '3.4');
+    && await page.inputValue('#prod-form [name=weight]') === '3.4' && await page.inputValue('#prod-form [name=retail_price]') === '52000');
 
   console.log('\n=== 4. «Другое изделие» — записываем «-3», дальше фото и «Сохранить» ===');
   await page.click(`${ВЕРХ} [data-act=save]`);
@@ -142,8 +143,9 @@ const кнопкиВнизу = page => page.$$eval(`${ВЕРХ} .modal-foot butt
   await page.waitForSelector(`${ВЕРХ} #prod-gallery`, { timeout: 10000 }).catch(() => {});
   check('открылась карточка нового изделия с фото', Boolean(await page.$(`${ВЕРХ} #prod-gallery`)));
   const третье = (await сАртикулом(АРТ + '-3'))[0];
-  check('записано с артикулом «-3» и всем набранным', третье && третье.name === 'Кольцо «Новая штука»' && третье.weight === 3.4,
-    третье && [третье.sku, третье.name, третье.weight]);
+  check('записано с артикулом «-3» и всем набранным',
+    третье && третье.name === 'Кольцо «Новая штука»' && третье.weight === 3.4 && третье.retail_price === 52000,
+    третье && [третье.sku, третье.name, третье.weight, третье.retail_price]);
   check('первое изделие не тронуто', (await зов('GET', '/api/products/' + первое)).data.name === 'Кольцо «Первое»');
   const поиск = ((await зов('GET', '/api/products?limit=50&search=' + encodeURIComponent(АРТ))).data.items || []).map(x => x.sku);
   check('поиск по артикулу находит все штуки модели', [АРТ, АРТ + '-2', АРТ + '-3'].every(s => поиск.includes(s)), поиск);

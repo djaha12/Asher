@@ -100,7 +100,11 @@ const вылезло = () => {
   check('новая продажа: не шире экрана', r.ширина <= r.экран && !r.где.length, r);
   await p.fill('#pos-search', 'Кольцо');
   await p.waitForSelector('.search-results .sr-item[data-i]', { timeout: 5000 });
-  await p.dispatchEvent('.search-results .sr-item[data-i]', 'mousedown');
+  // Берём первое, которое касса продаст: изделие без цены она в чек не кладёт,
+  // а такие кольца заводят другие наборы («Не заполнены», «Такой артикул»).
+  const сЦеной = await p.$$eval('.search-results .sr-item[data-i]',
+    els => els.findIndex(el => !el.querySelector('.warn')));
+  await p.dispatchEvent(`.search-results .sr-item[data-i="${Math.max(сЦеной, 0)}"]`, 'mousedown');
   await p.waitForTimeout(500);
   const крестик = await p.$eval('.pos-item [data-del]', el => {
     const r = el.getBoundingClientRect(), окно = el.closest('.modal').getBoundingClientRect();
