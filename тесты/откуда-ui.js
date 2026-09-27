@@ -108,7 +108,10 @@ const найти = (page, имя) => page.evaluate(async q =>
   check('в строке видно, откуда он', строки.length === 1 && строки[0].includes('Сарафанное радио'), строки);
   await page2.selectOption('#cf-source', 'tiktok');
   await page2.waitForTimeout(1200);
-  check('чужой фильтр его прячет', !(await page2.textContent('#cust-list')).includes(ИМЯ));
+  // Смотрим строки, а не весь текст: пустой список теперь повторяет запрос
+  // («По запросу «…» клиентов не нашлось»), и имя в нём есть законно.
+  check('чужой фильтр его прячет',
+    !(await page2.$$eval('#cust-list tbody tr', r => r.map(x => x.textContent).join(' '))).includes(ИМЯ));
   await page2.selectOption('#cf-source', '');
   await page2.waitForTimeout(1200);
 
