@@ -123,7 +123,7 @@ window.Pages.sets = (() => {
             <div class="grow">
               <div style="font-weight:600;font-size:13.5px">${ui.esc(i.name)}</div>
               <div class="muted" style="font-size:12px"><span class="mono">${ui.esc(i.sku)}</span>
-                ${i.metal ? ' · ' + ui.esc(i.metal) : ''}${i.weight ? ' · ' + ui.num(i.weight) + ' г' : ''}</div>
+                ${i.metal ? ' · ' + ui.esc(i.metal) : ''}${i.weight ? ' · ' + ui.num(i.weight, 3) + ' г' : ''}</div>
             </div>
             <div style="font-size:13px">${ui.money(i.retail_price)}</div>
             <button class="btn btn-sm btn-danger" data-rm="${i.id}">×</button>

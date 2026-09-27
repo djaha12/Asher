@@ -75,7 +75,7 @@ window.Passport = (() => {
     const серт = сертификаты(p);
     const свойства = [
       ['Металл', металл(p)],
-      ['Вес изделия', p.weight ? ui.num(p.weight) + ' г' : ''],
+      ['Вес изделия', p.weight ? ui.num(p.weight, 3) + ' г' : ''],
       ['Размер', p.size],
       ['Бриллиант', камень(p)],
       ['Вставки', вставки.length ? '' : p.gem_summary],
@@ -127,7 +127,7 @@ window.Passport = (() => {
       p.name,
       `Артикул: ${p.sku}`,
       металл(p) ? `Металл: ${металл(p)}` : '',
-      p.weight ? `Вес: ${ui.num(p.weight)} г` : '',
+      p.weight ? `Вес: ${ui.num(p.weight, 3)} г` : '',
       p.size ? `Размер: ${p.size}` : '',
       камень(p) ? `Бриллиант: ${камень(p)}` : '',
       ...(вставки.length ? вставки.map(g => 'Вставка: ' + строкаВставки(g)) : [p.gem_summary ? `Вставки: ${p.gem_summary}` : '']),

@@ -124,7 +124,7 @@ window.Pages.products = (() => {
       { title: 'Металл', render: r => ui.esc(metalLabel(r) || '—') },
       { title: 'Бриллиант', render: r => stoneLabel(r)
         ? `<span class="mono">${ui.esc(stoneLabel(r))}</span>` : '<span class="dim">—</span>' },
-      { title: 'Вес', cls: 'num', render: r => r.weight ? ui.num(r.weight) + ' г' : '—' },
+      { title: 'Вес', cls: 'num', render: r => r.weight ? ui.num(r.weight, 3) + ' г' : '—' },
     ];
     if (stores.length > 1) cols.push({ title: 'Точка', render: r => `<span class="dim">${ui.esc(r.store_name || '—')}</span>` });
     if (admin) cols.push({ title: 'Закупка', cls: 'num dim', render: r => ui.money(r.purchase_price) });
@@ -175,7 +175,7 @@ window.Pages.products = (() => {
         <div class="pcard-body">
           <div class="pcard-sku">${ui.highlight(r.sku, подсветка)}</div>
           <div class="pcard-name">${ui.highlight(r.name, подсветка)}</div>
-          <div class="pcard-meta">${[metalLabel(r), r.weight ? ui.num(r.weight) + '\u00a0г' : '', r.size]
+          <div class="pcard-meta">${[metalLabel(r), r.weight ? ui.num(r.weight, 3) + '\u00a0г' : '', r.size]
             .filter(Boolean).map(ui.esc).join(' · ') || '&nbsp;'}</div>
           ${stoneLabel(r) ? `<div class="pcard-stone">${ui.esc(stoneLabel(r))}</div>` : ''}
           <div class="pcard-price">${Number(r.retail_price) > 0 ? ui.money(r.retail_price) : '<span class="warn">цена не указана</span>'}</div>
@@ -211,7 +211,7 @@ window.Pages.products = (() => {
                 <dt>Металл</dt><dd>${ui.esc(metalLabel(p) || '—')}</dd>
                 <dt>Бриллиант</dt><dd>${stoneLabel(p)
                   ? `<span class="strong">${ui.esc(stoneLabel(p))}</span>` : '—'}</dd>
-                <dt>Вес изделия</dt><dd>${p.weight ? ui.num(p.weight) + ' г' : '—'}</dd>
+                <dt>Вес изделия</dt><dd>${p.weight ? ui.num(p.weight, 3) + ' г' : '—'}</dd>
                 <dt>Размер</dt><dd>${ui.esc(p.size || '—')}</dd>
                 <dt>Статус</dt><dd>${ui.badge('status', p.status)}${p.reserved_for_name ? ' за ' + ui.esc(p.reserved_for_name) : ''}
                   ${p.status === 'reserved' && p.reserved_until
@@ -540,7 +540,7 @@ window.Pages.products = (() => {
       metalLabel(p) ? `Металл: ${metalLabel(p)}` : '',
       stoneLabel(p) ? `Бриллиант: ${stoneLabel(p)}` : '',
       p.gem_summary && !stoneLabel(p) ? `Вставки: ${p.gem_summary}` : '',
-      p.weight ? `Вес: ${ui.num(p.weight)} г` : '',
+      p.weight ? `Вес: ${ui.num(p.weight, 3)} г` : '',
       p.size ? `Размер: ${p.size}` : '',
       `Цена: ${ui.money(p.retail_price)}`,
       p.status === 'reserved' ? 'Сейчас в резерве — уточните у продавца' : '',
@@ -795,7 +795,7 @@ window.Pages.products = (() => {
         <td><input class="input" name="name" placeholder="Кольцо с бриллиантом" style="min-width:160px"></td>
         <td><input class="input" name="metal" value="${ui.esc(умолч.metal)}" list="metal-list" placeholder="Белое золото" style="min-width:110px"></td>
         <td><input class="input" name="fineness" value="${ui.esc(умолч.fineness)}" list="fineness-list" placeholder="750" style="width:64px"></td>
-        <td><input class="input" name="weight" type="number" step="0.01" min="0" placeholder="4.2" style="width:76px"></td>
+        <td><input class="input" name="weight" type="number" step="0.001" min="0" placeholder="4.2" style="width:76px"></td>
         <td><input class="input" name="purchase_price" type="number" step="0.01" min="0" placeholder="закупка" style="width:110px"></td>
         <td><input class="input" name="retail_price" type="number" step="1" min="0" placeholder="продажа" style="width:110px"></td>
         <td><button type="button" class="btn btn-sm btn-danger" data-del>×</button></td>
@@ -1093,7 +1093,7 @@ window.Pages.products = (() => {
     return new Promise(resolve => {
       let ответ = null;
       const приметы = [д.sku, [д.metal, д.fineness].filter(Boolean).join(' '),
-        д.weight ? ui.num(д.weight) + '\u00a0г' : '', д.size ? 'размер ' + д.size : ''].filter(Boolean);
+        д.weight ? ui.num(д.weight, 3) + '\u00a0г' : '', д.size ? 'размер ' + д.size : ''].filter(Boolean);
       const m = ui.modal({
         title: `Артикул «${д.sku}» уже есть`,
         size: 'sm',
@@ -1168,7 +1168,8 @@ window.Pages.products = (() => {
         ${кнопкиВыбора('fineness', 'Проба', варианты.fineness, сейчас('fineness'), 'fineness-list')}
         <!-- Главный бриллиант: то, по чему изделие ищут, сравнивают и оценивают -->
         <div class="form-grid">
-          <label class="field"><span>Вес изделия, г</span><input name="weight" type="number" step="0.01" min="0" value="${p.weight || ''}"></label>
+          <!-- Шаг 0,001: весы показывают вес до тысячной — «3.324» должно помещаться -->
+          <label class="field"><span>Вес изделия, г</span><input name="weight" type="number" step="0.001" min="0" value="${p.weight || ''}"></label>
           <label class="field"><span>Каратность</span>
             <input name="carat" type="number" step="0.001" min="0" value="${p.carat || ''}" placeholder="0,50"></label>
         </div>
@@ -1274,7 +1275,7 @@ window.Pages.products = (() => {
         if (!weight) { ui.toast('Сначала укажите вес изделия', true); return; }
         const sum = Math.round(weight * (gramPrice + workPrice));
         form.querySelector('[name=retail_price]').value = sum;
-        ui.toast(`${ui.num(weight)} г × ${ui.money(gramPrice + workPrice)} = ${ui.money(sum)}` +
+        ui.toast(`${ui.num(weight, 3)} г × ${ui.money(gramPrice + workPrice)} = ${ui.money(sum)}` +
           ' — добавьте стоимость камня, если нужно');
       });
     }

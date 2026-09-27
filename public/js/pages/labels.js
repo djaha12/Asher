@@ -53,7 +53,7 @@ window.Pages.labels = (() => {
     const metal = [p.metal, p.fineness].filter(Boolean).join(' ');
     const stone = [p.carat ? ui.num(p.carat) + ' ct' : '', p.color, p.clarity]
       .filter(Boolean).join(' · ');
-    const meta = [o.metal ? metal : '', o.weight && p.weight ? ui.num(p.weight) + ' г' : '', p.size]
+    const meta = [o.metal ? metal : '', o.weight && p.weight ? ui.num(p.weight, 3) + ' г' : '', p.size]
       .filter(Boolean).join(' · ');
     return `
       <div class="jlabel">
@@ -120,7 +120,7 @@ window.Pages.labels = (() => {
       { title: 'Артикул', render: r => `<span class="mono strong">${ui.highlight(r.sku, hq)}</span>` },
       { title: 'Наименование', render: r => ui.highlight(r.name, hq) },
       { title: 'Металл', render: r => ui.esc(r.metal || '—') },
-      { title: 'Вес', cls: 'num', render: r => r.weight ? ui.num(r.weight) + ' г' : '—' },
+      { title: 'Вес', cls: 'num', render: r => r.weight ? ui.num(r.weight, 3) + ' г' : '—' },
       // Изделие могли завести без цены — на бирке тогда цены нет, а не «0 сом».
       { title: 'Цена', cls: 'num strong', render: r => Number(r.retail_price) > 0
         ? ui.money(r.retail_price) : '<span class="warn">не указана</span>' },

@@ -206,7 +206,7 @@ window.Pages.inventory = (() => {
       { title: 'Артикул', render: r => `<span class="mono strong">${ui.esc(r.sku)}</span>` },
       { title: 'Наименование', render: r => ui.esc(r.name) },
       { title: 'Металл', render: r => ui.esc(r.metal || '—') },
-      { title: 'Вес', cls: 'num', render: r => r.weight ? ui.num(r.weight) + ' г' : '—' },
+      { title: 'Вес', cls: 'num', render: r => r.weight ? ui.num(r.weight, 3) + ' г' : '—' },
       { title: 'Цена', cls: 'num', render: r => ui.money(r.retail_price) },
     ];
     if (withRemove) {
