@@ -491,8 +491,46 @@ window.ui = (() => {
     return `https://wa.me/${normalized}?text=${encodeURIComponent(text || '')}`;
   }
 
+  /*
+   * Таблицы на телефоне — карточками. Таблица в семь столбцов на экране
+   * шириной с ладонь обрезалась справа: в «Продажах» не было видно ни суммы,
+   * ни статуса чека, и никто не догадывался, что её можно тянуть вбок.
+   * Здесь каждой ячейке подписываем её столбец (data-label), а стили для
+   * узкого экрана (app.css, «Таблицы карточками») раскладывают строку
+   * столбиком: первая ячейка — заголовком, остальные — «подпись: значение».
+   * Подписываем все таблицы .tbl, и те, что появятся потом, — следим за
+   * страницей: списки перерисовываются, строки приёмки добавляются на ходу.
+   */
+  function подписатьТаблицы(root = document) {
+    for (const table of root.querySelectorAll('table.tbl')) {
+      const шапка = table.tHead && table.tHead.rows[0]
+        ? [...table.tHead.rows[0].cells].flatMap(th => Array(th.colSpan || 1).fill(th.textContent.trim()))
+        : [];
+      table.classList.add('stack');
+      for (const строка of table.querySelectorAll(':scope > tbody > tr, :scope > tfoot > tr')) {
+        let столбец = 0;
+        for (const ячейка of строка.cells) {
+          if (!ячейка.hasAttribute('data-label')) {
+            ячейка.setAttribute('data-label', шапка[столбец] || '');
+            // «Долг: —» на телефоне — лишняя строка: пустое прячем (только в карточке).
+            if (/^[—–-]?$/.test(ячейка.textContent.trim()) && !ячейка.querySelector('input, select, button, img, svg')) {
+              ячейка.classList.add('stack-empty');
+            }
+          }
+          столбец += ячейка.colSpan || 1;
+        }
+      }
+    }
+  }
+  let подписьЖдёт = false;
+  new MutationObserver(() => {
+    if (подписьЖдёт) return;
+    подписьЖдёт = true;
+    requestAnimationFrame(() => { подписьЖдёт = false; подписатьТаблицы(); });
+  }).observe(document.documentElement, { childList: true, subtree: true });
+
   return { esc, icon, money, moneyRich, num, dt, dateOnly, monthName, badge, L, modal, confirmDialog, toast, toastErr,
-    table, bindRows, formValues, debounce, currentTheme, applyTheme, toggleTheme, lightbox,
+    table, bindRows, formValues, debounce, currentTheme, applyTheme, toggleTheme, lightbox, подписатьТаблицы,
     barcodeSvg, photoUrl, highlight, whatsappLink, normalizePhone, sourcePicker, bindSourcePicker,
     естьВведённое, выборПриДубле, locale: loc };
 })();

@@ -162,7 +162,7 @@ window.Pages.products = (() => {
         <div class="pcard-body">
           <div class="pcard-sku">${ui.highlight(r.sku, filters.search)}</div>
           <div class="pcard-name">${ui.highlight(r.name, filters.search)}</div>
-          <div class="pcard-meta">${[metalLabel(r), r.weight ? ui.num(r.weight) + ' г' : '', r.size]
+          <div class="pcard-meta">${[metalLabel(r), r.weight ? ui.num(r.weight) + '\u00a0г' : '', r.size]
             .filter(Boolean).map(ui.esc).join(' · ') || '&nbsp;'}</div>
           ${stoneLabel(r) ? `<div class="pcard-stone">${ui.esc(stoneLabel(r))}</div>` : ''}
           <div class="pcard-price">${Number(r.retail_price) > 0 ? ui.money(r.retail_price) : '<span class="warn">цена не указана</span>'}</div>
@@ -794,7 +794,8 @@ window.Pages.products = (() => {
             <label class="field"><span>Точка продаж</span>
               <select name="store_id" id="rc-store"></select></label>
           </div>
-          <div class="form-grid-3" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 12px">
+          <!-- Три столбца — только на широком экране: на телефоне .form-grid-3 встаёт в один -->
+          <div class="form-grid-3" style="gap:0 12px">
             <label class="field"><span>Номер накладной</span><input name="doc_number" placeholder="№ 415"></label>
             <label class="field"><span>Дата накладной</span><input name="doc_date" type="date"></label>
             <label class="field"><span>Оплатить до</span><input name="due_date" type="date"></label>
@@ -888,7 +889,9 @@ window.Pages.products = (() => {
       m.body.querySelector('#rc-store').innerHTML =
         точки.map(s => `<option value="${s.id}"${s.is_default ? ' selected' : ''}>${ui.esc(s.name)}</option>`).join('');
       форма.querySelector('[name=doc_date]').value = new Date().toISOString().slice(0, 10);
-      добавить(5);
+      // На телефоне строка приёмки — целая карточка полей: начинаем с одной,
+      // следующая добавляется сама, как только заполняют последнюю.
+      добавить(window.matchMedia('(max-width: 600px)').matches ? 1 : 5);
     })();
 
     m.foot.querySelector('[data-act=cancel]').onclick = m.close;
