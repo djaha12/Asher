@@ -424,7 +424,10 @@ const routes = [
       if (!s) throw new ApiError(404, 'Поставщик не найден');
       const name = body.name !== undefined ? String(body.name).trim() : s.name;
       if (!name) throw new ApiError(400, 'Название поставщика обязательно');
-      const другой = db.prepare('SELECT name FROM suppliers WHERE nlower(name) = nlower(?) AND id != ?').get(name, id);
+      // Только когда название меняют: дубль с прежних времён иначе не дал бы
+      // поправить даже телефон, а переименовать его — и есть выход.
+      const другой = name.trim() !== String(s.name).trim()
+        && db.prepare('SELECT name FROM suppliers WHERE nlower(name) = nlower(?) AND id != ?').get(name, id);
       if (другой) throw new ApiError(400, `Поставщик «${другой.name}» уже есть — такое название занято`);
       db.prepare('UPDATE suppliers SET name = ?, contact = ?, phone = ?, notes = ? WHERE id = ?')
         .run(name,

@@ -174,7 +174,9 @@ const routes = [
         const price = body.price !== undefined ? round2(body.price) : existing.price;
         if (price < 0) throw new ApiError(400, 'Цена не может быть отрицательной');
         const sku = body.sku !== undefined ? String(body.sku).trim() : existing.sku;
-        checkSkuFree(sku, id);
+        // Артикул не меняли — не проверяем: совпадение с прежних времён
+        // иначе не дало бы поправить даже цену комплекта.
+        if (String(sku || '').trim() !== String(existing.sku || '').trim()) checkSkuFree(sku, id);
         db.prepare('UPDATE product_sets SET name = ?, sku = ?, price = ?, note = ? WHERE id = ?')
           .run(name, sku, price,
             body.note !== undefined ? String(body.note).trim() : existing.note,

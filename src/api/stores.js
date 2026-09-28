@@ -59,7 +59,9 @@ const routes = [
       const s = requireStore(id);
       const name = body.name !== undefined ? String(body.name).trim() : s.name;
       if (!name) throw new ApiError(400, 'Название точки обязательно');
-      const другая = db.prepare('SELECT name FROM stores WHERE nlower(name) = nlower(?) AND id != ?').get(name, id);
+      // Только когда название меняют — как у поставщиков.
+      const другая = name.trim() !== String(s.name).trim()
+        && db.prepare('SELECT name FROM stores WHERE nlower(name) = nlower(?) AND id != ?').get(name, id);
       if (другая) throw new ApiError(400, `Точка «${другая.name}» уже есть — такое название занято`);
       db.prepare('UPDATE stores SET name = ?, address = ?, phone = ? WHERE id = ?').run(
         name,
