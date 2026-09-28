@@ -930,21 +930,26 @@ function ensureDefaults() {
   }
 
   /*
-   * Категория «Буквенные подвески» — подвески в виде буквы, сразу после
-   * «Подвесок». Добавляем один раз: удалит владелец — не вернём; своя
-   * категория с «букв» в названии уже есть — не дублируем. Здесь, а не в
-   * migrate(): в новой базе стандартные категории заводятся выше.
+   * Категории, которые владелец попросил добавить в работающую базу, — каждая
+   * один раз и сразу после родственной (её нет — в конец): «Буквенные
+   * подвески» — после «Подвесок», «Пусеты» — после «Серёг». Удалит владелец —
+   * не вернём; своя категория с тем же словом в названии уже есть — не
+   * дублируем. Здесь, а не в migrate(): в новой базе стандартные категории
+   * заводятся выше.
    */
-  if (!getSetting('added_letter_category')) {
-    if (!db.prepare(`SELECT 1 FROM categories WHERE nlower(name) LIKE '%букв%'`).get()) {
-      const подвески = db.prepare(`SELECT sort FROM categories WHERE nlower(name) = 'подвески'`).get();
-      const место = подвески ? подвески.sort + 1
+  const категорияОдинРаз = (флаг, имя, после, слово) => {
+    if (getSetting(флаг)) return;
+    if (!db.prepare('SELECT 1 FROM categories WHERE nlower(name) LIKE ?').get(`%${слово}%`)) {
+      const сосед = db.prepare('SELECT sort FROM categories WHERE nlower(name) = ?').get(после);
+      const место = сосед ? сосед.sort + 1
         : db.prepare('SELECT COALESCE(MAX(sort), 0) + 1 AS m FROM categories').get().m;
       db.prepare('UPDATE categories SET sort = sort + 1 WHERE sort >= ?').run(место);
-      db.prepare('INSERT INTO categories (name, sort) VALUES (?, ?)').run('Буквенные подвески', место);
+      db.prepare('INSERT INTO categories (name, sort) VALUES (?, ?)').run(имя, место);
     }
-    setSetting('added_letter_category', '1');
-  }
+    setSetting(флаг, '1');
+  };
+  категорияОдинРаз('added_letter_category', 'Буквенные подвески', 'подвески', 'букв');
+  категорияОдинРаз('added_studs_category', 'Пусеты', 'серьги', 'пусет');
 }
 
 migrate();
