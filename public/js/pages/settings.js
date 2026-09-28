@@ -82,7 +82,7 @@ window.Pages.settings = (() => {
                     autocapitalize="characters" value="${ui.esc(s.default_clarity || '')}"></label>
               </div>
               <datalist id="st-metal-list"><option>Белое золото</option><option>Жёлтое золото</option>
-                <option>Красное золото</option></datalist>
+                <option>Розовое золото</option></datalist>
               <datalist id="st-color-list">${['D', 'E', 'F', 'G', 'H', 'I', 'J'].map(v => `<option>${v}</option>`).join('')}</datalist>
               <datalist id="st-clarity-list">${['IF', 'VVS1', 'VVS2', 'VS1', 'VS2', 'SI1', 'SI2'].map(v => `<option>${v}</option>`).join('')}</datalist>
               <p class="form-hint">Сразу выбраны в анкете нового изделия (металл и проба — ещё и
