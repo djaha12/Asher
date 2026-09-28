@@ -365,7 +365,16 @@ window.Pages.settings = (() => {
         if (isNew) id = (await api.post('/api/suppliers', v)).id;
         else await api.put('/api/suppliers/' + s.id, v);
         m.close(); onChange && onChange(id);
-      } catch (e) { ui.toastErr(e); }
+      } catch (e) {
+        // Такой уже заведён (хоть с другими буквами: «азия голд» — «Азия Голд») —
+        // берём его, а не заводим двойника.
+        if (isNew && e.status === 409 && e.data && e.data.existing) {
+          ui.toast(`Поставщик «${e.data.existing.name}» уже есть — второй не заводим`);
+          m.close(); onChange && onChange(e.data.existing.id);
+          return;
+        }
+        ui.toastErr(e);
+      }
     };
   }
 

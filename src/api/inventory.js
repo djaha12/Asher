@@ -124,7 +124,7 @@ const routes = [
       if (!code) throw new ApiError(400, 'Пустой код');
 
       const поКоду = к => db.prepare(
-        `SELECT * FROM products WHERE nlower(sku) = nlower(?) OR barcode = ? LIMIT 1`
+        `SELECT * FROM products WHERE nlower(sku) = nlower(?) OR (barcode != '' AND nlower(barcode) = nlower(?)) LIMIT 1`
       ).get(к, к);
       // Сканер-клавиатура при русской раскладке печатает «ФЫ-00120» вместо
       // «AS-00120» — пробуем тот же код в другой раскладке.

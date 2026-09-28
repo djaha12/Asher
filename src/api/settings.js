@@ -365,8 +365,9 @@ const routes = [
     handler: ({ body, session }) => {
       const name = String(body.name || '').trim();
       if (!name) throw new ApiError(400, 'Название категории обязательно');
-      const dup = db.prepare('SELECT 1 FROM categories WHERE name = ?').get(name);
-      if (dup) throw new ApiError(400, 'Такая категория уже есть');
+      // Большие и маленькие буквы — не повод завести вторую: «кольца» — это «Кольца».
+      const dup = db.prepare('SELECT name FROM categories WHERE nlower(name) = nlower(?)').get(name);
+      if (dup) throw new ApiError(400, `Такая категория уже есть: «${dup.name}»`);
       const max = db.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM categories').get().m;
       const info = db.prepare('INSERT INTO categories (name, sort) VALUES (?, ?)').run(name, Number(max) + 1);
       audit(session.userId, 'create', 'category', Number(info.lastInsertRowid), name);
@@ -388,6 +389,11 @@ const routes = [
   },
 
   // --- Поставщики ---
+  /*
+   * Один поставщик — одна запись: «азия голд» — это «Азия Голд». Раньше
+   * повтор не проверялся вовсе, и долг одного поставщика расползался по
+   * двум карточкам. Отвечаем, кто уже заведён, — окно выберет его.
+   */
   {
     method: 'GET', path: '/api/suppliers',
     handler: () => ({
@@ -402,6 +408,8 @@ const routes = [
     handler: ({ body, session }) => {
       const name = String(body.name || '').trim();
       if (!name) throw new ApiError(400, 'Название поставщика обязательно');
+      const есть = db.prepare('SELECT id, name FROM suppliers WHERE nlower(name) = nlower(?)').get(name);
+      if (есть) throw new ApiError(409, `Поставщик «${есть.name}» уже есть`, { existing: есть });
       const info = db.prepare('INSERT INTO suppliers (name, contact, phone, notes) VALUES (?,?,?,?)')
         .run(name, String(body.contact || ''), String(body.phone || ''), String(body.notes || ''));
       audit(session.userId, 'create', 'supplier', Number(info.lastInsertRowid), name);
@@ -416,6 +424,8 @@ const routes = [
       if (!s) throw new ApiError(404, 'Поставщик не найден');
       const name = body.name !== undefined ? String(body.name).trim() : s.name;
       if (!name) throw new ApiError(400, 'Название поставщика обязательно');
+      const другой = db.prepare('SELECT name FROM suppliers WHERE nlower(name) = nlower(?) AND id != ?').get(name, id);
+      if (другой) throw new ApiError(400, `Поставщик «${другой.name}» уже есть — такое название занято`);
       db.prepare('UPDATE suppliers SET name = ?, contact = ?, phone = ?, notes = ? WHERE id = ?')
         .run(name,
           body.contact !== undefined ? String(body.contact) : s.contact,

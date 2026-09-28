@@ -181,8 +181,8 @@ function следующийАртикул(занятые = new Set()) {
   for (const [пр, п] of поПрефиксу) if (!лучший || п.сколько > лучший.сколько) лучший = { пр, ...п };
   if (лучший) { префикс = лучший.пр; номер = лучший.наибольший + 1; ширина = лучший.ширина; }
   const занят = sku => занятые.has(sku.toLowerCase())
-    || db.prepare('SELECT 1 FROM products WHERE sku = ? COLLATE NOCASE').get(sku)
-    || db.prepare('SELECT 1 FROM product_sets WHERE sku = ? COLLATE NOCASE').get(sku);
+    || db.prepare('SELECT 1 FROM products WHERE nlower(sku) = nlower(?)').get(sku)
+    || db.prepare('SELECT 1 FROM product_sets WHERE nlower(sku) = nlower(?)').get(sku);
   for (;; номер++) {
     const sku = префикс + String(номер).padStart(ширина, '0');
     if (!занят(sku)) return sku;
@@ -608,7 +608,7 @@ const routes = [
       if (дубль) отказЗаАртикул(дубль, data.sku);
       // Артикул сканируется одним кодом и в кассе, и в инвентаризации,
       // поэтому не должен совпадать с артикулом комплекта.
-      const dupSet = db.prepare('SELECT name FROM product_sets WHERE sku = ? COLLATE NOCASE').get(data.sku);
+      const dupSet = db.prepare('SELECT name FROM product_sets WHERE nlower(sku) = nlower(?)').get(data.sku);
       if (dupSet) throw new ApiError(400, `Артикул «${data.sku}» занят комплектом «${dupSet.name}»`);
       /*
        * Изделие без точки продаж — вещь-невидимка: в общем складе оно есть,

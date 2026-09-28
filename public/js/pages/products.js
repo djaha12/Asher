@@ -1080,14 +1080,18 @@ window.Pages.products = (() => {
         suppliers = await api.get('/api/suppliers').then(r => r.items).catch(() => suppliers);
         const новый = suppliers.find(x => x.id === id);
         if (!новый) return;
-        const опция = document.createElement('option');
-        опция.value = String(новый.id);
-        опция.textContent = новый.name;
-        select.insertBefore(опция, select.querySelector(`option[value="${НОВЫЙ_ПОСТАВЩИК}"]`));
+        // Уже был в списке (набрали его другими буквами) — просто выбираем.
+        const был = select.querySelector(`option[value="${новый.id}"]`);
+        if (!был) {
+          const опция = document.createElement('option');
+          опция.value = String(новый.id);
+          опция.textContent = новый.name;
+          select.insertBefore(опция, select.querySelector(`option[value="${НОВЫЙ_ПОСТАВЩИК}"]`));
+        }
         select.value = String(новый.id);
         прежний = select.value;
         select.dispatchEvent(new Event('change'));
-        ui.toast(`Поставщик «${новый.name}» добавлен и выбран`);
+        if (!был) ui.toast(`Поставщик «${новый.name}» добавлен и выбран`);
       });
     });
   }

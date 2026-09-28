@@ -41,6 +41,9 @@ const routes = [
     handler: ({ body, session }) => {
       const name = String(body.name || '').trim();
       if (!name) throw new ApiError(400, 'Название точки обязательно');
+      // «центр» — это «Центр»: две точки с одним названием путают остатки.
+      const есть = db.prepare('SELECT name FROM stores WHERE nlower(name) = nlower(?)').get(name);
+      if (есть) throw new ApiError(400, `Точка «${есть.name}» уже есть`);
       const max = db.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM stores').get().m;
       const info = db.prepare('INSERT INTO stores (name, address, phone, is_default, sort) VALUES (?,?,?,0,?)')
         .run(name, String(body.address || '').trim(), String(body.phone || '').trim(), Number(max) + 1);
@@ -56,6 +59,8 @@ const routes = [
       const s = requireStore(id);
       const name = body.name !== undefined ? String(body.name).trim() : s.name;
       if (!name) throw new ApiError(400, 'Название точки обязательно');
+      const другая = db.prepare('SELECT name FROM stores WHERE nlower(name) = nlower(?) AND id != ?').get(name, id);
+      if (другая) throw new ApiError(400, `Точка «${другая.name}» уже есть — такое название занято`);
       db.prepare('UPDATE stores SET name = ?, address = ?, phone = ? WHERE id = ?').run(
         name,
         body.address !== undefined ? String(body.address).trim() : s.address,

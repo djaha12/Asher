@@ -83,10 +83,11 @@ function requireSet(id) {
 function checkSkuFree(sku, setId) {
   const code = String(sku || '').trim();
   if (!code) return;
-  const product = db.prepare('SELECT name FROM products WHERE sku = ? COLLATE NOCASE').get(code);
+  // COLLATE NOCASE знает только латиницу — «к-1» и «К-1» он считал разными.
+  const product = db.prepare('SELECT name FROM products WHERE nlower(sku) = nlower(?)').get(code);
   if (product) throw new ApiError(400, `Артикул «${code}» занят изделием «${product.name}»`);
   const other = db.prepare(
-    'SELECT name FROM product_sets WHERE sku = ? COLLATE NOCASE AND id != ?'
+    'SELECT name FROM product_sets WHERE nlower(sku) = nlower(?) AND id != ?'
   ).get(code, setId || 0);
   if (other) throw new ApiError(400, `Артикул «${code}» занят комплектом «${other.name}»`);
 }

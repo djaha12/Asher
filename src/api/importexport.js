@@ -2,6 +2,7 @@
 const { db, nowIso, round2, audit, transaction } = require('../db');
 const { ApiError } = require('./util');
 const { SOURCES } = require('../customer-sources');
+const { свернуть } = require('../поиск');
 
 // ---------- Разбор CSV ----------
 
@@ -233,8 +234,27 @@ function importCsv(body, userId) {
         db.prepare('SELECT id, name FROM categories').all().map(c => [c.name.toLowerCase(), c.id])
       );
       const insCat = db.prepare('INSERT INTO categories (name, sort) VALUES (?, 999)');
-      const skuExists = db.prepare('SELECT 1 FROM products WHERE sku = ?');
-      const findBySku = db.prepare('SELECT * FROM products WHERE sku = ?');
+      /*
+       * Артикул — без учёта регистра: «as-00120» в новой выгрузке — это
+       * «AS-00120», а не новое изделие-двойник. Каталог сворачиваем один раз,
+       * а не на каждой строке: выгрузка 1С в тысячи строк иначе перебирала бы
+       * весь склад тысячи раз. Точное написание, если есть, — первым.
+       */
+      const поКлючу = new Map();   // свёрнутый артикул → [{ id, sku }]
+      const запомнить = (id, sku) => {
+        const к = свернуть(sku);
+        if (!поКлючу.has(к)) поКлючу.set(к, []);
+        поКлючу.get(к).push({ id, sku });
+      };
+      for (const r of db.prepare('SELECT id, sku FROM products').all()) запомнить(r.id, r.sku);
+      const поId = db.prepare('SELECT * FROM products WHERE id = ?');
+      const skuExists = { get: sku => поКлючу.has(свернуть(sku)) };
+      const findBySku = {
+        get: sku => {
+          const все = поКлючу.get(свернуть(sku));
+          return все ? поId.get((все.find(x => x.sku === sku) || все[0]).id) : undefined;
+        },
+      };
       // Импортированный товар кладём на выбранную точку (по умолчанию — основную),
       // иначе он не попадёт ни в остатки точки, ни в инвентаризацию.
       const targetStore = body.store_id
@@ -327,7 +347,7 @@ function importCsv(body, userId) {
           continue;
         }
 
-        ins.run(sku, pick(row, mapping, 'barcode') || '', name, categoryId,
+        const новое = ins.run(sku, pick(row, mapping, 'barcode') || '', name, categoryId,
           pick(row, mapping, 'metal') || '', pick(row, mapping, 'fineness') || '',
           parseNumber(pick(row, mapping, 'weight')), pick(row, mapping, 'size') || '',
           parseNumber(pick(row, mapping, 'carat')),
@@ -337,6 +357,8 @@ function importCsv(body, userId) {
           round2(parseNumber(pick(row, mapping, 'purchase_price'))),
           round2(parseNumber(pick(row, mapping, 'retail_price'))),
           pick(row, mapping, 'description') || '', targetStore, nowIso());
+        // Тот же артикул ниже в этой же выгрузке — уже не новое изделие.
+        запомнить(Number(новое.lastInsertRowid), sku);
         created++;
       }
     } else {
