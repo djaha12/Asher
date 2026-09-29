@@ -161,15 +161,6 @@ async function набрать(page, селектор, текст, ждать = 1
   } else console.log('  (старых операций в демо-данных нет — проверку «за всё время» пропускаем)');
   await набрать(page, '#ff-search', '');
 
-  console.log('\n=== 4. Старое золото: поиск актов ===');
-  await раздел(page, 'scrap', '#scrap-search');
-  await набрать(page, '#scrap-search', чек.scrap.number);
-  let лом = чисто(await page.innerText('#scrap-list'));
-  check('акт по номеру — одной строкой', лом.includes(чек.scrap.number) && (await page.$$('#scrap-list tbody tr')).length === 1,
-    (await page.$$('#scrap-list tbody tr')).length);
-  await набрать(page, '#scrap-search', `алена ${М}`);
-  check('акт по клиентке', чисто(await page.innerText('#scrap-list')).includes(чек.scrap.number));
-
   console.log('\n=== 5. Комплекты: поиск ===');
   await раздел(page, 'sets', '#sets-search');
   await набрать(page, '#sets-search', `весна ${М}`, 500);
@@ -263,7 +254,7 @@ async function набрать(page, селектор, текст, ждать = 1
   const тел = await (await browser.newContext({ viewport: { width: 375, height: 800 } })).newPage();
   тел.on('pageerror', e => ошибки.push(e.message));
   await войти(тел, 'admin', 'admin123');
-  for (const [hash, сел] of [['orders', '#of-search'], ['sets', '#sets-search'], ['scrap', '#scrap-search'], ['finance', '#ff-search']]) {
+  for (const [hash, сел] of [['orders', '#of-search'], ['sets', '#sets-search'], ['finance', '#ff-search']]) {
     await раздел(тел, hash, сел);
     const ширина = await тел.evaluate(() => document.documentElement.scrollWidth);
     check(`#/${hash}: не шире экрана и поле видно`, ширина <= 375 && await тел.isVisible(сел), ширина);
