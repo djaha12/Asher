@@ -13,7 +13,6 @@ window.App = (() => {
     { key: 'debts', title: 'Долги', ico: 'clock' },
     { key: 'orders', title: 'Заказы и ремонт', ico: 'wrench' },
     { section: 'Склад' },
-    { key: 'sets', title: 'Комплекты', ico: 'gift' },
     { key: 'inventory', title: 'Инвентаризация', ico: 'clipboard' },
     { key: 'labels', title: 'Ценники и бирки', ico: 'tag' },
     { section: 'Управление', admin: true },
@@ -415,7 +414,8 @@ window.App = (() => {
     // поэтому список читается одинаково, чем бы ни оказалась находка.
     function flatten(data) {
       const out = [];
-      for (const g of data.groups || []) {
+      // Комплекты владелец убрал — их раздела нет, и в поиске их не показываем.
+      for (const g of (data.groups || []).filter(г => г.key !== 'sets')) {
         const start = out.length;
         for (const r of g.items) {
           if (g.key === 'products') {
@@ -454,14 +454,9 @@ window.App = (() => {
               line2: ui.esc(r.what || 'лом') + ` · ${ui.num(r.weight, 3)} г` +
                 (r.sale_number ? ` · чек <span class="mono">${ui.esc(r.sale_number)}</span>` : ''),
               right: money(r.amount), href: r.sale_id ? '#/sales/' + r.sale_id : '#/scrap' });
-          } else {
-            out.push({ group: g.title, icon: 'gift',
-              line1: ui.esc(r.name),
-              line2: `<span class="mono">${ui.esc(r.sku)}</span> · изделий: ${r.items_count}`,
-              right: money(r.price), href: '#/sets/' + r.id });
           }
         }
-        if (g.more) out[start].moreAfterGroup = g.title;
+        if (g.more && out[start]) out[start].moreAfterGroup = g.title;
       }
       return out;
     }

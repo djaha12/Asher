@@ -38,7 +38,7 @@ const BAD_WORDS = /Закупочн|Закупка в валюте|Наценк�
   const pages = [
     ['dashboard', 'Главная'], ['products', 'Каталог'], ['sales', 'Продажи'],
     ['customers', 'Клиенты'], ['orders', 'Заказы'], ['debts', 'Долги'],
-    ['inventory', 'Инвентаризация'], ['labels', 'Бирки'], ['sets', 'Комплекты'],
+    ['inventory', 'Инвентаризация'], ['labels', 'Бирки'],
     ['settings', 'Настройки'],
   ];
   for (const [key, title] of pages) {

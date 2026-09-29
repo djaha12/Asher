@@ -4,8 +4,7 @@ const ВЫВОД = require('node:path').join(__dirname, '.вывод');
 /*
  * Поиск глазами продавца и владельца — в каждом разделе.
  *
- * Поле поиска теперь есть и в заказах, и в финансах, и в старом золоте, и в
- * комплектах. Везде одни правила: слова в любом порядке, «ё», окончания,
+ * Поле поиска теперь есть и в заказах, и в финансах. Везде одни правила: слова в любом порядке, «ё», окончания,
  * не та раскладка — с подписью «найдено по …». Найденное подсвечено.
  * Старый чек при периоде «30 дней» не теряется: система ищет за всё время
  * и говорит об этом. Касса понимает артикул, набранный в русской раскладке.
@@ -161,18 +160,6 @@ async function набрать(page, селектор, текст, ждать = 1
   } else console.log('  (старых операций в демо-данных нет — проверку «за всё время» пропускаем)');
   await набрать(page, '#ff-search', '');
 
-  console.log('\n=== 5. Комплекты: поиск ===');
-  await раздел(page, 'sets', '#sets-search');
-  await набрать(page, '#sets-search', `весна ${М}`, 500);
-  check('комплект по названию — одна карточка', (await page.$$('#sets-list [data-set]')).length === 1);
-  await набрать(page, '#sets-search', `${L}-3`, 500);
-  check('комплект по артикулу изделия внутри', (await page.$$(`#sets-list [data-set="${комплект.id}"]`)).length === 1);
-  await набрать(page, '#sets-search', п.другаяРаскладка(`весна ${М}`), 500);
-  check('не та раскладка — нашли и подписали', (await page.$$('#sets-list [data-set]')).length === 1
-    && /найдено по «весна/.test(await page.textContent('.search-fix').catch(() => '')));
-  await набрать(page, '#sets-search', `нет такого ${М}`, 500);
-  check('пусто — так и сказано', /комплектов не нашлось/.test(await page.innerText('#sets-list')));
-
   console.log('\n=== 6. Долги ===');
   await раздел(page, 'debts', '#d-search');
   await набрать(page, '#d-search', `гулнара ${М}`, 600);
@@ -254,7 +241,7 @@ async function набрать(page, селектор, текст, ждать = 1
   const тел = await (await browser.newContext({ viewport: { width: 375, height: 800 } })).newPage();
   тел.on('pageerror', e => ошибки.push(e.message));
   await войти(тел, 'admin', 'admin123');
-  for (const [hash, сел] of [['orders', '#of-search'], ['sets', '#sets-search'], ['finance', '#ff-search']]) {
+  for (const [hash, сел] of [['orders', '#of-search'], ['finance', '#ff-search']]) {
     await раздел(тел, hash, сел);
     const ширина = await тел.evaluate(() => document.documentElement.scrollWidth);
     check(`#/${hash}: не шире экрана и поле видно`, ширина <= 375 && await тел.isVisible(сел), ширина);

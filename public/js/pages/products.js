@@ -236,7 +236,6 @@ window.Pages.products = (() => {
                     : ''}
                   ${p.status === 'written_off' && p.write_off_reason
                     ? `<div class="muted" style="font-size:12.5px">${ui.esc(p.write_off_reason)}</div>` : ''}</dd>
-                ${p.set_name ? `<dt>Комплект</dt><dd>${ui.esc(p.set_name)}</dd>` : ''}
                 ${admin ? `<dt>Закупочная</dt><dd>${ui.money(p.purchase_price)}
                   ${p.purchase_currency && p.purchase_rate
                     ? `<div class="muted" style="font-size:12.5px">${ui.num(p.purchase_price_orig)} ${ui.esc(p.purchase_currency)}

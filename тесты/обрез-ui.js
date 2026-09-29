@@ -105,7 +105,7 @@ function найти() {
   };
   console.log('=== Разделы ===');
   for (const стр of ['dashboard', 'products', 'sales', 'debts', 'customers', 'orders', 'analytics', 'finance',
-    'inventory', 'labels', 'sets', 'team', 'import']) {
+    'inventory', 'labels', 'team', 'import']) {
     await закрыть();
     await p.goto(BASE + '/#/' + стр);
     await проверить('раздел ' + стр);

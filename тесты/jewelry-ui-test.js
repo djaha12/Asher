@@ -1,7 +1,7 @@
 'use strict';
 require('./устройство');   // проверки называют себя устройством, как настоящее приложение
 const ВЫВОД = require('node:path').join(__dirname, '.вывод');
-// Браузерная проверка новых экранов: комплекты, сертификаты, валюта, резерв, возврат.
+// Браузерная проверка новых экранов: сертификаты, валюта, резерв, возврат.
 const { chromium } = require('./браузер');
 const BASE = process.env.BASE || 'http://127.0.0.1:3122';
 const OUT = ВЫВОД + '/shots-jewelry';
@@ -32,32 +32,8 @@ function check(name, cond, extra) {
   await page.click('#login-form button[type=submit]');
   await page.waitForSelector('#app:not(.hidden)', { timeout: 15000 });
 
-  // ---------- Страница комплектов ----------
-  console.log('\n=== Комплекты ===');
-  await page.goto(`${BASE}/#/sets`);
-  await page.waitForTimeout(1500);
-  check('пункт «Комплекты» есть в меню', await page.isVisible('.nav-item[data-key=sets]'));
-  check('кнопка сборки на месте', await page.isVisible('#sets-new'));
-  await page.screenshot({ path: `${OUT}/01-комплекты.png`, fullPage: true });
-
-  await page.click('#sets-new');
-  await page.waitForTimeout(600);
-  check('диалог сборки открылся', await page.isVisible('#st-name'));
-  await page.fill('#st-name', 'Гарнитур «Проверка»');
-  await page.fill('#st-search', 'Кольцо');
-  await page.waitForTimeout(1200);
-  const found = await page.$$('[data-add]');
-  check('поиск изделий работает', found.length > 0, found.length);
-  if (found.length >= 2) {
-    await found[0].click(); await page.waitForTimeout(300);
-    const again = await page.$$('[data-add]');
-    if (again.length) { await again[0].click(); await page.waitForTimeout(300); }
-  }
-  await page.screenshot({ path: `${OUT}/02-сборка-комплекта.png` });
-  const pickedCount = await page.$$eval('#st-picked .set-item', els => els.length);
-  check('изделия добавляются в состав', pickedCount >= 1, pickedCount);
-  await page.keyboard.press('Escape');
-  await page.waitForTimeout(400);
+  // Комплекты владелец убрал — пункта в меню нет (подробно — комплекты-ui).
+  check('пункта «Комплекты» в меню нет', !(await page.$('.nav-item[data-key=sets]')));
 
   // ---------- Карточка изделия ----------
   console.log('\n=== Карточка изделия ===');
@@ -151,23 +127,23 @@ function check(name, cond, extra) {
   await page.screenshot({ path: `${OUT}/06-настройки-курс.png`, fullPage: true });
 
   // ---------- Тёмная тема и телефон ----------
-  await page.goto(`${BASE}/#/sets`);
+  await page.goto(`${BASE}/#/dashboard`);
   await page.waitForTimeout(1200);
   await page.click('#btn-theme');
   await page.waitForTimeout(700);
-  await page.screenshot({ path: `${OUT}/07-комплекты-тёмная.png`, fullPage: true });
+  await page.screenshot({ path: `${OUT}/07-главная-тёмная.png`, fullPage: true });
   await page.click('#btn-theme');
   await page.waitForTimeout(400);
 
   const mob = await ctx.newPage();
   mob.on('pageerror', e => errors.push('JS (моб.): ' + e.message));
   await mob.setViewportSize({ width: 390, height: 844 });
-  await mob.goto(`${BASE}/#/sets`);
+  await mob.goto(`${BASE}/#/products`);
   await mob.waitForTimeout(1600);
   const overflow = await mob.evaluate(() =>
     document.documentElement.scrollWidth - document.documentElement.clientWidth);
   check('на телефоне нет горизонтальной прокрутки', overflow === 0, overflow);
-  await mob.screenshot({ path: `${OUT}/08-телефон-комплекты.png` });
+  await mob.screenshot({ path: `${OUT}/08-телефон-каталог.png` });
 
   // эмодзи в интерфейсе запрещены — только линейные значки
   const emoji = await page.evaluate(() =>
