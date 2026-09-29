@@ -30,6 +30,10 @@ db.exec('PRAGMA busy_timeout = 5000');
 // понижает регистр только у латиницы, поэтому регистрируем свою функцию.
 // Заодно «ё» и кыргызские буквы — как в поиске (src/поиск.js).
 const поиск = require('./поиск');
+
+// Категории магазина: их заводит новая база, к ним один раз приводится старая
+// (ensureDefaults). Порядок — как в списке категорий.
+const КАТЕГОРИИ_МАГАЗИНА = ['Кольца', 'Серьги', 'Подвески', 'Браслеты', 'Колье', 'Часы'];
 db.function('nlower', { deterministic: true }, s => (s === null || s === undefined) ? null : поиск.свернуть(s));
 
 /*
@@ -877,9 +881,8 @@ function ensureDefaults() {
   }
   const hasCategories = db.prepare('SELECT COUNT(*) AS c FROM categories').get().c > 0;
   if (!hasCategories) {
-    const cats = ['Кольца', 'Серьги', 'Подвески', 'Браслеты', 'Цепи', 'Колье', 'Броши', 'Часы', 'Комплекты'];
     const ins = db.prepare('INSERT INTO categories (name, sort) VALUES (?, ?)');
-    cats.forEach((c, i) => ins.run(c, i));
+    КАТЕГОРИИ_МАГАЗИНА.forEach((c, i) => ins.run(c, i));
   }
   if (!getSetting('store_name')) setSetting('store_name', 'Asher Diamonds');
   // Курс доллара для закупок — поле в настройках не должно быть пустым при
@@ -930,26 +933,50 @@ function ensureDefaults() {
   }
 
   /*
-   * Категории, которые владелец попросил добавить в работающую базу, — каждая
-   * один раз и сразу после родственной (её нет — в конец): «Буквенные
-   * подвески» — после «Подвесок», «Пусеты» — после «Серёг». Удалит владелец —
-   * не вернём; своя категория с тем же словом в названии уже есть — не
-   * дублируем. Здесь, а не в migrate(): в новой базе стандартные категории
-   * заводятся выше.
+   * Категории магазина — шесть (КАТЕГОРИИ_МАГАЗИНА). Владелец: «должно быть
+   * серьги, кольца, колье, браслеты, часы» — и подвески. Базу магазина
+   * приводим к этому один раз, здесь, а не в migrate(): в новой базе
+   * категории заводятся выше.
+   *   — «Пусеты» — это серьги: изделия переезжают в «Серьги»;
+   *   — «Буквенные подвески» — в «Подвески»;
+   *   — остальные лишние категории удаляем, только если в них пусто:
+   *     изделие без категории потеряется в каталоге, а куда его — решать
+   *     владельцу. Такая категория остаётся, и он видит её в Настройках.
+   * Название, поставленное по категории («Пусеты», «Буквенная подвеска»),
+   * идёт за изделием: «Серьги», «Подвеска». Вписанное руками не трогаем.
+   * Что переехало и что удалено — в журнале действий.
    */
-  const категорияОдинРаз = (флаг, имя, после, слово) => {
-    if (getSetting(флаг)) return;
-    if (!db.prepare('SELECT 1 FROM categories WHERE nlower(name) LIKE ?').get(`%${слово}%`)) {
-      const сосед = db.prepare('SELECT sort FROM categories WHERE nlower(name) = ?').get(после);
-      const место = сосед ? сосед.sort + 1
-        : db.prepare('SELECT COALESCE(MAX(sort), 0) + 1 AS m FROM categories').get().m;
-      db.prepare('UPDATE categories SET sort = sort + 1 WHERE sort >= ?').run(место);
-      db.prepare('INSERT INTO categories (name, sort) VALUES (?, ?)').run(имя, место);
-    }
-    setSetting(флаг, '1');
-  };
-  категорияОдинРаз('added_letter_category', 'Буквенные подвески', 'подвески', 'букв');
-  категорияОдинРаз('added_studs_category', 'Пусеты', 'серьги', 'пусет');
+  if (!getSetting('categories_trimmed')) {
+    const поИмени = имя => db.prepare('SELECT id, name, sort FROM categories WHERE nlower(name) = nlower(?)').get(имя);
+    const итог = [];
+    transaction(() => {
+      for (const имя of КАТЕГОРИИ_МАГАЗИНА) {
+        if (!поИмени(имя)) {
+          db.prepare('INSERT INTO categories (name, sort) VALUES (?, (SELECT COALESCE(MAX(sort), 0) + 1 FROM categories))').run(имя);
+        }
+      }
+      for (const [слово, куда, былоИмя, сталоИмя] of [['пусет', 'Серьги', 'Пусеты', 'Серьги'],
+        ['букв', 'Подвески', 'Буквенная подвеска', 'Подвеска']]) {
+        const цель = поИмени(куда);
+        for (const к of db.prepare('SELECT id, name FROM categories WHERE nlower(name) LIKE ?').all(`%${слово}%`)) {
+          db.prepare('UPDATE products SET name = ? WHERE category_id = ? AND name IN (?, ?)').run(сталоИмя, к.id, былоИмя, к.name);
+          const n = db.prepare('UPDATE products SET category_id = ? WHERE category_id = ?').run(цель.id, к.id).changes;
+          db.prepare('DELETE FROM categories WHERE id = ?').run(к.id);
+          итог.push(`«${к.name}» → «${цель.name}» (изделий: ${n})`);
+        }
+      }
+      const свои = new Set(КАТЕГОРИИ_МАГАЗИНА.map(поиск.свернуть));
+      for (const к of db.prepare('SELECT id, name FROM categories ORDER BY sort, id').all()) {
+        if (свои.has(поиск.свернуть(к.name.trim()))) continue;
+        const n = db.prepare('SELECT COUNT(*) AS c FROM products WHERE category_id = ?').get(к.id).c;
+        if (n) { итог.push(`«${к.name}» оставлена: в ней изделий ${n}`); continue; }
+        db.prepare('DELETE FROM categories WHERE id = ?').run(к.id);
+        итог.push(`«${к.name}» удалена (была пустой)`);
+      }
+      if (итог.length) audit(null, 'update', 'category', null, 'Категории магазина: ' + итог.join('; '));
+    });
+    setSetting('categories_trimmed', '1');
+  }
 }
 
 migrate();

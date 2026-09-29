@@ -134,6 +134,15 @@ const CATEGORY_SPECS = {
 };
 const PREFIX = { 'Кольца': 'Кольцо', 'Серьги': 'Серьги', 'Подвески': 'Подвеска', 'Браслеты': 'Браслет',
   'Цепи': 'Цепь', 'Колье': 'Колье', 'Броши': 'Брошь', 'Часы': 'Часы', 'Комплекты': 'Комплект' };
+// Демо-каталог шире категорий магазина: цепи, броши и комплекты нужны проверкам,
+// а в новой базе их нет — заводим в конец списка.
+for (const имя of Object.keys(CATEGORY_SPECS)) {
+  if (!cats[имя]) {
+    cats[имя] = Number(db.prepare(
+      'INSERT INTO categories (name, sort) VALUES (?, (SELECT COALESCE(MAX(sort), 0) + 1 FROM categories))'
+    ).run(имя).lastInsertRowid);
+  }
+}
 
 function gemsFor(withDiamond, price) {
   if (!withDiamond) return [];

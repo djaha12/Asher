@@ -182,3 +182,11 @@ if [ -f "$APP_DIR/src/двойники.js" ]; then
   sudo -u "$APP_USER" node "$APP_DIR/src/двойники.js" "$APP_DIR/data/asher.db" 2>/dev/null \
     || echo "   проверить не удалось — на работу системы это не влияет"
 fi
+
+# Категории — одни названия, без изделий и сумм: по ним видно, что правка
+# категорий дошла до базы магазина. Тоже только читаем и тоже не роняем.
+sudo -u "$APP_USER" node -e "
+  const { DatabaseSync } = require('node:sqlite');
+  const db = new DatabaseSync(process.argv[1], { readOnly: true });
+  console.log('   Категории: ' + db.prepare('SELECT name FROM categories ORDER BY sort, id').all().map(c => c.name).join(', '));
+" "$APP_DIR/data/asher.db" 2>/dev/null || true
