@@ -89,16 +89,6 @@ function searchOrders(q) {
   ).all(q, PER_GROUP + 1);
 }
 
-function searchSets(q) {
-  return db.prepare(
-    `SELECT ps.id, ps.sku, ps.name, ps.price,
-            (SELECT COUNT(*) FROM products p WHERE p.set_id = ps.id) AS items_count
-     FROM product_sets ps
-     WHERE nmatch(?, 0, NULL, ps.name, ps.sku, ps.note)
-     ORDER BY ps.name LIMIT ?`
-  ).all(q, PER_GROUP + 1);
-}
-
 // Акты приёма старого золота: «Л-000012», клиент, что принесли.
 function searchScrap(q) {
   return db.prepare(
@@ -123,7 +113,6 @@ function найти(q) {
     { key: 'customers', title: 'Клиенты', ...cut(searchCustomers(q)) },
     { key: 'sales', title: 'Чеки', ...cut(searchSales(q)) },
     { key: 'orders', title: 'Заказы и ремонт', ...cut(searchOrders(q)) },
-    { key: 'sets', title: 'Комплекты', ...cut(searchSets(q)) },
     { key: 'scrap', title: 'Старое золото', ...cut(searchScrap(q)) },
   ].filter(g => g.items.length);
 }

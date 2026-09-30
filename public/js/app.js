@@ -414,8 +414,7 @@ window.App = (() => {
     // поэтому список читается одинаково, чем бы ни оказалась находка.
     function flatten(data) {
       const out = [];
-      // Комплекты владелец убрал — их раздела нет, и в поиске их не показываем.
-      for (const g of (data.groups || []).filter(г => г.key !== 'sets')) {
+      for (const g of data.groups || []) {
         const start = out.length;
         for (const r of g.items) {
           if (g.key === 'products') {
