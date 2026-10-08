@@ -15,7 +15,7 @@ on:
       host:
         description: Адрес сервера
         required: true
-        default: '77.235.20.172'
+        default: '212.112.105.196'
       port:
         description: Порт входа на сервер (SSH)
         required: true
@@ -33,10 +33,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      HOST: ${{ inputs.host || '77.235.20.172' }}
+      HOST: ${{ inputs.host || '212.112.105.196' }}
       PORT: ${{ inputs.port || '8369' }}
       DOMAIN: ${{ inputs.domain || 'diamonds.kg' }}
-      ALT_HOSTS: '212.112.105.196'
+      ALT_HOSTS: '77.235.20.172'
       SSHPASS: ${{ secrets.SERVER_ROOT_PASSWORD }}
     steps:
       - name: Снаружи — как сайт видят покупатели и продавцы

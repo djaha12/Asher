@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       host:
-        description: Адрес сервера (например 77.235.20.172)
+        description: Адрес сервера (например 212.112.105.196)
         required: true
       port:
         description: Порт входа на сервер (SSH)
@@ -46,7 +46,7 @@ jobs:
       # При запуске кнопкой значения приходят из полей, при запуске веткой
       # полей нет — тогда берутся эти. Адрес, порт и домен не секреты:
       # они и так написаны в инструкции по переезду.
-      HOST: ${{ inputs.host || '77.235.20.172' }}
+      HOST: ${{ inputs.host || '212.112.105.196' }}
       PORT: ${{ inputs.port || '8369' }}
       DOMAIN: ${{ inputs.domain || 'diamonds.kg' }}
       SSHPASS: ${{ secrets.SERVER_ROOT_PASSWORD }}
