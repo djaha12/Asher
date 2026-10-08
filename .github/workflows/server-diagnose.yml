@@ -36,25 +36,36 @@ jobs:
       HOST: ${{ inputs.host || '77.235.20.172' }}
       PORT: ${{ inputs.port || '8369' }}
       DOMAIN: ${{ inputs.domain || 'diamonds.kg' }}
+      ALT_HOSTS: '212.112.105.196'
       SSHPASS: ${{ secrets.SERVER_ROOT_PASSWORD }}
     steps:
       - name: Снаружи — как сайт видят покупатели и продавцы
+        continue-on-error: true
         run: |
           echo "--- адрес домена ---"
           getent ahostsv4 "$DOMAIN" | awk '{print $1}' | sort -u || echo "домен не находится"
+          # У сервера в панели хостинга два внешних адреса. Домен смотрит на
+          # один; если хостинг сменил адрес, сайт отвечает только по другому.
           echo "--- порты сервера снаружи ---"
-          for p in 80 443 "$PORT"; do
-            if timeout 12 bash -c "</dev/tcp/$HOST/$p" 2>/dev/null; then
-              echo "порт $p: открыт"
-            else
-              echo "порт $p: НЕ ОТВЕЧАЕТ"
-            fi
+          for h in $HOST $ALT_HOSTS; do
+            for p in 80 443 "$PORT"; do
+              if timeout 12 bash -c "</dev/tcp/$h/$p" 2>/dev/null; then
+                echo "$h порт $p: открыт"
+              else
+                echo "$h порт $p: НЕ ОТВЕЧАЕТ"
+              fi
+            done
+          done
+          for h in $ALT_HOSTS; do
+            echo "--- сайт по адресу $h ---"
+            curl -sS --max-time 20 -o /dev/null -w "код %{http_code}, всего %{time_total}s\n" \
+              --resolve "$DOMAIN:443:$h" "https://$DOMAIN/api/ping" || echo "(не ответил)"
           done
           echo "--- https://$DOMAIN/api/ping ---"
           curl -sS --max-time 25 -o ping.txt \
             -w "код %{http_code}, соединение %{time_connect}s, tls %{time_appconnect}s, ответ %{time_starttransfer}s, всего %{time_total}s\n" \
             "https://$DOMAIN/api/ping" || echo "(curl не дождался ответа)"
-          head -c 300 ping.txt 2>/dev/null; echo
+          head -c 300 ping.txt 2>/dev/null || true; echo
           echo "--- главная страница ---"
           curl -sS --max-time 25 -o /dev/null \
             -w "код %{http_code}, всего %{time_total}s, %{size_download} байт\n" \
@@ -69,6 +80,11 @@ jobs:
           if [ -z "$SSHPASS" ]; then echo "Не задан секрет SERVER_ROOT_PASSWORD."; exit 1; fi
           sudo apt-get update -qq >/dev/null
           sudo apt-get install -y -qq sshpass >/dev/null
+          # Входим по тому адресу, на котором порт входа открыт.
+          for h in $HOST $ALT_HOSTS; do
+            if timeout 12 bash -c "</dev/tcp/$h/$PORT" 2>/dev/null; then HOST=$h; break; fi
+          done
+          echo "вход через $HOST"
           RC=0
           sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=25 -o NumberOfPasswordPrompts=1 -p "$PORT" "root@$HOST" \
